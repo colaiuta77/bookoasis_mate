@@ -56,8 +56,12 @@ class PluginStructureTest(unittest.TestCase):
 
         self.assertEqual("bookoasis_mate", self.root.name)
         self.assertIn('package_name: "bookoasis_mate"', text)
-        self.assertIn('version: "1.0.0"', text)
+        self.assertIn('version: "1.0.1"', text)
         self.assertIn("colaiuta77/bookoasis_mate", text)
+        readme = (self.root / "README.md").read_text(encoding="utf-8")
+        self.assertIn("**FF용 플러그인이며", readme)
+        self.assertNotIn("FlaskFarm(FF)", readme)
+        self.assertIn("v1.0.1 (2026-07-29)", readme)
 
     def test_public_repository_excludes_local_development_and_runtime_files(self):
         ignore = (self.root / ".gitignore").read_text(encoding="utf-8")
@@ -303,7 +307,10 @@ class PluginStructureTest(unittest.TestCase):
         self.assertIn("통DB 이관 상태 조회 연결이 복구되었습니다.", status)
         self.assertIn("css/bookoasis_mate.css", manual)
         self.assertEqual(3, manual.count("doctor-section doctor-card"))
-        self.assertIn("<h4>핵심 내용</h4>", manual)
+        self.assertNotIn("핵심 내용", manual)
+        self.assertNotIn("대상 보관함을 만들고 전체 스캔", manual)
+        self.assertIn("신규 생성·기존 갱신·경로 미일치 도서 수", manual)
+        self.assertIn("사용자 계정 자체는 만들지 않으며", manual)
         self.assertIn("<h4>주의 사항</h4>", manual)
         self.assertIn("압축을 직접 해제하지 않습니다", manual)
         self.assertIn("기존 데이터와 병합하지 않습니다", manual)
