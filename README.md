@@ -1,6 +1,6 @@
 # BookOasis Mate
 
-**FlaskFarm(FF)용 플러그인이며 BookOasis 서버가 실행되는 파일시스템에 접근할 수 있어야 합니다.**
+**FF용 플러그인이며 BookOasis 서버가 실행되는 파일시스템에 접근할 수 있어야 합니다.**
 
 ## 주요 기능
 
