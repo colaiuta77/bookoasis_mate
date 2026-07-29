@@ -733,22 +733,62 @@ class BookOasisMateEngine:
             items.append(item)
         return {"items": items, "total": total, "page": page, "page_size": page_size, "pages": (total + page_size - 1) // page_size}
 
-    def all_cover_references(self, include_inactive_adult=False):
+    def all_cover_references(
+        self,
+        include_inactive_adult=False,
+        library_ids=None,
+        batch_size=2000,
+        on_progress=None,
+        should_stop=None,
+    ):
         references = set()
+        selected_ids = sorted({
+            int(value)
+            for value in (library_ids or [])
+            if str(value or "").strip().isdigit() and int(value) > 0
+        })
+        batch_size = _as_int(batch_size, 2000, 100, 10000)
+        read_count = 0
         targets = self.targets()
         adult_path = self.settings.get("adult_db_path")
         if include_inactive_adult and not any(target.db_type == "adult" for target in targets):
             if adult_path and Path(adult_path).expanduser().is_file():
                 targets.append(DatabaseTarget("adult", "성인", adult_path))
         for target in targets:
+            if should_stop and should_stop():
+                break
             with closing(self._connect(target)) as connection:
                 parts = self._book_query_parts(connection)
                 if "cover_image" not in parts["columns"]:
                     continue
-                rows = connection.execute(
-                    f"SELECT cover_image FROM books b WHERE {parts['active']} AND TRIM(COALESCE(cover_image, '')) != ''"
-                ).fetchall()
-                references.update(normalize_cover_path(row[0]) for row in rows if normalize_cover_path(row[0]))
+                conditions = [
+                    parts["active"],
+                    "TRIM(COALESCE(cover_image, '')) != ''",
+                ]
+                params = []
+                if selected_ids:
+                    if "library_id" in parts["columns"]:
+                        placeholders = ", ".join("?" for _ in selected_ids)
+                        conditions.append(f"b.library_id IN ({placeholders})")
+                        params.extend(selected_ids)
+                cursor = connection.execute(
+                    "SELECT cover_image FROM books b WHERE "
+                    + " AND ".join(conditions),
+                    params,
+                )
+                while True:
+                    if should_stop and should_stop():
+                        return references
+                    rows = cursor.fetchmany(batch_size)
+                    if not rows:
+                        break
+                    for row in rows:
+                        normalized = normalize_cover_path(row[0])
+                        if normalized:
+                            references.add(normalized)
+                    read_count += len(rows)
+                    if on_progress:
+                        on_progress(read_count, len(references))
         return references
 
     def quick_check(self, db_type="general"):

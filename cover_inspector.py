@@ -1,6 +1,7 @@
 # 마운트된 BookOasis 표지 파일을 점검하고 고아 파일을 안전하게 정리합니다.
 import os
 import struct
+import time
 from pathlib import Path, PurePosixPath
 
 
@@ -190,13 +191,23 @@ def cleanup_orphan_files(
         "truncated": False,
         "stopped": False,
     }
+    last_report_count = 0
+    last_report_at = 0.0
 
     def stopped():
         return bool(should_stop and should_stop())
 
     def report(force=False):
-        if on_progress and (force or result["scanned_count"] % 100 == 0):
-            on_progress(result)
+        nonlocal last_report_at, last_report_count
+        if not on_progress:
+            return
+        now = time.monotonic()
+        scanned_delta = result["scanned_count"] - last_report_count
+        if not force and scanned_delta < 250 and now - last_report_at < 0.5:
+            return
+        on_progress(result)
+        last_report_count = result["scanned_count"]
+        last_report_at = now
 
     def append_item(item):
         if len(result["items"]) >= result_limit:
@@ -258,7 +269,7 @@ def cleanup_orphan_files(
                         "status": "error",
                         "error": str(error),
                     })
-                report(force=True)
+                report()
 
     report(force=True)
     return result

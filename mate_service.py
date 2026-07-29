@@ -17,11 +17,10 @@ from .bookoasis_logs import list_log_files, read_lazy_progress, read_log_tail
 from .bookoasis_package_import import BookOasisPackageImportEngine
 from .category_migration import (
     CategoryMigrationEngine,
-    MigrationStopped,
     parse_library_ids,
     parse_paths,
 )
-from .cover_inspector import cleanup_orphan_files, inspect_cover_file
+from .cover_inspector import inspect_cover_file
 from .kavita_migration import KavitaMigrationEngine, parse_name_list
 from .mate_engine import BookOasisMateEngine, _as_bool, _as_int
 
@@ -134,11 +133,14 @@ class BookOasisMateService:
         self._gap_analysis_lock = threading.Lock()
         self._admin_client = None
         self._admin_client_fingerprint = None
-        self._orphan_cleanup_stop = threading.Event()
-        self._orphan_cleanup_thread = None
+        self._orphan_cleanup_process = None
+        self._orphan_cleanup_status_path = None
+        self._orphan_cleanup_stop_path = None
         self._orphan_cleanup_status = self._empty_orphan_cleanup_status()
         self._migration_stop = threading.Event()
-        self._migration_thread = None
+        self._migration_process = None
+        self._migration_status_path = None
+        self._migration_stop_path = None
         self._migration_started_monotonic = None
         self._migration_status = self._empty_migration_status()
         self._database_migration_stop = threading.Event()
@@ -152,6 +154,7 @@ class BookOasisMateService:
     def _empty_orphan_cleanup_status():
         return {
             "is_working": "wait",
+            "job_type": "orphan_cleanup",
             "dry_run": True,
             "db_type": "general",
             "library_id": None,
@@ -172,6 +175,7 @@ class BookOasisMateService:
     def _empty_migration_status():
         return {
             "is_working": "wait",
+            "job_type": "category_migration",
             "operation": "",
             "stage": "",
             "current": 0,
@@ -210,6 +214,7 @@ class BookOasisMateService:
             "webhook_token": model.get("webhook_token"),
             "bookoasis_log_dir": model.get("bookoasis_log_dir"),
             "cover_root_path": model.get("cover_root_path"),
+            "cover_root_custom": model.get_bool("cover_root_custom"),
             "cover_min_width": _as_int(model.get("cover_min_width"), 200, 1, 10000),
             "cover_min_height": _as_int(model.get("cover_min_height"), 280, 1, 10000),
             "cover_min_file_size_kb": _as_int(model.get("cover_min_file_size_kb"), 5, 0, 102400),
@@ -224,7 +229,10 @@ class BookOasisMateService:
         root = infer_bookoasis_root(values)
         values["bookoasis_root_path"] = root
         if root:
-            values.update(derive_bookoasis_paths(root))
+            derived = derive_bookoasis_paths(root)
+            if values["cover_root_custom"]:
+                derived.pop("cover_root_path", None)
+            values.update(derived)
         return values
 
     @staticmethod
@@ -240,6 +248,10 @@ class BookOasisMateService:
             "webhook_token": values.get("webhook_token"),
             "bookoasis_log_dir": values.get("bookoasis_log_dir"),
             "cover_root_path": values.get("cover_root_path"),
+            "cover_root_custom": _as_bool(
+                values.get("cover_root_custom"),
+                False,
+            ),
             "cover_min_width": _as_int(values.get("cover_min_width"), 200, 1, 10000),
             "cover_min_height": _as_int(values.get("cover_min_height"), 280, 1, 10000),
             "cover_min_file_size_kb": _as_int(values.get("cover_min_file_size_kb"), 5, 0, 102400),
@@ -254,7 +266,10 @@ class BookOasisMateService:
         root = infer_bookoasis_root(settings)
         settings["bookoasis_root_path"] = root
         if root:
-            settings.update(derive_bookoasis_paths(root))
+            derived = derive_bookoasis_paths(root)
+            if settings["cover_root_custom"]:
+                derived.pop("cover_root_path", None)
+            settings.update(derived)
         return settings
 
     def engine(self, settings=None):
@@ -816,8 +831,114 @@ class BookOasisMateService:
         )
         return data
 
+    @staticmethod
+    def _maintenance_worker_paths(root_path, job_name):
+        root = Path(str(root_path or "")).expanduser().resolve()
+        prefix = f".bookoasis_mate_{job_name}"
+        return {
+            "config": root / f"{prefix}_job.json",
+            "status": root / f"{prefix}_status.json",
+            "stop": root / f"{prefix}_stop",
+            "log": root / f"{prefix}_worker.log",
+        }
+
+    @staticmethod
+    def _worker_pid_alive(pid):
+        if os.name == "nt":
+            return None
+        try:
+            numeric_pid = int(pid)
+        except (TypeError, ValueError):
+            return None
+        if numeric_pid <= 0:
+            return None
+        try:
+            os.kill(numeric_pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return None
+
+    def _external_job_status(self, status_path, job_type, process, failure_message):
+        status = self._read_database_migration_json(status_path)
+        if not status or status.get("job_type") != job_type:
+            return None
+        started_epoch = float(status.get("started_epoch") or 0)
+        if status.get("is_working") == "run" and started_epoch:
+            status["elapsed_seconds"] = round(
+                max(0, time.time() - started_epoch),
+                1,
+            )
+        exited = (
+            process is not None and process.poll() is not None
+        )
+        if process is None and status.get("is_working") == "run":
+            exited = self._worker_pid_alive(status.get("worker_pid")) is False
+        if status.get("is_working") == "run" and exited:
+            return_code = process.returncode if process is not None else "알 수 없음"
+            status.update(
+                {
+                    "is_working": "error",
+                    "message": failure_message,
+                    "error": (
+                        "작업 프로세스가 완료 상태를 기록하지 못했습니다. "
+                        f"종료 코드: {return_code}"
+                    ),
+                }
+            )
+            self._write_database_migration_json(status_path, status)
+        return status
+
+    def _launch_maintenance_worker(self, paths, config, initial_status):
+        paths["config"].parent.mkdir(parents=True, exist_ok=True)
+        if paths["stop"].exists():
+            paths["stop"].unlink()
+        self._write_database_migration_json(paths["config"], config)
+        self._write_database_migration_json(paths["status"], initial_status)
+        worker_script = Path(__file__).with_name("maintenance_worker.py")
+        command = [
+            sys.executable,
+            str(worker_script),
+            str(paths["config"]),
+            str(paths["status"]),
+            str(paths["stop"]),
+        ]
+        with paths["log"].open("ab") as output:
+            return subprocess.Popen(
+                command,
+                cwd=str(worker_script.parent),
+                stdin=subprocess.DEVNULL,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+
+    def _orphan_cleanup_paths(self, cover_root=None):
+        root = str(
+            cover_root or self.settings().get("cover_root_path") or ""
+        ).strip()
+        if not root:
+            return None
+        return self._maintenance_worker_paths(
+            Path(root) / ".bookoasis_mate_jobs",
+            "orphan_cleanup",
+        )
+
     def orphan_cleanup_status(self):
         with self._lock:
+            paths = self._orphan_cleanup_paths()
+            if paths is not None:
+                external = self._external_job_status(
+                    self._orphan_cleanup_status_path or paths["status"],
+                    "orphan_cleanup",
+                    self._orphan_cleanup_process,
+                    "고아 표지파일 정리 프로세스가 종료되었습니다.",
+                )
+                if external:
+                    self._orphan_cleanup_status = copy.deepcopy(external)
             return copy.deepcopy(self._orphan_cleanup_status)
 
     def start_orphan_cleanup(self, db_type="general", library_id=None, dry_run=True, confirm_delete=False):
@@ -845,14 +966,14 @@ class BookOasisMateService:
         if not selected:
             raise ValueError("정리할 보관함을 찾을 수 없습니다.")
 
+        current_status = self.orphan_cleanup_status()
         with self._lock:
-            if self._orphan_cleanup_status.get("is_working") == "run":
+            if current_status.get("is_working") == "run":
                 return {
                     "started": False,
                     "message": "고아 표지파일 정리가 이미 실행 중입니다.",
-                    "status": copy.deepcopy(self._orphan_cleanup_status),
+                    "status": current_status,
                 }
-            self._orphan_cleanup_stop.clear()
             self._orphan_cleanup_status = self._empty_orphan_cleanup_status()
             self._orphan_cleanup_status.update({
                 "is_working": "run",
@@ -864,16 +985,43 @@ class BookOasisMateService:
             })
 
         library_ids = [int(item["id"]) for item in selected]
-        worker = threading.Thread(
-            target=self._run_orphan_cleanup,
-            args=(settings, db_type, selected_library_id, selected_name, library_ids, dry_run),
-            name="ff-library-doctor-orphan-covers",
-        )
-        worker.daemon = True
-        self._orphan_cleanup_thread = worker
-        worker.start()
+        paths = self._orphan_cleanup_paths(root)
+        worker_config = {
+            "job_type": "orphan_cleanup",
+            "settings": {
+                "general_db_path": settings.get("general_db_path"),
+                "adult_db_path": settings.get("adult_db_path"),
+                "adult_enabled": settings.get("adult_enabled"),
+                "cover_root_path": settings.get("cover_root_path"),
+            },
+            "db_type": db_type,
+            "library_id": selected_library_id,
+            "library_name": selected_name,
+            "library_ids": library_ids,
+            "dry_run": dry_run,
+        }
+        try:
+            process = self._launch_maintenance_worker(
+                paths,
+                worker_config,
+                self._orphan_cleanup_status,
+            )
+        except Exception as error:
+            with self._lock:
+                self._orphan_cleanup_status.update(
+                    {
+                        "is_working": "error",
+                        "message": "고아 표지파일 정리 프로세스를 시작하지 못했습니다.",
+                        "error": str(error),
+                    }
+                )
+            raise
+        self._orphan_cleanup_process = process
+        self._orphan_cleanup_status_path = paths["status"]
+        self._orphan_cleanup_stop_path = paths["stop"]
         self._debug(
-            "고아 표지파일 정리 시작",
+            "고아 표지파일 정리 별도 프로세스 시작",
+            pid=process.pid,
             db_type=db_type,
             library_id=selected_library_id or "all",
             libraries=len(library_ids),
@@ -885,76 +1033,28 @@ class BookOasisMateService:
             "status": self.orphan_cleanup_status(),
         }
 
-    def _run_orphan_cleanup(self, settings, db_type, library_id, library_name, library_ids, dry_run):
-        started = time.monotonic()
-
-        def publish(progress):
-            with self._lock:
-                current = self._orphan_cleanup_status
-                for key in (
-                    "scanned_count", "target_count", "target_size", "deleted_count",
-                    "deleted_size", "error_count", "items", "truncated", "stopped",
-                ):
-                    current[key] = copy.deepcopy(progress.get(key, current.get(key)))
-                current["message"] = "중지 요청을 처리하는 중입니다." if self._orphan_cleanup_stop.is_set() else "정리 작업을 실행 중입니다."
-
-        try:
-            engine = self.engine(settings)
-            references = engine.all_cover_references(include_inactive_adult=True)
-            result = cleanup_orphan_files(
-                settings.get("cover_root_path"),
-                references,
-                library_ids,
-                dry_run=dry_run,
-                result_limit=500,
-                should_stop=self._orphan_cleanup_stop.is_set,
-                on_progress=publish,
-            )
-            publish(result)
-            with self._lock:
-                self._orphan_cleanup_status.update({
-                    "is_working": "stop" if result["stopped"] else "wait",
-                    "db_type": db_type,
-                    "library_id": library_id,
-                    "library_name": library_name,
-                    "message": (
-                        "사용자 요청으로 작업을 중지했습니다."
-                        if result["stopped"]
-                        else ("Dry Run을 완료했습니다." if dry_run else "고아 표지파일 정리를 완료했습니다.")
-                    ),
-                    "duration_ms": self._duration_ms(started),
-                })
-            self._debug(
-                "고아 표지파일 정리 완료",
-                db_type=db_type,
-                library_id=library_id or "all",
-                dry_run=str(dry_run).lower(),
-                scanned=result["scanned_count"],
-                targets=result["target_count"],
-                deleted=result["deleted_count"],
-                errors=result["error_count"],
-                stopped=str(result["stopped"]).lower(),
-                duration_ms=self._duration_ms(started),
-            )
-        except Exception as error:
-            self.P.logger.error(f"BookOasis Mate 고아 표지파일 정리 실패: {error}")
-            with self._lock:
-                self._orphan_cleanup_status.update({
-                    "is_working": "error",
-                    "message": "고아 표지파일 정리에 실패했습니다. 플러그인 로그를 확인해 주세요.",
-                    "duration_ms": self._duration_ms(started),
-                })
-
     def stop_orphan_cleanup(self):
+        current_status = self.orphan_cleanup_status()
         with self._lock:
-            if self._orphan_cleanup_status.get("is_working") != "run":
+            if current_status.get("is_working") != "run":
                 return {
                     "requested": False,
                     "message": "실행 중인 고아 표지파일 정리 작업이 없습니다.",
-                    "status": copy.deepcopy(self._orphan_cleanup_status),
+                    "status": current_status,
                 }
-            self._orphan_cleanup_stop.set()
+            stop_path = self._orphan_cleanup_stop_path
+            if stop_path is None:
+                paths = self._orphan_cleanup_paths()
+                stop_path = paths["stop"] if paths is not None else None
+            if stop_path is not None:
+                stop_path.parent.mkdir(parents=True, exist_ok=True)
+                stop_path.touch()
             self._orphan_cleanup_status["message"] = "중지 요청을 처리하는 중입니다."
+            if self._orphan_cleanup_status_path is not None:
+                self._write_database_migration_json(
+                    self._orphan_cleanup_status_path,
+                    self._orphan_cleanup_status,
+                )
         self._debug("고아 표지파일 정리 중지 요청")
         return {
             "requested": True,
@@ -964,7 +1064,7 @@ class BookOasisMateService:
 
     def migration_config(self):
         model = self.P.ModelSetting
-        return {
+        config = {
             "work_dir": str(model.get("migration_work_dir") or "").strip(),
             "operation": str(model.get("migration_operation") or "export").strip(),
             "export_db_type": str(
@@ -993,6 +1093,9 @@ class BookOasisMateService:
                 "migration_backup_before_import"
             ),
         }
+        if config["import_mode"] == "merge":
+            config["import_name"] = ""
+        return config
 
     def _migration_engine(self, config=None, on_progress=None):
         config = config or self.migration_config()
@@ -1035,16 +1138,31 @@ class BookOasisMateService:
 
     def migration_status(self):
         with self._lock:
-            status = copy.deepcopy(self._migration_status)
-            if (
-                status.get("is_working") == "run"
-                and self._migration_started_monotonic is not None
-            ):
-                status["elapsed_seconds"] = round(
-                    time.monotonic() - self._migration_started_monotonic,
-                    1,
+            config = self.migration_config()
+            if config.get("work_dir"):
+                paths = self._maintenance_worker_paths(
+                    config["work_dir"],
+                    "category_migration",
                 )
-            return status
+                external = self._external_job_status(
+                    self._migration_status_path or paths["status"],
+                    "category_migration",
+                    self._migration_process,
+                    "카테고리 이관 프로세스가 종료되었습니다.",
+                )
+                if external:
+                    completed_now = (
+                        self._migration_status.get("is_working") == "run"
+                        and external.get("is_working") == "wait"
+                    )
+                    self._migration_status = copy.deepcopy(external)
+                    if completed_now:
+                        self._cached_report = None
+                        self._cached_at = 0.0
+                        self._settings_fingerprint = None
+                        self._cover_issue_cache_key = None
+                        self._cover_issue_cache = None
+            return copy.deepcopy(self._migration_status)
 
     def _append_migration_log(self, message):
         text = str(message or "").strip()
@@ -1062,38 +1180,6 @@ class BookOasisMateService:
         )
         if len(logs) > 300:
             del logs[:-300]
-
-    def _publish_migration(self, progress):
-        with self._lock:
-            current = int(progress.get("current") or 0)
-            total = int(progress.get("total") or 0)
-            stage = str(progress.get("stage") or "")
-            previous_stage = self._migration_status.get("stage")
-            self._migration_status.update(
-                {
-                    "stage": stage,
-                    "current": current,
-                    "total": total,
-                    "progress_percent": (
-                        min(100, round(current * 100 / total))
-                        if total > 0
-                        else 0
-                    ),
-                    "message": (
-                        "중지 요청을 처리하는 중입니다."
-                        if self._migration_stop.is_set()
-                        else str(progress.get("message") or "작업을 실행 중입니다.")
-                    ),
-                }
-            )
-            if (
-                stage != previous_stage
-                or current in {0, 1, total}
-                or (current > 0 and current % 100 == 0)
-            ):
-                self._append_migration_log(
-                    progress.get("log") or progress.get("message")
-                )
 
     def start_migration(self):
         config = self.migration_config()
@@ -1117,14 +1203,14 @@ class BookOasisMateService:
             ):
                 raise ValueError("병합할 기존 카테고리를 선택해 주세요.")
 
+        current_status = self.migration_status()
         with self._lock:
-            if self._migration_status.get("is_working") == "run":
+            if current_status.get("is_working") == "run":
                 return {
                     "started": False,
                     "message": "카테고리 이관 작업이 이미 실행 중입니다.",
-                    "status": self.migration_status(),
+                    "status": current_status,
                 }
-            self._migration_stop.clear()
             self._migration_started_monotonic = time.monotonic()
             self._migration_status = self._empty_migration_status()
             self._migration_status.update(
@@ -1141,127 +1227,76 @@ class BookOasisMateService:
             )
             self._append_migration_log(self._migration_status["message"])
 
-        worker = threading.Thread(
-            target=self._run_migration,
-            args=(config,),
-            name="bookoasis-mate-category-migration",
+        settings = self.settings()
+        paths = self._maintenance_worker_paths(
+            config["work_dir"],
+            "category_migration",
         )
-        worker.daemon = True
-        self._migration_thread = worker
-        worker.start()
-        self._debug("카테고리 이관 시작", operation=operation)
+        worker_config = {
+            **config,
+            "job_type": "category_migration",
+            "cover_root_path": settings.get("cover_root_path"),
+            "target_general_db": settings.get("general_db_path"),
+            "target_adult_db": settings.get("adult_db_path"),
+        }
+        try:
+            process = self._launch_maintenance_worker(
+                paths,
+                worker_config,
+                self._migration_status,
+            )
+        except Exception as error:
+            with self._lock:
+                self._migration_status.update(
+                    {
+                        "is_working": "error",
+                        "message": "카테고리 이관 프로세스를 시작하지 못했습니다.",
+                        "error": str(error),
+                    }
+                )
+                self._append_migration_log(self._migration_status["message"])
+            raise
+        self._migration_process = process
+        self._migration_status_path = paths["status"]
+        self._migration_stop_path = paths["stop"]
+        self._debug(
+            "카테고리 이관 별도 프로세스 시작",
+            pid=process.pid,
+            operation=operation,
+        )
         return {
             "started": True,
             "message": "카테고리 이관 작업을 시작했습니다.",
             "status": self.migration_status(),
         }
 
-    def _run_migration(self, config):
-        started = time.monotonic()
-        operation = config["operation"]
-        try:
-            engine = self._migration_engine(
-                config,
-                on_progress=self._publish_migration,
-            )
-            settings = self.settings()
-            if operation == "export":
-                db_type = config["export_db_type"]
-                target = self.engine(settings).get_target(db_type)
-                result = engine.export_categories(
-                    target.path,
-                    db_type,
-                    config["export_library_ids"],
-                )
-            else:
-                inspection = engine.inspect_package(config["import_package"])
-                requested_type = config["import_db_type"]
-                db_type = (
-                    inspection["db_type"]
-                    if requested_type == "auto"
-                    else requested_type
-                )
-                target = self.engine(settings).get_target(db_type)
-                result = engine.import_category(
-                    target.path,
-                    config["import_package"],
-                    config["import_target_paths"],
-                    db_type=db_type,
-                    name=config["import_name"] or None,
-                    merge_to=(
-                        config["merge_library_id"]
-                        if config["import_mode"] == "merge"
-                        else None
-                    ),
-                    backup=config["backup_before_import"],
-                    inspection=inspection,
-                )
-            with self._lock:
-                self._migration_status.update(
-                    {
-                        "is_working": "wait",
-                        "progress_percent": 100,
-                        "message": (
-                            "카테고리 내보내기를 완료했습니다."
-                            if operation == "export"
-                            else (
-                                "기존 카테고리 병합을 완료했습니다."
-                                if result.get("mode") == "merge"
-                                else "신규 카테고리 가져오기를 완료했습니다."
-                            )
-                        ),
-                        "result": result,
-                        "elapsed_seconds": round(time.monotonic() - started, 1),
-                    }
-                )
-                self._append_migration_log(self._migration_status["message"])
-            self.invalidate()
-            self._debug(
-                "카테고리 이관 완료",
-                operation=operation,
-                duration_ms=self._duration_ms(started),
-            )
-        except MigrationStopped:
-            with self._lock:
-                self._migration_status.update(
-                    {
-                        "is_working": "stop",
-                        "message": "사용자 요청으로 카테고리 이관을 중지했습니다.",
-                        "elapsed_seconds": round(time.monotonic() - started, 1),
-                    }
-                )
-                self._append_migration_log(self._migration_status["message"])
-            self._debug(
-                "카테고리 이관 중지",
-                operation=operation,
-                duration_ms=self._duration_ms(started),
-            )
-        except Exception as error:
-            self.P.logger.error(f"BookOasis Mate 카테고리 이관 실패: {error}")
-            with self._lock:
-                self._migration_status.update(
-                    {
-                        "is_working": "error",
-                        "message": "카테고리 이관에 실패했습니다.",
-                        "error": str(error),
-                        "elapsed_seconds": round(time.monotonic() - started, 1),
-                    }
-                )
-                self._append_migration_log(
-                    f"{self._migration_status['message']} {error}"
-                )
-
     def stop_migration(self):
+        current_status = self.migration_status()
         with self._lock:
-            if self._migration_status.get("is_working") != "run":
+            if current_status.get("is_working") != "run":
                 return {
                     "requested": False,
                     "message": "실행 중인 카테고리 이관 작업이 없습니다.",
-                    "status": self.migration_status(),
+                    "status": current_status,
                 }
-            self._migration_stop.set()
+            stop_path = self._migration_stop_path
+            if stop_path is None:
+                work_dir = self.migration_config().get("work_dir")
+                if work_dir:
+                    stop_path = self._maintenance_worker_paths(
+                        work_dir,
+                        "category_migration",
+                    )["stop"]
+            if stop_path is not None:
+                stop_path.parent.mkdir(parents=True, exist_ok=True)
+                stop_path.touch()
             self._migration_status["message"] = "중지 요청을 처리하는 중입니다."
             self._append_migration_log("사용자가 작업 중지를 요청했습니다.")
+            if self._migration_status_path is not None:
+                self._write_database_migration_json(
+                    self._migration_status_path,
+                    self._migration_status,
+                )
         self._debug("카테고리 이관 중지 요청")
         return {
             "requested": True,

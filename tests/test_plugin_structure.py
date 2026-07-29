@@ -56,12 +56,12 @@ class PluginStructureTest(unittest.TestCase):
 
         self.assertEqual("bookoasis_mate", self.root.name)
         self.assertIn('package_name: "bookoasis_mate"', text)
-        self.assertIn('version: "1.0.1"', text)
+        self.assertIn('version: "1.0.2"', text)
         self.assertIn("colaiuta77/bookoasis_mate", text)
         readme = (self.root / "README.md").read_text(encoding="utf-8")
         self.assertIn("**FF용 플러그인이며", readme)
         self.assertNotIn("FlaskFarm(FF)", readme)
-        self.assertIn("v1.0.1 (2026-07-29)", readme)
+        self.assertIn("v1.0.2 (2026-07-29)", readme)
 
     def test_public_repository_excludes_local_development_and_runtime_files(self):
         ignore = (self.root / ".gitignore").read_text(encoding="utf-8")
@@ -184,6 +184,8 @@ class PluginStructureTest(unittest.TestCase):
         self.assertIn("migration_backup_before_import", setting)
         self.assertIn("migration_import_mode_merge", setting)
         self.assertIn("migration_merge_library_select", setting)
+        self.assertIn('id="migration_import_name_group"', setting)
+        self.assertIn("$('#migration_import_name').val('');", setting)
         self.assertIn("migration_start_btn", status)
         self.assertIn("migration_stop_btn", status)
         self.assertIn("migration_progress_bar", status)
@@ -332,6 +334,16 @@ class PluginStructureTest(unittest.TestCase):
         self.assertIn("bookoasis_password", template)
         self.assertIn("bookoasis_log_dir", template)
         self.assertIn("bookoasis_root_path", template)
+        self.assertIn("cover_root_custom", template)
+        self.assertIn("Reverse proxy 사용 시 예: https://yourdomain.com", template)
+        self.assertIn(
+            "BookOasis 설치 시 .env에 설정한 WEBHOOK_TOKEN과 같은 값을 입력합니다.",
+            template,
+        )
+        self.assertIn(
+            "너무 짧으면 API 연결이 실패할 수 있습니다. 기본값 30초",
+            template,
+        )
         self.assertIn("general_db_size_btn", template)
         self.assertIn("general_db_libraries_btn", template)
         self.assertIn("adult_db_size_btn", template)
@@ -349,9 +361,10 @@ class PluginStructureTest(unittest.TestCase):
             "select_bookoasis_log_dir_btn",
             "select_general_db_path_btn",
             "select_adult_db_path_btn",
-            "select_cover_root_path_btn",
         ):
             self.assertNotIn(removed_button_id, setting)
+        self.assertIn("select_cover_root_path_btn", setting)
+        self.assertIn("updateCoverRootMode", setting)
         self.assertIn("globalSelectLocalFolder", setting)
         self.assertNotIn("globalSelectLocalFile", setting)
         self.assertIn("db/media_general.db", setting)

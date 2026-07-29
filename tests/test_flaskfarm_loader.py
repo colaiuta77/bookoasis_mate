@@ -145,6 +145,10 @@ class FlaskFarmLoaderTest(unittest.TestCase):
             "True", package.P.module_list[3].db_default["gdrive_scan_auto_cleanup"]
         )
         self.assertEqual("30", package.P.module_list[0].db_default["api_timeout"])
+        self.assertEqual(
+            "False",
+            package.P.module_list[0].db_default["cover_root_custom"],
+        )
         self.assertIn("bookoasis_root_path", package.P.module_list[0].db_default)
         service = package.P.bookoasis_mate_service
         self.assertEqual(30, service.settings_from_mapping({})["api_timeout"])
@@ -170,6 +174,32 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         self.assertEqual(
             "/host/volume1/docker/bookoasis/covers",
             derived["cover_root_path"],
+        )
+        custom_cover = service.settings_from_mapping(
+            {
+                "bookoasis_root_path": "/host/volume1/docker/bookoasis",
+                "cover_root_custom": "True",
+                "cover_root_path": "/host/custom/covers",
+            }
+        )
+        self.assertTrue(custom_cover["cover_root_custom"])
+        self.assertEqual(
+            "/host/custom/covers",
+            custom_cover["cover_root_path"],
+        )
+        self.assertEqual(
+            "/host/volume1/docker/bookoasis/db/media_general.db",
+            custom_cover["general_db_path"],
+        )
+        _DummySetting.values = {
+            "bookoasis_root_path": "/host/volume1/docker/bookoasis",
+            "cover_root_custom": "True",
+            "cover_root_path": "/host/persisted/covers",
+        }
+        persisted = service.settings()
+        self.assertEqual(
+            "/host/persisted/covers",
+            persisted["cover_root_path"],
         )
         legacy = service.settings_from_mapping(
             {"general_db_path": "/legacy/media_general.db"}
@@ -371,7 +401,7 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         self.assertIsNone(package.P.history_model)
         self.assertIsNone(package.P.gdrive_scan_model)
 
-    def test_service_runs_category_export_in_background(self):
+    def test_service_starts_category_export_in_separate_process(self):
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
             work_root = root / "migration"
@@ -389,20 +419,35 @@ class FlaskFarmLoaderTest(unittest.TestCase):
             package = self._load_package(_DummyDb())
             service = package.P.bookoasis_mate_service
 
-            with patch(
-                "bookoasis_mate.mate_service.CategoryMigrationEngine.export_categories",
-                return_value={"count": 2, "files": [{"path": "one"}, {"path": "two"}]},
-            ) as mocked_export:
+            captured = {}
+
+            def fake_launch(paths, config, status):
+                captured.update(
+                    {
+                        "paths": paths,
+                        "config": config,
+                        "status": status,
+                    }
+                )
+                return types.SimpleNamespace(pid=4321, poll=lambda: None)
+
+            with patch.object(
+                service,
+                "_launch_maintenance_worker",
+                side_effect=fake_launch,
+            ):
                 started = service.start_migration()
-                service._migration_thread.join(timeout=5)
                 status = service.migration_status()
 
         self.assertTrue(started["started"])
-        self.assertEqual("wait", status["is_working"])
+        self.assertEqual("run", status["is_working"])
         self.assertEqual("export", status["operation"])
-        self.assertEqual(100, status["progress_percent"])
-        self.assertEqual(2, status["result"]["count"])
-        mocked_export.assert_called_once()
+        self.assertEqual("category_migration", captured["config"]["job_type"])
+        self.assertEqual([1, 2], captured["config"]["export_library_ids"])
+        self.assertEqual(
+            str(root / "media_general.db"),
+            captured["config"]["target_general_db"],
+        )
 
     def test_service_routes_existing_category_merge_to_import_engine(self):
         with tempfile.TemporaryDirectory() as tempdir:
@@ -420,35 +465,34 @@ class FlaskFarmLoaderTest(unittest.TestCase):
                 "migration_import_db_type": "general",
                 "migration_import_mode": "merge",
                 "migration_merge_library_id": "7",
+                "migration_import_name": "병합에서는 사용하지 않음",
                 "migration_import_target_paths": "/books/one\n/books/two",
                 "migration_backup_before_import": "True",
             }
             package = self._load_package(_DummyDb())
             service = package.P.bookoasis_mate_service
 
-            with patch(
-                "bookoasis_mate.mate_service.CategoryMigrationEngine.inspect_package",
-                return_value={"db_type": "general"},
+            captured = {}
+
+            def fake_launch(paths, config, status):
+                captured.update(config)
+                return types.SimpleNamespace(pid=4321, poll=lambda: None)
+
+            with patch.object(
+                service,
+                "_launch_maintenance_worker",
+                side_effect=fake_launch,
             ):
-                with patch(
-                    "bookoasis_mate.mate_service.CategoryMigrationEngine.import_category",
-                    return_value={
-                        "mode": "merge",
-                        "library_id": 7,
-                        "library_name": "기존 보관함",
-                    },
-                ) as mocked_import:
-                    started = service.start_migration()
-                    service._migration_thread.join(timeout=5)
-                    status = service.migration_status()
+                started = service.start_migration()
+                status = service.migration_status()
 
         self.assertTrue(started["started"])
-        self.assertEqual("wait", status["is_working"])
-        self.assertEqual("기존 카테고리 병합을 완료했습니다.", status["message"])
-        self.assertEqual("7", mocked_import.call_args.kwargs["merge_to"])
+        self.assertEqual("run", status["is_working"])
+        self.assertEqual("7", captured["merge_library_id"])
+        self.assertEqual("", captured["import_name"])
         self.assertEqual(
             ["/books/one", "/books/two"],
-            mocked_import.call_args.args[2],
+            captured["import_target_paths"],
         )
 
     def test_migration_ajax_routes_start_status_and_stop(self):
@@ -1077,7 +1121,7 @@ class FlaskFarmLoaderTest(unittest.TestCase):
             service = package.P.bookoasis_mate_service
 
             started = service.start_orphan_cleanup("general", "1", "true")
-            service._orphan_cleanup_thread.join(timeout=5)
+            service._orphan_cleanup_process.wait(timeout=5)
             status = service.orphan_cleanup_status()
             with self.assertRaises(ValueError):
                 service.start_orphan_cleanup("general", "1", "false", confirm_delete="false")

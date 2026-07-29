@@ -356,6 +356,25 @@ class BookOasisMateEngineTest(unittest.TestCase):
         self.assertNotIn("1/adult.webp", active_only)
         self.assertIn("1/adult.webp", protected)
 
+    def test_cover_reference_scan_batches_only_selected_library(self):
+        connection = sqlite3.connect(self.db_path)
+        connection.execute(
+            "UPDATE books SET cover_image = '2/comic.webp' WHERE id = 2"
+        )
+        connection.commit()
+        connection.close()
+        progress = []
+        engine = BookOasisMateEngine(self.settings)
+
+        references = engine.all_cover_references(
+            library_ids=[2],
+            batch_size=100,
+            on_progress=lambda read, unique: progress.append((read, unique)),
+        )
+
+        self.assertEqual({"2/comic.webp"}, references)
+        self.assertEqual([(1, 1)], progress)
+
     def test_reduced_schema_degrades_without_crashing(self):
         reduced = Path(self.tempdir.name) / "reduced.db"
         connection = sqlite3.connect(reduced)

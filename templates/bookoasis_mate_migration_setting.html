@@ -80,7 +80,9 @@
         </select>
       </div>
     </div>
-    {{ macros.setting_input_text('migration_import_name', '신규 카테고리 이름', value=arg['migration_import_name'], desc=['비워두면 패키지의 원본 카테고리명을 사용합니다.', '같은 이름이 있으면 Imported 시각을 붙여 구분합니다.']) }}
+    <div id="migration_import_name_group">
+      {{ macros.setting_input_text('migration_import_name', '신규 카테고리 이름', value=arg['migration_import_name'], desc=['신규 카테고리로 가져올 때만 사용합니다.', '비워두면 패키지의 원본 카테고리명을 사용합니다.', '같은 이름이 있으면 Imported 시각을 붙여 구분합니다.']) }}
+    </div>
     <div id="migration_merge_library_group" class="form-group row">
       <label class="col-sm-3 col-form-label">병합 대상 카테고리</label>
       <div class="col-sm-9">
@@ -116,11 +118,12 @@ function migrationSetMode(mode) {
 function migrationSetImportMode(mode) {
   mode = mode === 'merge' ? 'merge' : 'new';
   $('#migration_import_mode').val(mode);
-  $('#migration_import_name').closest('.form-group').toggle(mode === 'new');
+  $('#migration_import_name_group').toggle(mode === 'new');
   $('#migration_merge_library_group').toggle(mode === 'merge');
   $('#migration_import_mode_new').toggleClass('btn-primary', mode === 'new').toggleClass('btn-outline-primary', mode !== 'new');
   $('#migration_import_mode_merge').toggleClass('btn-primary', mode === 'merge').toggleClass('btn-outline-primary', mode !== 'merge');
   if (mode === 'merge') {
+    $('#migration_import_name').val('');
     if ($('#migration_import_db_type').val() === 'auto') {
       $('#migration_import_db_type').val('general');
     }
@@ -129,6 +132,9 @@ function migrationSetImportMode(mode) {
 }
 
 function migrationSyncValues() {
+  if ($('#migration_import_mode').val() === 'merge') {
+    $('#migration_import_name').val('');
+  }
   $('#migration_export_library_ids').val(($('#migration_export_library_select').val() || []).join(','));
   $('#migration_import_package').val($('#migration_import_package_select').val() || '');
   $('#migration_merge_library_id').val($('#migration_merge_library_select').val() || '');

@@ -23,6 +23,7 @@ class ModuleMain(PluginModuleBase):
             "webhook_token": "",
             "bookoasis_log_dir": "/volume1/docker/BookOasis_stable/logs",
             "cover_root_path": "",
+            "cover_root_custom": "False",
             "cover_min_width": "200",
             "cover_min_height": "280",
             "cover_min_file_size_kb": "5",

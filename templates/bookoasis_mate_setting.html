@@ -6,11 +6,11 @@
 {{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['connection_test_btn', '연결 테스트']]) }}
 <form id="setting">
   <h4>BookOasis 연결</h4>
-  {{ macros.setting_input_text('bookoasis_url', 'BookOasis URL', value=arg['bookoasis_url'], desc=['상태 API와 표지 URL에 사용합니다.', '예: http://172.17.0.1:5930']) }}
+  {{ macros.setting_input_text('bookoasis_url', 'BookOasis URL', value=arg['bookoasis_url'], desc=['상태 API와 표지 URL에 사용합니다.', '예: http://172.17.0.1:5930', 'Reverse proxy 사용 시 예: https://yourdomain.com']) }}
   {{ macros.setting_input_text('bookoasis_username', 'BookOasis 관리자 계정', value=arg['bookoasis_username'], desc=['개별 도서 재스캔과 메타데이터 검색·적용에 사용합니다.']) }}
   {{ macros.setting_input_text('bookoasis_password', 'BookOasis 관리자 비밀번호', value=arg['bookoasis_password'], type='password', desc=['서버 측 관리자 세션 생성에만 사용하며 로그나 API 응답에 표시하지 않습니다.']) }}
-  {{ macros.setting_input_text('webhook_token', '스캔 웹훅 토큰', value=arg['webhook_token'], desc=['BookOasis WEBHOOK_TOKEN과 같은 값을 입력합니다.', '보관함 전체 재스캔 요청에만 사용합니다.']) }}
-  {{ macros.setting_input_int('api_timeout', 'API 연결 제한 시간(초)', value=arg['api_timeout'], desc=['1~30초']) }}
+  {{ macros.setting_input_text('webhook_token', '스캔 웹훅 토큰', value=arg['webhook_token'], desc=['BookOasis 설치 시 .env에 설정한 WEBHOOK_TOKEN과 같은 값을 입력합니다.', '보관함 전체 재스캔 요청에만 사용합니다.']) }}
+  {{ macros.setting_input_int('api_timeout', 'API 연결 제한 시간(초)', value=arg['api_timeout'], desc=['1~30초', '너무 짧으면 API 연결이 실패할 수 있습니다. 기본값 30초']) }}
   {{ macros.setting_input_text_and_buttons('bookoasis_root_path', 'BookOasis 기본 경로', [['select_bookoasis_root_path_btn', '경로 선택']], value=arg.get('bookoasis_root_path', ''), desc=['FlaskFarm 컨테이너에서 보이는 BookOasis 설치 루트입니다.', '선택하면 db, logs, covers 경로를 자동으로 채웁니다.']) }}
   {{ macros.setting_input_text_and_buttons('general_db_path', '일반 DB 파일', [['general_db_size_btn', '크기 확인'], ['general_db_libraries_btn', '섹션 확인']], value=arg['general_db_path'], desc=['<기본 경로>/db/media_general.db로 자동 설정됩니다.']) }}
   {{ macros.setting_checkbox('adult_enabled', '성인 DB 검사', value=arg['adult_enabled'], desc=['성인 DB를 함께 진단합니다.']) }}
@@ -20,7 +20,8 @@
   {{ macros.setting_input_text('bookoasis_log_dir', 'BookOasis 로그 디렉터리', value=arg['bookoasis_log_dir'], desc=['<기본 경로>/logs로 자동 설정됩니다.']) }}
   {{ macros.m_hr() }}
   <h4>표지 검사</h4>
-  {{ macros.setting_input_text('cover_root_path', '표지 디렉터리', value=arg['cover_root_path'], desc=['<기본 경로>/covers로 자동 설정됩니다.']) }}
+  {{ macros.setting_checkbox('cover_root_custom', '커스텀 표지 경로', value=arg.get('cover_root_custom', 'False'), desc=['기본 경로가 아닌 커스텀 경로 사용 시 체크합니다.']) }}
+  {{ macros.setting_input_text_and_buttons('cover_root_path', '표지 디렉터리', [['select_cover_root_path_btn', '경로 선택']], value=arg['cover_root_path'], desc=['기본값은 <기본 경로>/covers로 자동 설정됩니다.', '커스텀 표지 경로를 체크하면 직접 입력하거나 경로를 선택할 수 있습니다.']) }}
   {{ macros.setting_input_int('cover_min_width', '최소 표지 너비', value=arg['cover_min_width'], desc=['이 값보다 작으면 저해상도로 표시합니다.']) }}
   {{ macros.setting_input_int('cover_min_height', '최소 표지 높이', value=arg['cover_min_height'], desc=['이 값보다 작으면 저해상도로 표시합니다.']) }}
   {{ macros.setting_input_int('cover_min_file_size_kb', '최소 표지 파일 크기(KB)', value=arg['cover_min_file_size_kb'], desc=['이 값보다 작으면 파일 크기 작음으로 표시합니다.', '0이면 검사하지 않습니다.']) }}
@@ -41,10 +42,12 @@
 <script>
 $(function() {
   use_collapse('adult_enabled');
-  $('#general_db_path,#adult_db_path,#bookoasis_log_dir,#cover_root_path').prop('readonly', true);
+  $('#general_db_path,#adult_db_path,#bookoasis_log_dir').prop('readonly', true);
+  updateCoverRootMode();
   updateBookOasisDerivedPaths();
 });
 $('#adult_enabled').change(function() { use_collapse('adult_enabled'); });
+$('#cover_root_custom').change(updateCoverRootMode);
 
 function currentSettings() {
   updateBookOasisDerivedPaths();
@@ -64,7 +67,16 @@ function updateBookOasisDerivedPaths() {
   $('#general_db_path').val(bookoasisRootJoin(root, 'db/media_general.db'));
   $('#adult_db_path').val(bookoasisRootJoin(root, 'db/media_adult.db'));
   $('#bookoasis_log_dir').val(bookoasisRootJoin(root, 'logs'));
-  $('#cover_root_path').val(bookoasisRootJoin(root, 'covers'));
+  if (!$('#cover_root_custom').is(':checked')) {
+    $('#cover_root_path').val(bookoasisRootJoin(root, 'covers'));
+  }
+}
+
+function updateCoverRootMode() {
+  var custom = $('#cover_root_custom').is(':checked');
+  $('#cover_root_path').prop('readonly', !custom);
+  $('#select_cover_root_path_btn').prop('disabled', !custom);
+  if (!custom) updateBookOasisDerivedPaths();
 }
 
 $("body").on('click', '#select_bookoasis_root_path_btn', function(e) {
@@ -78,6 +90,16 @@ $("body").on('click', '#select_bookoasis_root_path_btn', function(e) {
 });
 
 $('#bookoasis_root_path').on('input change', updateBookOasisDerivedPaths);
+
+$("body").on('click', '#select_cover_root_path_btn', function(e) {
+  e.preventDefault();
+  if (!$('#cover_root_custom').is(':checked')) return;
+  var input = $('#cover_root_path');
+  globalSelectLocalFolder('표지 폴더 선택', input.val().trim() || '/', function(result) {
+    if (typeof result !== 'string' || !result.trim()) return;
+    input.val(result.trim());
+  });
+});
 
 function showDatabaseDetails(dbType, view) {
   var data = currentSettings() + '&db_type=' + encodeURIComponent(dbType);
