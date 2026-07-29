@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+<div class="doctor-toolbar doctor-log-toolbar">
+  <select id="log_file" class="form-control form-control-sm"></select>
+  <button id="log_catalog_btn" class="btn btn-sm btn-outline-primary">목록 새로고침</button>
+  <button id="log_pause_btn" class="btn btn-sm btn-primary">일시정지</button>
+  <button id="log_clear_btn" class="btn btn-sm btn-outline-secondary">화면 지우기</button>
+  <label class="doctor-check"><input id="log_auto_refresh" type="checkbox" checked> 2초 자동 갱신</label>
+  <label class="doctor-check"><input id="log_auto_scroll" type="checkbox" checked> 자동 스크롤</label>
+</div>
+
+<div class="doctor-toolbar doctor-log-filter">
+  <select id="log_level" class="form-control form-control-sm">
+    <option value="all">모든 로그</option>
+    <option value="error">오류</option>
+    <option value="warning">경고</option>
+    <option value="info">정보</option>
+  </select>
+  <input id="log_search" class="form-control form-control-sm" placeholder="표시 내용 검색">
+  <select id="log_line_limit" class="form-control form-control-sm">
+    <option value="200">최근 200줄</option>
+    <option value="500" selected>최근 500줄</option>
+    <option value="1000">최근 1,000줄</option>
+    <option value="2000">최근 2,000줄</option>
+  </select>
+</div>
+
+<div class="doctor-log-summary">
+  <span id="log_status">로그 목록을 확인하는 중입니다.</span>
+  <span id="log_file_meta" class="doctor-muted"></span>
+</div>
+<pre id="log_output" class="doctor-log-output" tabindex="0"></pre>
+<div id="log_empty" class="doctor-empty" style="display:none"></div>
+
+<script>
+var logPollTimer = null;
+var logRequestRunning = false;
+var logPaused = false;
+var logCursorIdentity = '';
+var logCursorOffset = '';
+var logRawText = '';
+
+function scheduleLogPoll() {
+  clearTimeout(logPollTimer);
+  if (!logPaused && $('#log_auto_refresh').is(':checked') && !document.hidden && $('#log_file').val()) {
+    logPollTimer = setTimeout(function() { loadLogTail(false); }, 2000);
+  }
+}
+
+function resetLogCursor() {
+  logCursorIdentity = '';
+  logCursorOffset = '';
+  logRawText = '';
+  document.getElementById('log_output').textContent = '';
+}
+
+function trimLogBuffer() {
+  var lines = logRawText.split(/\r?\n/);
+  if (lines.length > 4000) logRawText = lines.slice(-4000).join('\n');
+}
+
+function levelMatches(line, level) {
+  if (level === 'error') return /(error|failed|exception|traceback|malformed|오류|실패|치명)/i.test(line);
+  if (level === 'warning') return /(warn|warning|경고|주의|skip|건너)/i.test(line);
+  if (level === 'info') return !levelMatches(line, 'error') && !levelMatches(line, 'warning');
+  return true;
+}
+
+function renderLogText() {
+  var query = String($('#log_search').val() || '').toLowerCase();
+  var level = $('#log_level').val();
+  var lines = logRawText.split(/\r?\n/).filter(function(line) {
+    return levelMatches(line, level) && (!query || line.toLowerCase().indexOf(query) !== -1);
+  });
+  var output = document.getElementById('log_output');
+  output.textContent = lines.join('\n');
+  if ($('#log_auto_scroll').is(':checked')) output.scrollTop = output.scrollHeight;
+}
+
+function populateLogFiles(data, preferred) {
+  var select = document.getElementById('log_file');
+  bookoasisMateClear(select);
+  (data.files || []).forEach(function(file) {
+    var option = document.createElement('option');
+    option.value = file.name;
+    option.textContent = file.label + ' · ' + file.name;
+    select.appendChild(option);
+  });
+  if (preferred && Array.prototype.some.call(select.options, function(option) { return option.value === preferred; })) {
+    select.value = preferred;
+  }
+  var hasFiles = select.options.length > 0;
+  $('#log_empty').toggle(!hasFiles);
+  $('#log_output').toggle(hasFiles);
+  document.getElementById('log_empty').textContent = data.message || '표시할 BookOasis 로그 파일이 없습니다.';
+  if (!hasFiles) document.getElementById('log_status').textContent = data.message || '로그 파일이 없습니다.';
+  return hasFiles;
+}
+
+function loadLogCatalog(showLoading) {
+  var previous = $('#log_file').val();
+  bookoasisMateAjax('main', 'log_catalog', {}, function(ret) {
+    var data = ret.data || {};
+    if (!data.success) {
+      populateLogFiles(data, '');
+      return;
+    }
+    if (populateLogFiles(data, previous)) {
+      resetLogCursor();
+      loadLogTail(showLoading === true);
+    }
+  }, null, {
+    global:showLoading === true,
+    silent:showLoading !== true,
+    error:function(xhr, message) {
+      document.getElementById('log_status').textContent = message;
+    }
+  });
+}
+
+function loadLogTail(showLoading) {
+  if (logRequestRunning || logPaused || !$('#log_file').val()) {
+    scheduleLogPoll();
+    return;
+  }
+  logRequestRunning = true;
+  bookoasisMateAjax('main', 'log_tail', {
+    filename:$('#log_file').val(),
+    cursor_identity:logCursorIdentity,
+    cursor_offset:logCursorOffset,
+    line_limit:$('#log_line_limit').val()
+  }, function(ret) {
+    var data = ret.data || {};
+    if (!data.success) {
+      document.getElementById('log_status').textContent = data.message || '로그를 읽을 수 없습니다.';
+      return;
+    }
+    if (data.reset) logRawText = '';
+    logRawText += data.text || '';
+    trimLogBuffer();
+    logCursorIdentity = data.identity || '';
+    logCursorOffset = data.offset;
+    renderLogText();
+    document.getElementById('log_status').textContent =
+      (data.reset ? '로그 회전 또는 초기화를 감지했습니다. · ' : '') + (data.text ? '최신 로그를 반영했습니다.' : '새 로그를 기다리는 중입니다.');
+    document.getElementById('log_file_meta').textContent =
+      bookoasisMateBytes(data.size) + ' · 수정 ' + (data.modified_at || '-');
+  }, function() {
+    logRequestRunning = false;
+    scheduleLogPoll();
+  }, {
+    global:showLoading === true,
+    silent:showLoading !== true,
+    error:function(xhr, message) {
+      document.getElementById('log_status').textContent = message;
+    }
+  });
+}
+
+$('#log_file').change(function() { resetLogCursor(); loadLogTail(true); });
+$('#log_catalog_btn').click(function(e) { e.preventDefault(); loadLogCatalog(true); });
+$('#log_pause_btn').click(function(e) {
+  e.preventDefault();
+  logPaused = !logPaused;
+  this.textContent = logPaused ? '다시 시작' : '일시정지';
+  document.getElementById('log_status').textContent = logPaused ? '실시간 로그 갱신을 일시정지했습니다.' : '실시간 로그 갱신을 다시 시작했습니다.';
+  if (logPaused) clearTimeout(logPollTimer);
+  else loadLogTail(false);
+});
+$('#log_clear_btn').click(function(e) { e.preventDefault(); logRawText = ''; renderLogText(); });
+$('#log_auto_refresh').change(scheduleLogPoll);
+$('#log_auto_scroll').change(renderLogText);
+$('#log_level').change(renderLogText);
+$('#log_line_limit').change(function() { resetLogCursor(); loadLogTail(true); });
+$('#log_search').on('input', renderLogText);
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) clearTimeout(logPollTimer);
+  else loadLogTail(false);
+});
+window.addEventListener('beforeunload', function() { clearTimeout(logPollTimer); });
+$(document).ready(function() { loadLogCatalog(false); });
+</script>
+{% endblock %}

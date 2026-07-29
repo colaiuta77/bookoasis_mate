@@ -1,0 +1,58 @@
+{# gd-poller CommandDispatcher 래퍼와 BookOasis 변경 감지 연동 절차를 안내합니다. #}
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+
+<div class="doctor-section doctor-card">
+  <h3>Google Drive 변경 감지 연동 매뉴얼</h3>
+  <p>gd-poller가 전달하는 action, 파일 유형, 현재 경로와 이전 경로를 래퍼가 FlaskFarm으로 보냅니다. FlaskFarm은 이벤트를 먼저 DB에 저장한 뒤 rclone VFS와 BookOasis를 처리합니다.</p>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>1. 사전 설정</h4>
+  <ol>
+    <li>BookOasis Mate 설정에서 일반·성인 DB 경로, BookOasis URL과 스캔 웹훅 토큰을 입력합니다.</li>
+    <li>Google Drive 연동 설정에서 경로 매핑과 rclone VFS 규칙을 실제 컨테이너 경로에 맞춥니다.</li>
+    <li>FlaskFarm 시스템 설정에서 전역 API 키를 확인합니다.</li>
+    <li>gd-poller 컨테이너에서 래퍼 파일과 Python 3를 실행할 수 있어야 합니다.</li>
+  </ol>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>2. gd-poller 설정 예시</h4>
+  <p>gd-poller <code>config.yaml</code>의 기존 <code>pollers[].dispatchers</code> 목록에 아래 항목을 추가합니다. YAML 들여쓰기는 탭이 아닌 공백을 사용해야 합니다.</p>
+  <pre><code>- class: CommandDispatcher
+  command: "python3 /data/plugins/bookoasis_mate/scripts/gd_poller_ff_bridge.py --url http://FLASKFARM_IP:9999/bookoasis_mate/api/gdrive_scan/event --apikey FLASKFARM_API_KEY"
+  wait_for_process: true
+  timeout: 15</code></pre>
+  <p><code>CommandDispatcher</code>는 명령 뒤에 <code>action</code>, <code>file|directory</code>, 현재 경로, 이전 경로를 순서대로 자동 추가합니다.</p>
+  <p><code>FLASKFARM_IP</code>와 <code>FLASKFARM_API_KEY</code>를 실제 값으로 바꿉니다. 이 방식은 전용 Dispatcher가 추가되기 전까지 사용하는 임시 방식입니다.</p>
+  <p><strong>주의:</strong> API 키가 gd-poller <code>Command</code> 로그와 운영체제 프로세스 목록에 노출될 수 있습니다. 설정 파일과 로그의 접근 권한을 제한하고 외부에 공유하지 마세요.</p>
+  <p>실제 60초 버퍼와 동일 보관함 중복 제거는 BookOasis Mate의 이벤트 버퍼 설정이 담당합니다.</p>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>3. 경로 매핑 예시</h4>
+  <pre><code>/GDRIVE =&gt; /mnt/gds/GDRIVE</code></pre>
+  <p>gd-poller가 <code>/GDRIVE/READING/만화/A.cbz</code>를 보내면 <code>/mnt/gds/GDRIVE/READING/만화/A.cbz</code>로 해석합니다. 대상 접두사는 BookOasis DB의 <code>libraries.physical_path</code>에 저장된 보관함 경로와 같아야 하며 FlaskFarm 파일시스템에 실제로 존재할 필요는 없습니다.</p>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>4. rclone VFS 규칙 예시</h4>
+  <pre><code>/mnt/gds/GDRIVE|/GDRIVE|http://172.17.0.1:5572
+/mnt/gds/GDRIVE|/GDRIVE|http://172.17.0.1:5572#vfs|RCLONE_USER|RCLONE_PASSWORD</code></pre>
+  <p>인증정보가 필요하면 URL에 포함하지 말고 네 번째·다섯 번째 필드에 사용자명과 비밀번호를 입력합니다. 실제 값이 포함된 설정이나 로그는 외부에 공유하지 마세요.</p>
+  <p>이동·이름 변경은 이전 경로 forget과 이전·현재 부모 경로 refresh를 실행합니다. 생성·수정·복원은 현재 부모 경로를 refresh하고, 삭제는 대상 forget 후 부모를 refresh합니다.</p>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>동작 범위와 주의 사항</h4>
+  <ul>
+    <li>BookOasis 공개 웹훅은 개별 파일 경로를 받지 않으므로, 정확한 변경 폴더의 VFS를 갱신한 뒤 해당 보관함의 비강제 증분 스캔을 요청합니다.</li>
+    <li>같은 버퍼 구간에 여러 파일이 변경되어도 동일 DB·보관함의 스캔 요청은 한 번만 보냅니다.</li>
+    <li>경로에 맞는 VFS 규칙이 없거나 refresh가 실패하면 BookOasis 스캔을 보류하고 이벤트를 재시도합니다.</li>
+    <li>FlaskFarm이 재시작되면 처리 중이던 이벤트는 재시도 대기로 복구합니다.</li>
+    <li>지원 확장자가 아닌 파일 이벤트는 정상 응답 후 무시합니다. 디렉터리 이벤트는 항상 처리합니다.</li>
+  </ul>
+</div>
+{% endblock %}

@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+<div class="doctor-toolbar">
+  <select id="db_type" class="form-control form-control-sm">
+    <option value="general">일반 DB</option>
+    {% if arg.get('adult_enabled') == 'True' %}<option value="adult">성인 DB</option>{% endif %}
+  </select>
+  <button id="refresh_btn" class="btn btn-sm btn-primary">새로고침</button>
+  <button id="rescan_all_btn" class="btn btn-sm btn-warning">전체 재스캔 요청</button>
+  <label class="doctor-check"><input id="force_rescan" type="checkbox"> 대기 중이어도 다시 요청</label>
+  <label class="doctor-check"><input id="scanner_auto_refresh" type="checkbox" checked> 2초 자동 갱신</label>
+  <span id="scanner_updated_at" class="doctor-muted"></span>
+</div>
+
+<div id="live_queue_card" class="doctor-card doctor-live-card">
+  <div class="doctor-live-header">
+    <div>
+      <h5>실시간 스캐너 작업</h5>
+      <strong id="live_queue_title">상태를 확인하는 중입니다.</strong>
+    </div>
+    <span id="live_queue_badge" class="doctor-status doctor-status-warning">확인 중</span>
+  </div>
+  <div id="live_queue_stage" class="doctor-live-stage"></div>
+  <div id="live_queue_meta" class="doctor-muted"></div>
+  <div id="live_progress" class="doctor-live-progress" style="display:none">
+    <div class="doctor-live-progress-track"><div id="live_progress_bar" class="doctor-live-progress-bar"></div></div>
+    <div class="doctor-live-progress-text">
+      <span id="live_progress_count"></span>
+      <span id="live_progress_time" class="doctor-muted"></span>
+    </div>
+    <div id="live_progress_file" class="doctor-path"></div>
+  </div>
+  <div id="live_queue_error" class="doctor-live-error" style="display:none"></div>
+</div>
+
+<h4>보관함 상태</h4>
+<div class="doctor-table-wrap"><table class="table table-sm doctor-table">
+  <thead><tr><th>보관함</th><th>상태</th><th>마지막 스캔</th><th>스케줄</th><th>원격</th><th>작업</th></tr></thead>
+  <tbody id="library_rows"></tbody>
+</table></div>
+<div id="library_empty" class="doctor-empty" style="display:none">등록된 보관함이 없습니다.</div>
+
+<h4 class="doctor-section">최근 스캔 작업</h4>
+<div class="doctor-table-wrap"><table class="table table-sm doctor-table">
+  <thead><tr><th>ID</th><th>유형</th><th>상태</th><th>단계</th><th>요청 시각</th><th>오류</th></tr></thead>
+  <tbody id="task_rows"></tbody>
+</table></div>
+<div id="task_empty" class="doctor-empty" style="display:none">스캔 작업 기록이 없습니다.</div>
+
+<script>
+var scannerPollTimer = null;
+var scannerRequestRunning = false;
+
+function setLiveQueue(data) {
+  var live = data.live_queue || {};
+  var running = live.running || null;
+  var progress = data.lazy_progress || null;
+  var title = document.getElementById('live_queue_title');
+  var badge = document.getElementById('live_queue_badge');
+  var stage = document.getElementById('live_queue_stage');
+  var meta = document.getElementById('live_queue_meta');
+  var error = document.getElementById('live_queue_error');
+  var progressBox = document.getElementById('live_progress');
+
+  error.style.display = live.error ? 'block' : 'none';
+  error.textContent = live.error ? '실시간 API 연결 실패 · DB 작업 이력을 표시합니다. ' + live.error : '';
+  if (!running) {
+    title.textContent = live.success ? '현재 실행 중인 스캔이 없습니다.' : '실시간 작업 상태를 확인할 수 없습니다.';
+    badge.className = 'doctor-status ' + (live.success ? 'doctor-status-healthy' : 'doctor-status-warning');
+    badge.textContent = live.success ? '대기' : '확인 필요';
+    stage.textContent = live.pending_count ? '대기열 ' + live.pending_count + '건' : '';
+    meta.textContent = '';
+    progressBox.style.display = 'none';
+    return;
+  }
+
+  var labels = {lazy_scan:'Lazy Scanner', library_scan:'보관함 스캔', cover_scan:'표지 스캔'};
+  title.textContent = labels[running.type] || running.type || '백그라운드 작업';
+  badge.className = 'doctor-status doctor-status-healthy';
+  badge.textContent = '실행 중';
+  stage.textContent = running.stage || '작업을 처리하고 있습니다.';
+  meta.textContent = [
+    running.library_name,
+    running.started_at ? '시작 ' + running.started_at : '',
+    live.pending_count ? '대기 ' + live.pending_count + '건' : ''
+  ].filter(Boolean).join(' · ');
+
+  if (running.type === 'lazy_scan' && progress) {
+    progressBox.style.display = 'block';
+    document.getElementById('live_progress_bar').style.width = Math.max(0, Math.min(100, Number(progress.percent || 0))) + '%';
+    document.getElementById('live_progress_count').textContent =
+      '현재 배치 ' + progress.done + ' / ' + progress.total + '권 · ' + progress.percent + '%';
+    document.getElementById('live_progress_time').textContent =
+      progress.modified_at ? '로그 갱신 ' + progress.modified_at : '';
+    document.getElementById('live_progress_file').textContent = progress.filename || '';
+  } else {
+    progressBox.style.display = 'none';
+  }
+}
+
+function renderScanner(data) {
+  setLiveQueue(data);
+  var libraryBody = document.getElementById('library_rows'); bookoasisMateClear(libraryBody);
+  $('#library_empty').toggle(data.libraries.length === 0);
+  data.libraries.forEach(function(item) {
+    var row = document.createElement('tr');
+    row.appendChild(bookoasisMateText('td', '', item.name || '-'));
+    row.appendChild(bookoasisMateText('td', '', item.scan_status || '-'));
+    row.appendChild(bookoasisMateText('td', 'doctor-muted', item.last_scanned_at || '미실행'));
+    row.appendChild(bookoasisMateText('td', '', item.cron_schedule || '-'));
+    row.appendChild(bookoasisMateText('td', '', Number(item.is_remote || 0) ? '예' : '아니요'));
+    var actionCell = document.createElement('td');
+    var button = bookoasisMateText('button', 'btn btn-sm btn-outline-warning', '재스캔');
+    button.type = 'button';
+    button.addEventListener('click', function() { requestRescan(item.id, item.name || item.id, false); });
+    actionCell.appendChild(button); row.appendChild(actionCell);
+    libraryBody.appendChild(row);
+  });
+  var taskBody = document.getElementById('task_rows'); bookoasisMateClear(taskBody);
+  $('#task_empty').toggle(data.tasks.length === 0);
+  data.tasks.forEach(function(item) {
+    var row = document.createElement('tr');
+    if (item.is_active) row.className = 'doctor-active-row';
+    row.appendChild(bookoasisMateText('td', '', item.id));
+    row.appendChild(bookoasisMateText('td', '', item.task_type || '-'));
+    row.appendChild(bookoasisMateText('td', item.is_active ? 'doctor-live-status' : '', item.display_status || item.status || '-'));
+    row.appendChild(bookoasisMateText('td', '', item.display_stage || item.stage || '-'));
+    row.appendChild(bookoasisMateText('td', 'doctor-muted', item.enqueue_at || '-'));
+    row.appendChild(bookoasisMateText('td', item.error_message ? 'doctor-error' : '', item.error_message || '-'));
+    taskBody.appendChild(row);
+  });
+}
+function requestRescan(libraryId, label, allLibraries) {
+  var target = allLibraries ? '현재 DB의 모든 보관함' : '보관함 [' + label + ']';
+  if (!confirm(target + '에 재스캔을 요청하시겠습니까?')) return;
+  bookoasisMateAjax('main', 'rescan', {
+    db_type: $('#db_type').val(),
+    library_id: libraryId || '',
+    all_libraries: allLibraries ? 'true' : 'false',
+    force: $('#force_rescan').is(':checked') ? 'true' : 'false'
+  }, function(ret) { if (ret.data) loadScanner(true); });
+}
+function scheduleScannerPoll() {
+  clearTimeout(scannerPollTimer);
+  if ($('#scanner_auto_refresh').is(':checked') && !document.hidden) {
+    scannerPollTimer = setTimeout(function() { loadScanner(false); }, 2000);
+  }
+}
+function loadScanner(showLoading) {
+  if (scannerRequestRunning) return;
+  scannerRequestRunning = true;
+  bookoasisMateAjax('main', 'scanner', {db_type:$('#db_type').val(), live:'true'}, function(ret) {
+    if (ret.ret === 'success') {
+      renderScanner(ret.data);
+      document.getElementById('scanner_updated_at').textContent = '마지막 갱신 ' + new Date().toLocaleTimeString();
+    }
+  }, function() {
+    scannerRequestRunning = false;
+    scheduleScannerPoll();
+  }, {
+    global:showLoading === true,
+    silent:showLoading !== true,
+    error:function(xhr, message) {
+      var error = document.getElementById('live_queue_error');
+      error.style.display = 'block';
+      error.textContent = message;
+    }
+  });
+}
+$('#refresh_btn').click(function(e) { e.preventDefault(); loadScanner(true); });
+$('#rescan_all_btn').click(function(e) { e.preventDefault(); requestRescan('', '', true); });
+$('#db_type').change(function() { loadScanner(true); });
+$('#scanner_auto_refresh').change(scheduleScannerPoll);
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) clearTimeout(scannerPollTimer);
+  else loadScanner(false);
+});
+window.addEventListener('beforeunload', function() { clearTimeout(scannerPollTimer); });
+$(document).ready(function() { loadScanner(false); });
+</script>
+{% endblock %}

@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+<div class="doctor-toolbar">
+  <button id="refresh_btn" class="btn btn-sm btn-secondary">새로고침</button>
+  <button id="run_scan_btn" class="btn btn-sm btn-primary">검사 실행 및 기록</button>
+  <span id="generated_at" class="doctor-muted"></span>
+</div>
+<div id="summary_grid" class="doctor-grid"></div>
+<div id="database_list" class="doctor-section"></div>
+<div class="doctor-section doctor-card">
+  <h5>수동 DB 무결성 검사</h5>
+  <p class="doctor-muted">PRAGMA quick_check는 읽기 전용이지만 큰 DB에서는 부하가 생길 수 있습니다. 필요한 경우에만 실행하세요.</p>
+  <div class="doctor-toolbar mb-0">
+    <select id="quick_db_type" class="form-control form-control-sm">
+      <option value="general">일반 DB</option>
+    </select>
+    <button id="quick_check_btn" class="btn btn-sm btn-warning">quick_check 실행</button>
+  </div>
+</div>
+
+<script>
+function doctorFormatCount(value, unit) {
+  return Number(value || 0).toLocaleString('ko-KR') + (unit || '');
+}
+
+function doctorMetricGroup(title, stats) {
+  var group = bookoasisMateText('section', 'doctor-overview-group', '');
+  group.appendChild(bookoasisMateText('h5', '', title));
+  (stats || []).forEach(function(stat) {
+    var row = bookoasisMateText('div', 'doctor-overview-stat', '');
+    row.appendChild(bookoasisMateText('span', '', stat.label));
+    row.appendChild(bookoasisMateText('span', stat.tone ? 'doctor-overview-stat-' + stat.tone : '', stat.value));
+    group.appendChild(row);
+  });
+  return group;
+}
+
+function doctorSummaryOverview(totals, scanner, staleDays) {
+  var totalBooks = Number(totals.total_books || 0);
+  var problemBooks = Number(totals.problem_books || 0);
+  var healthyBooks = Number(totals.healthy_books || 0);
+  var healthPercent = Math.max(0, Math.min(100, Number(totals.health_percent || 0)));
+  var problemPercent = totalBooks ? (problemBooks / totalBooks * 100).toFixed(1) + '%' : '0%';
+  var card = bookoasisMateText('div', 'doctor-card doctor-overview-card', '');
+
+  var chartArea = bookoasisMateText('div', 'doctor-overview-chart-area', '');
+  var donut = bookoasisMateText('div', 'doctor-overview-donut' + (totalBooks ? '' : ' doctor-overview-donut-empty'), '');
+  donut.style.setProperty('--doctor-health-percent', healthPercent + '%');
+  var center = bookoasisMateText('div', 'doctor-overview-center', '');
+  center.appendChild(bookoasisMateText('strong', '', doctorFormatCount(totalBooks, '권')));
+  center.appendChild(bookoasisMateText('span', '', '전체 도서'));
+  donut.appendChild(center);
+  chartArea.appendChild(donut);
+
+  var legend = bookoasisMateText('div', 'doctor-overview-legend', '');
+  [
+    {label:'정상 도서', value:doctorFormatCount(healthyBooks, '권') + ' · ' + healthPercent + '%', tone:'healthy'},
+    {label:'점검 필요', value:doctorFormatCount(problemBooks, '권') + ' · ' + problemPercent, tone:'warning'}
+  ].forEach(function(item) {
+    var row = bookoasisMateText('div', 'doctor-overview-legend-row', '');
+    row.appendChild(bookoasisMateText('span', 'doctor-overview-dot doctor-overview-dot-' + item.tone, ''));
+    row.appendChild(bookoasisMateText('span', '', item.label));
+    row.appendChild(bookoasisMateText('span', 'doctor-overview-legend-value', item.value));
+    legend.appendChild(row);
+  });
+  chartArea.appendChild(legend);
+  card.appendChild(chartArea);
+
+  var groups = bookoasisMateText('div', 'doctor-overview-groups', '');
+  groups.appendChild(doctorMetricGroup('문제 도서', [
+    {label:'점검 필요', value:doctorFormatCount(problemBooks, '권'), tone:problemBooks ? 'warning' : 'healthy'},
+    {label:'중복 ISBN 후보', value:doctorFormatCount(totals.duplicate_isbn, '권')},
+    {label:'ISBN 누락', value:doctorFormatCount(totals.isbn, '권')}
+  ]));
+  groups.appendChild(doctorMetricGroup('메타데이터 누락', [
+    {label:'표지 없음', value:doctorFormatCount(totals.cover, '권')},
+    {label:'저자 없음', value:doctorFormatCount(totals.author, '권')},
+    {label:'출판사 없음', value:doctorFormatCount(totals.publisher, '권')},
+    {label:'소개 없음', value:doctorFormatCount(totals.summary, '권')}
+  ]));
+  groups.appendChild(doctorMetricGroup('파일 및 페이지', [
+    {label:'페이지 수 미기록', value:doctorFormatCount(totals.pages, '권')},
+    {label:'파일 크기 미기록', value:doctorFormatCount(totals.file_size, '권')},
+    {label:'페이지 수 기록', value:doctorFormatCount(Math.max(0, totalBooks - Number(totals.pages || 0)), '권')},
+    {label:'파일 크기 기록', value:doctorFormatCount(Math.max(0, totalBooks - Number(totals.file_size || 0)), '권')}
+  ]));
+  groups.appendChild(doctorMetricGroup('스캔 상태', [
+    {label:'최근 작업 실패', value:doctorFormatCount(scanner.recent_failed_tasks, '건'), tone:Number(scanner.recent_failed_tasks || 0) ? 'warning' : 'healthy'},
+    {label:'대기 작업', value:doctorFormatCount(scanner.pending_tasks, '건')},
+    {label:'실행 작업', value:doctorFormatCount(scanner.running_tasks, '건')},
+    {label:'장기 미스캔', value:doctorFormatCount(scanner.stale_libraries, '개')}
+  ]));
+  card.appendChild(groups);
+  card.appendChild(bookoasisMateText(
+    'div',
+    'doctor-overview-note',
+    '활성 도서 기준입니다. 문제 유형은 서로 중복될 수 있습니다. 스캔 실패는 최근 7일 · 장기 미스캔은 ' + staleDays + '일 기준입니다.'
+  ));
+  return card;
+}
+
+function renderReport(report) {
+  var totals = report.totals || {};
+  var scanner = report.scanner || {};
+  $('#generated_at').text('마지막 조회 ' + (report.generated_at || '-'));
+  var summary = document.getElementById('summary_grid');
+  bookoasisMateClear(summary);
+  summary.appendChild(doctorSummaryOverview(totals, scanner, report.stale_days || 14));
+
+  var list = document.getElementById('database_list');
+  bookoasisMateClear(list);
+  var quickSelect = document.getElementById('quick_db_type');
+  var selectedDbType = quickSelect.value || 'general';
+  bookoasisMateClear(quickSelect);
+  (report.databases || []).forEach(function(db) {
+    var option = document.createElement('option');
+    option.value = db.db_type;
+    option.textContent = db.label + ' DB';
+    quickSelect.appendChild(option);
+    var card = bookoasisMateText('div', 'doctor-card mb-3', '');
+    var heading = bookoasisMateText('div', 'd-flex justify-content-between align-items-center', '');
+    heading.appendChild(bookoasisMateText('h4', 'mb-0', db.label + ' DB'));
+    heading.appendChild(bookoasisMateStatus(db.status));
+    card.appendChild(heading);
+    if (db.connected) {
+      var reasons = db.status_reasons || [];
+      var reasonBox = bookoasisMateText('div', 'doctor-db-reason doctor-db-reason-' + db.status, '');
+      reasonBox.appendChild(bookoasisMateText('strong', '', db.status === 'warning' ? '주의 판정 이유' : 'DB 진단 결과'));
+      if (db.status === 'warning') {
+        var reasonList = bookoasisMateText('ul', '', '');
+        reasons.forEach(function(reason) {
+          reasonList.appendChild(bookoasisMateText('li', '', reason.label + ' ' + doctorFormatCount(reason.count, reason.unit)));
+        });
+        reasonBox.appendChild(reasonList);
+        reasonBox.appendChild(bookoasisMateText('small', '', '주의는 DB 파일 손상 판정이 아니라 진단·스캔 확인 항목이 있다는 의미입니다.'));
+      } else {
+        reasonBox.appendChild(bookoasisMateText('div', '', '현재 판정 기준에서 경고 항목이 발견되지 않았습니다.'));
+      }
+      card.appendChild(reasonBox);
+
+      var facts = bookoasisMateText('div', 'doctor-db-facts', '');
+      [
+        {label:'전체 도서', value:doctorFormatCount((db.summary || {}).total_books, '권')},
+        {label:'문제 도서', value:doctorFormatCount((db.summary || {}).problem_books, '권')},
+        {label:'실패·중단 보관함', value:doctorFormatCount((db.scanner || {}).failed_libraries, '개')},
+        {label:'장기 미스캔', value:doctorFormatCount((db.scanner || {}).stale_libraries, '개')}
+      ].forEach(function(fact) {
+        var item = bookoasisMateText('div', 'doctor-db-fact', '');
+        item.appendChild(bookoasisMateText('span', '', fact.label));
+        item.appendChild(bookoasisMateText('strong', '', fact.value));
+        facts.appendChild(item);
+      });
+      card.appendChild(facts);
+      card.appendChild(bookoasisMateText('div', 'doctor-path doctor-db-path', db.path || '경로 없음'));
+      card.appendChild(bookoasisMateText('div', 'doctor-sub', 'SQLite ' + (db.journal_mode || '-') + ' · ' + bookoasisMateBytes(db.file_size) + ' · 조회 ' + (db.duration_ms || 0) + 'ms'));
+    } else {
+      card.appendChild(bookoasisMateText('div', 'doctor-path mt-2', db.path || '경로 없음'));
+      card.appendChild(bookoasisMateText('div', 'doctor-error mt-2', db.error || 'DB 연결 실패'));
+    }
+    list.appendChild(card);
+  });
+  if (quickSelect.querySelector('option[value="' + selectedDbType + '"]')) {
+    quickSelect.value = selectedDbType;
+  }
+}
+
+function loadReport() {
+  bookoasisMateAjax('main', 'report', {}, function(ret) {
+    if (ret.ret === 'success') renderReport(ret.data);
+  });
+}
+
+$('#refresh_btn').click(function(e) { e.preventDefault(); loadReport(); });
+$('#run_scan_btn').click(function(e) {
+  e.preventDefault();
+  bookoasisMateAjax('main', 'run_scan', {}, function(ret) {
+    if (ret.ret === 'success') renderReport(ret.data);
+  });
+});
+$('#quick_check_btn').click(function(e) {
+  e.preventDefault();
+  if (!confirm('선택한 DB에 quick_check를 실행하시겠습니까?')) return;
+  bookoasisMateAjax('main', 'quick_check', {db_type:$('#quick_db_type').val()}, function(ret) {
+    if (!ret.data) return;
+    var result = (ret.data.result || []).map(bookoasisMateEscape).join('<br>');
+    showModal(result || bookoasisMateEscape(ret.data.message || ''), 'DB quick_check', false);
+  });
+});
+$(document).ready(loadReport);
+</script>
+{% endblock %}

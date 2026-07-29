@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+<input type="hidden" id="doctor_bookoasis_url" value="{{ arg.get('bookoasis_url', '') }}">
+
+<div class="doctor-toolbar">
+  <select id="db_type" class="form-control form-control-sm">
+    <option value="general">일반 DB</option>
+    {% if arg.get('adult_enabled') == 'True' %}<option value="adult">성인 DB</option>{% endif %}
+  </select>
+  <select id="issue_library_id" class="form-control form-control-sm" disabled>
+    <option value="">보관함 불러오는 중</option>
+  </select>
+  <select id="issue_type" class="form-control form-control-sm">
+    <option value="all">전체 문제</option>
+    <option value="author">저자 없음</option>
+    <option value="publisher">출판사 없음</option><option value="summary">소개 없음</option>
+    <option value="isbn">ISBN 없음</option><option value="pages">페이지 수 미기록</option>
+    <option value="file_size">파일 크기 미기록</option><option value="duplicate_isbn">ISBN 중복 후보</option>
+  </select>
+  <input id="search" class="form-control form-control-sm" placeholder="제목·시리즈·저자 검색">
+  <button id="search_btn" class="btn btn-sm btn-primary">조회</button>
+  <span id="issue_count" class="doctor-muted"></span>
+</div>
+<p class="doctor-muted">도서 행을 클릭하면 BookOasis 상세 보기, 개별 재스캔과 플러그인 메타데이터 검색 메뉴가 열립니다.</p>
+<div class="doctor-table-wrap">
+  <table class="table table-sm doctor-table">
+    <thead><tr><th>표지</th><th>도서</th><th>보관함</th><th>상태</th><th>등록일</th><th>근거</th></tr></thead>
+    <tbody id="issue_rows"></tbody>
+  </table>
+</div>
+<div id="issue_empty" class="doctor-empty" style="display:none">문제 도서가 없습니다.</div>
+<div class="doctor-pagination">
+  <button id="prev_btn" class="btn btn-sm btn-secondary">이전</button>
+  <span id="page_info"></span>
+  <button id="next_btn" class="btn btn-sm btn-secondary">다음</button>
+</div>
+
+<div id="issue_json_modal" class="doctor-action-modal" aria-hidden="true">
+  <div class="doctor-action-dialog" role="dialog" aria-modal="true" aria-labelledby="issue_json_title">
+    <div class="doctor-action-dialog-header">
+      <h4 id="issue_json_title">문제 도서 판정 근거</h4>
+      <button id="issue_json_close" type="button" class="doctor-action-close" aria-label="닫기">×</button>
+    </div>
+    <pre id="issue_json_content" class="doctor-gdrive-json"></pre>
+  </div>
+</div>
+
+<script>
+var issuePage = 1;
+var issuePages = 1;
+var issueLibrariesReady = false;
+function openIssueJson(event, item) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('issue_json_content').textContent = JSON.stringify(item.diagnostics || {}, null, 2);
+  var modal = document.getElementById('issue_json_modal');
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+}
+function closeIssueJson() {
+  var modal = document.getElementById('issue_json_modal');
+  modal.style.display = 'none';
+  modal.setAttribute('aria-hidden', 'true');
+}
+function renderIssues(data) {
+  var body = document.getElementById('issue_rows');
+  bookoasisMateClear(body);
+  $('#issue_count').text('총 ' + data.total + '권');
+  $('#issue_empty').toggle(data.items.length === 0);
+  $('.doctor-table-wrap').toggle(data.items.length > 0);
+  data.items.forEach(function(item) {
+    var row = document.createElement('tr');
+    var coverCell = document.createElement('td');
+    if (item.cover_url) {
+      var image = document.createElement('img'); image.className = 'doctor-cover'; image.src = item.cover_url; image.alt = '';
+      image.onerror = function() { this.style.display = 'none'; };
+      coverCell.appendChild(image);
+    }
+    row.appendChild(coverCell);
+    var book = document.createElement('td');
+    book.appendChild(bookoasisMateText('strong', '', item.title || '제목 없음'));
+    if (item.series_name) {
+      book.appendChild(bookoasisMateText('div', 'doctor-muted', '시리즈 · ' + item.series_name));
+    }
+    book.appendChild(bookoasisMateText('div', 'doctor-muted', item.author || '저자 정보 없음'));
+    row.appendChild(book);
+    row.appendChild(bookoasisMateText('td', '', item.library_name || '보관함 미상'));
+    var issueCell = document.createElement('td');
+    (item.issues || []).forEach(function(issue) { issueCell.appendChild(bookoasisMateText('span', 'doctor-badge', issue.label)); });
+    row.appendChild(issueCell);
+    row.appendChild(bookoasisMateText('td', 'doctor-muted', item.created_at || '-'));
+    var actionCell = document.createElement('td');
+    var jsonButton = bookoasisMateButton('JSON', 'btn btn-sm btn-outline-primary');
+    jsonButton.addEventListener('click', function(event) { openIssueJson(event, item); });
+    actionCell.appendChild(jsonButton);
+    row.appendChild(actionCell);
+    bookoasisMateBindBookActions(row, item, function() { loadIssues(issuePage); });
+    body.appendChild(row);
+  });
+  issuePage = data.page; issuePages = Math.max(1, data.pages || 1);
+  $('#page_info').text(issuePage + ' / ' + issuePages);
+  $('#prev_btn').prop('disabled', issuePage <= 1);
+  $('#next_btn').prop('disabled', issuePage >= issuePages);
+}
+function loadIssues(page) {
+  bookoasisMateAjax('main', 'issues', {db_type:$('#db_type').val(), library_id:$('#issue_library_id').val(), issue_type:$('#issue_type').val(), search:$('#search').val(), page:page}, function(ret) {
+    if (ret.ret === 'success') renderIssues(ret.data);
+  });
+}
+function loadIssueLibraries() {
+  var dbType = $('#db_type').val();
+  var select = $('#issue_library_id');
+  issueLibrariesReady = false;
+  select.prop('disabled', true).empty().append($('<option>', {value:'', text:'보관함 불러오는 중'}));
+  bookoasisMateAjax('main', 'scanner', {db_type:dbType, limit:10}, function(ret) {
+    if ($('#db_type').val() !== dbType || !ret.data) return;
+    select.empty().append($('<option>', {value:'', text:'전체 보관함'}));
+    ret.data.libraries.forEach(function(item) {
+      select.append($('<option>', {value:item.id, text:item.name || ('보관함 ' + item.id)}));
+    });
+    issueLibrariesReady = true;
+    select.prop('disabled', false);
+    loadIssues(1);
+  }, function(xhr, status) {
+    if ($('#db_type').val() === dbType && status !== 'success') {
+      issueLibrariesReady = true;
+      select.empty().append($('<option>', {value:'', text:'전체 보관함'})).prop('disabled', false);
+      loadIssues(1);
+    }
+  });
+}
+$('#search_btn').click(function(e) { e.preventDefault(); loadIssues(1); });
+$('#search').keydown(function(e) { if (e.key === 'Enter') { e.preventDefault(); loadIssues(1); } });
+$('#db_type').change(function() { loadIssueLibraries(); });
+$('#issue_library_id,#issue_type').change(function() { if (issueLibrariesReady) loadIssues(1); });
+$('#prev_btn').click(function() { if (issuePage > 1) loadIssues(issuePage - 1); });
+$('#next_btn').click(function() { if (issuePage < issuePages) loadIssues(issuePage + 1); });
+$('#issue_json_close').click(closeIssueJson);
+$('#issue_json_modal').click(function(event) { if (event.target === this) closeIssueJson(); });
+$(document).keydown(function(event) { if (event.key === 'Escape') closeIssueJson(); });
+$(document).ready(function() { loadIssueLibraries(); });
+</script>
+{% endblock %}

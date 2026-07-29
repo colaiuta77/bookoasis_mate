@@ -1,0 +1,209 @@
+{# 통DB 이관 작업의 진행률·결과·로그와 시작·중지 제어를 제공합니다. #}
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+{{ macros.m_button_group([['database_migration_start_btn', '시작'], ['database_migration_stop_btn', '중지']]) }}
+<div class="alert alert-warning">가져오기는 미리보기와 Dry Run을 먼저 확인하고 BookOasis를 중지하세요. 내보내기는 정확한 DB·표지 시점을 위해 스캐너와 메타데이터 변경 작업을 멈춘 상태를 권장합니다.</div>
+<div class="doctor-section doctor-card">
+  <div class="d-flex justify-content-between"><strong id="database_migration_status_label">대기중</strong><span id="database_migration_elapsed" class="doctor-muted">0.0초</span></div>
+  <div class="progress mt-2" style="height:18px;"><div id="database_migration_progress_bar" class="progress-bar progress-bar-striped" style="width:0%">0%</div></div>
+  <div id="database_migration_status_message" class="doctor-muted mt-2">이관 설정을 저장한 뒤 시작하세요.</div>
+</div>
+<div class="doctor-section"><h4>작업 결과</h4><div id="database_migration_result" class="doctor-card doctor-muted">완료된 작업 결과가 없습니다.</div></div>
+<div class="doctor-section"><h4>작업 로그</h4><div id="database_migration_log" class="doctor-cleanup-log"><div class="doctor-muted">아직 실행한 작업이 없습니다.</div></div></div>
+
+<script>
+var databaseMigrationTimer = null;
+var databaseMigrationStatusRequestActive = false;
+var databaseMigrationStatusFailureCount = 0;
+var databaseMigrationStatusOutageNotified = false;
+var databaseMigrationSource = {{ arg.get('database_migration_source', 'kavita')|tojson }};
+var databaseMigrationPackageAction = {{ arg.get('bookoasis_package_action', 'import')|tojson }};
+function databaseMigrationStopPolling() {
+  if (databaseMigrationTimer) clearTimeout(databaseMigrationTimer);
+  databaseMigrationTimer = null;
+}
+function databaseMigrationScheduleRefresh(delay) {
+  databaseMigrationStopPolling();
+  databaseMigrationTimer = setTimeout(function() {
+    databaseMigrationTimer = null;
+    databaseMigrationRefresh();
+  }, Math.max(0, Number(delay || 0)));
+}
+function databaseMigrationStatusFailure(message) {
+  databaseMigrationStatusFailureCount += 1;
+  if (!databaseMigrationStatusOutageNotified) {
+    notify(message || '통DB 이관 상태 조회가 지연되고 있습니다. 작업은 백그라운드에서 계속될 수 있습니다.', 'warning');
+    databaseMigrationStatusOutageNotified = true;
+  }
+  var retryDelay = Math.min(10000, 1000 * Math.pow(2, Math.min(databaseMigrationStatusFailureCount - 1, 4)));
+  databaseMigrationScheduleRefresh(retryDelay);
+}
+function databaseMigrationStatusSuccess() {
+  var recovered = databaseMigrationStatusOutageNotified;
+  databaseMigrationStatusFailureCount = 0;
+  databaseMigrationStatusOutageNotified = false;
+  if (recovered) notify('통DB 이관 상태 조회 연결이 복구되었습니다.', 'success');
+}
+function databaseMigrationResult(data, root) {
+  var result = data.result;
+  if (result.source_type === 'bookoasis' && result.package_action === 'export') {
+    root.append($('<div>').append($('<strong>').text('BookOasis 패키지 내보내기 결과')));
+    root.append($('<div>').addClass('mt-1').text(
+      'DB 패키지 · ' + (result.database_package_path || '') + ' · ' +
+      bookoasisMateBytes(result.database_package_size || 0)
+    ));
+    root.append($('<div>').addClass('mt-1').text(
+      '표지 패키지 · ' + (result.cover_package_path || '') + ' · ' +
+      bookoasisMateBytes(result.cover_package_size || 0)
+    ));
+    root.append($('<div>').addClass('doctor-muted mt-1').text(
+      'DB ' + Number(result.database_count || 0).toLocaleString() + '개 · 표지 ' +
+      Number(result.cover_files_count || 0).toLocaleString() + '개 · 원본 표지 크기 ' +
+      bookoasisMateBytes(result.cover_source_size || 0)
+    ));
+    return;
+  }
+  root.append($('<div>').append($('<strong>').text(result.dry_run ? 'Dry Run 결과' : '실제 이관 결과')));
+  if (result.source_type === 'bookoasis') {
+    root.append($('<div>').addClass('mt-1').text(
+      'BookOasis 패키지 · DB 2개 · 보관함 ' + Number(result.libraries_count || 0).toLocaleString() + '개 · ' +
+      '도서 ' + Number(result.books_count || 0).toLocaleString() + '권 · 표지 파일 ' +
+      Number(result.cover_files_count || 0).toLocaleString() + '개'
+    ));
+    root.append($('<div>').addClass((result.path_collision_count || result.missing_cover_count) ? 'text-danger mt-1' : 'doctor-muted mt-1').text(
+      '도서 경로 충돌 ' + Number(result.path_collision_count || 0).toLocaleString() + '건 · ' +
+      'DB 참조 표지 누락 ' + Number(result.missing_cover_count || 0).toLocaleString() + '건 · ' +
+      '미참조 표지 ' + Number(result.unreferenced_cover_count || 0).toLocaleString() + '건'
+    ));
+    root.append($('<div>').addClass('doctor-muted mt-1').text(
+      '사용자 ' + Number(result.users_count || 0).toLocaleString() + '명 · 진행률 ' +
+      Number(result.progress_count || 0).toLocaleString() + '건 · 경로 변경 도서 ' +
+      Number(result.changed_books_count || 0).toLocaleString() + '권 · 표지명 변경 ' +
+      Number(result.changed_covers_count || 0).toLocaleString() + '개'
+    ));
+    (result.databases || []).forEach(function(item) {
+      root.append($('<div>').addClass('doctor-muted mt-1').text(
+        (item.db_type === 'adult' ? '성인 DB' : '일반 DB') + ' · 스키마 버전 ' +
+        Number(item.user_version || 0).toLocaleString() + ' · 도서 ' +
+        Number(item.books_count || 0).toLocaleString() + '권'
+      ));
+    });
+    var backups = result.database_backups || {};
+    if (backups.general) root.append($('<div>').addClass('mt-1').text('일반 DB 백업 · ' + backups.general));
+    if (backups.adult) root.append($('<div>').addClass('mt-1').text('성인 DB 백업 · ' + backups.adult));
+    if (result.cover_backup_path) root.append($('<div>').addClass('mt-1').text('기존 표지 백업 · ' + result.cover_backup_path));
+  } else {
+    root.append($('<div>').addClass('mt-1').text(
+      'Kavita 원본 ' + Number(result.source_books_count || 0).toLocaleString() + '권 · ' +
+      '신규 생성 ' + Number(result.books_created_count || result.new_books_count || 0).toLocaleString() + '권 · ' +
+      '기존 갱신 ' + Number(result.books_updated_count || result.matched_books_count || 0).toLocaleString() + '권 · ' +
+      '표지 ' + Number(result.covers_updated_count || result.cover_candidates_count || 0).toLocaleString() + '개 · ' +
+      '진행률 ' + Number(result.progress_updated_count || result.progress_count || 0).toLocaleString() + '건'
+    ));
+  }
+  if (result.backup_path) root.append($('<div>').addClass('mt-1').text('DB 백업 · ' + result.backup_path));
+}
+function databaseMigrationRenderStatus(data) {
+  data = data || {};
+  var running = data.is_working === 'run';
+  var completed = !running && !!data.result;
+  $('#database_migration_start_btn').prop('disabled', running);
+  $('#database_migration_stop_btn').prop('disabled', !running);
+  $('#database_migration_status_label').text(
+    running ? '실행중' :
+      (data.is_working === 'error' ? '실패' :
+        (data.is_working === 'stop' ? '사용자 중지' :
+          (completed ? '완료' : '대기중')))
+  );
+  $('#database_migration_elapsed').text(Number(data.elapsed_seconds || 0).toFixed(1) + '초');
+  var percent = Math.max(0, Math.min(100, Number(data.progress_percent || 0)));
+  $('#database_migration_progress_bar').css('width', percent + '%').text(percent + '%').toggleClass('progress-bar-animated', running);
+  var count = data.total > 0 ? ' (' + Number(data.current || 0).toLocaleString() + '/' + Number(data.total || 0).toLocaleString() + ')' : '';
+  $('#database_migration_status_message').text((data.message || '대기중') + count + (data.error ? ' · ' + data.error : ''));
+  var result = $('#database_migration_result').empty();
+  if (!data.result) result.addClass('doctor-muted').text('완료된 작업 결과가 없습니다.');
+  else { result.removeClass('doctor-muted'); databaseMigrationResult(data, result); }
+  var log = $('#database_migration_log').empty();
+  (data.logs || []).forEach(function(item) {
+    var row = $('<div>').addClass('doctor-cleanup-log-row');
+    row.append($('<span>').addClass('doctor-muted mr-2').text(item.time || ''));
+    row.append($('<span>').text(item.message || ''));
+    log.append(row);
+  });
+  if (!(data.logs || []).length) log.append($('<div>').addClass('doctor-muted').text('아직 실행한 작업이 없습니다.'));
+  if (running) databaseMigrationScheduleRefresh(1000);
+  else databaseMigrationStopPolling();
+}
+function databaseMigrationRefresh() {
+  if (databaseMigrationStatusRequestActive) return;
+  databaseMigrationStatusRequestActive = true;
+  bookoasisMateAjax('database_migration', 'status', {}, function(ret) {
+    databaseMigrationStatusRequestActive = false;
+    databaseMigrationStatusSuccess();
+    databaseMigrationRenderStatus(ret.data);
+  }, null, {
+    global:false,
+    silent:true,
+    error:function() {
+      databaseMigrationStatusRequestActive = false;
+      databaseMigrationStatusFailure();
+    }
+  });
+}
+function databaseMigrationRecoverStartRequest(originalMessage) {
+  setTimeout(function() {
+    bookoasisMateAjax('database_migration', 'status', {}, function(ret) {
+      var status = ret.data || {};
+      databaseMigrationStatusSuccess();
+      databaseMigrationRenderStatus(status);
+      if (status.is_working === 'run') {
+        notify('시작 요청 응답은 끊겼지만 통DB 이관 작업은 정상 실행 중입니다.', 'warning');
+      } else if (status.result) {
+        notify('시작 요청 응답은 끊겼지만 통DB 이관 완료 상태를 확인했습니다.', 'success');
+      } else if (status.is_working === 'error') {
+        notify(status.error || status.message || originalMessage, 'danger');
+      } else {
+        $('#database_migration_start_btn').prop('disabled', false);
+        notify(originalMessage, 'danger');
+      }
+    }, null, {
+      global:false,
+      silent:true,
+      error:function() {
+        databaseMigrationStatusFailure(
+          '시작 요청 응답과 상태 조회가 지연되고 있습니다. 작업은 백그라운드에서 계속될 수 있습니다.'
+        );
+      }
+    });
+  }, 800);
+}
+$('#database_migration_start_btn').click(function(e) {
+  e.preventDefault();
+  var exporting = databaseMigrationSource === 'bookoasis' && databaseMigrationPackageAction === 'export';
+  var message = exporting
+    ? '현재 일반·성인 DB와 전체 표지를 이관 작업 디렉터리로 내보내시겠습니까?\n\n정확한 시점의 패키지가 필요하면 스캐너와 메타데이터 변경 작업을 먼저 중지하세요.'
+    : '저장된 설정으로 통DB 이관을 시작하시겠습니까?\n\nBookOasis 패키지 실제 가져오기라면 BookOasis 컨테이너와 모든 스캐너를 완전히 중지한 상태여야 합니다.';
+  if (!confirm(message)) return;
+  $('#database_migration_start_btn').prop('disabled', true);
+  bookoasisMateAjax('database_migration', 'start', {bookoasis_confirm_stopped:'True'}, function(ret) {
+    if (ret.data && ret.data.status) databaseMigrationRenderStatus(ret.data.status);
+  }, null, {
+    global:false,
+    silent:true,
+    error:function(xhr, requestMessage) {
+      databaseMigrationRecoverStartRequest(requestMessage);
+    }
+  });
+});
+$('#database_migration_stop_btn').click(function(e) {
+  e.preventDefault();
+  bookoasisMateAjax('database_migration', 'stop', {}, function(ret) {
+    if (ret.data && ret.data.status) databaseMigrationRenderStatus(ret.data.status);
+  });
+});
+$(document).ready(databaseMigrationRefresh);
+</script>
+{% endblock %}

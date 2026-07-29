@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+{{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['connection_test_btn', '연결 테스트']]) }}
+<form id="setting">
+  <h4>BookOasis 연결</h4>
+  {{ macros.setting_input_text('bookoasis_url', 'BookOasis URL', value=arg['bookoasis_url'], desc=['상태 API와 표지 URL에 사용합니다.', '예: http://172.17.0.1:5930']) }}
+  {{ macros.setting_input_text('bookoasis_username', 'BookOasis 관리자 계정', value=arg['bookoasis_username'], desc=['개별 도서 재스캔과 메타데이터 검색·적용에 사용합니다.']) }}
+  {{ macros.setting_input_text('bookoasis_password', 'BookOasis 관리자 비밀번호', value=arg['bookoasis_password'], type='password', desc=['서버 측 관리자 세션 생성에만 사용하며 로그나 API 응답에 표시하지 않습니다.']) }}
+  {{ macros.setting_input_text('webhook_token', '스캔 웹훅 토큰', value=arg['webhook_token'], desc=['BookOasis WEBHOOK_TOKEN과 같은 값을 입력합니다.', '보관함 전체 재스캔 요청에만 사용합니다.']) }}
+  {{ macros.setting_input_int('api_timeout', 'API 연결 제한 시간(초)', value=arg['api_timeout'], desc=['1~30초']) }}
+  {{ macros.setting_input_text_and_buttons('bookoasis_root_path', 'BookOasis 기본 경로', [['select_bookoasis_root_path_btn', '경로 선택']], value=arg.get('bookoasis_root_path', ''), desc=['FlaskFarm 컨테이너에서 보이는 BookOasis 설치 루트입니다.', '선택하면 db, logs, covers 경로를 자동으로 채웁니다.']) }}
+  {{ macros.setting_input_text_and_buttons('general_db_path', '일반 DB 파일', [['general_db_size_btn', '크기 확인'], ['general_db_libraries_btn', '섹션 확인']], value=arg['general_db_path'], desc=['<기본 경로>/db/media_general.db로 자동 설정됩니다.']) }}
+  {{ macros.setting_checkbox('adult_enabled', '성인 DB 검사', value=arg['adult_enabled'], desc=['성인 DB를 함께 진단합니다.']) }}
+  <div id="adult_enabled_div" class="collapse">
+    {{ macros.setting_input_text_and_buttons('adult_db_path', '성인 DB 파일', [['adult_db_size_btn', '크기 확인'], ['adult_db_libraries_btn', '섹션 확인']], value=arg['adult_db_path'], desc=['<기본 경로>/db/media_adult.db로 자동 설정됩니다.']) }}
+  </div>
+  {{ macros.setting_input_text('bookoasis_log_dir', 'BookOasis 로그 디렉터리', value=arg['bookoasis_log_dir'], desc=['<기본 경로>/logs로 자동 설정됩니다.']) }}
+  {{ macros.m_hr() }}
+  <h4>표지 검사</h4>
+  {{ macros.setting_input_text('cover_root_path', '표지 디렉터리', value=arg['cover_root_path'], desc=['<기본 경로>/covers로 자동 설정됩니다.']) }}
+  {{ macros.setting_input_int('cover_min_width', '최소 표지 너비', value=arg['cover_min_width'], desc=['이 값보다 작으면 저해상도로 표시합니다.']) }}
+  {{ macros.setting_input_int('cover_min_height', '최소 표지 높이', value=arg['cover_min_height'], desc=['이 값보다 작으면 저해상도로 표시합니다.']) }}
+  {{ macros.setting_input_int('cover_min_file_size_kb', '최소 표지 파일 크기(KB)', value=arg['cover_min_file_size_kb'], desc=['이 값보다 작으면 파일 크기 작음으로 표시합니다.', '0이면 검사하지 않습니다.']) }}
+  {{ macros.setting_input_int('cover_min_aspect_percent', '최소 짧은 변 비율(%)', value=arg['cover_min_aspect_percent'], desc=['짧은 변 ÷ 긴 변이 이 값보다 작으면 비정상 비율로 표시합니다.', '0이면 검사하지 않습니다.']) }}
+  {{ macros.m_hr() }}
+  <h4>검사 정책</h4>
+  {{ macros.setting_checkbox('check_missing_isbn', 'ISBN 누락 검사', value=arg['check_missing_isbn'], desc=['만화·웹툰은 ISBN이 없는 경우가 많아 기본값은 꺼져 있습니다.']) }}
+  {{ macros.setting_input_int('stale_days', '장기 미스캔 기준일', value=arg['stale_days'], desc=['1~3650일']) }}
+  {{ macros.setting_input_int('page_size', '문제 도서 페이지 크기', value=arg['page_size'], desc=['10~200권']) }}
+  {{ macros.setting_input_int('cache_seconds', '상태 요약 캐시(초)', value=arg['cache_seconds'], desc=['0이면 캐시하지 않습니다.']) }}
+  {{ macros.setting_input_int('history_limit', '검사 이력 표시 수', value=arg['history_limit'], desc=['10~1000건']) }}
+  {{ macros.m_hr() }}
+  <h4>자동 검사</h4>
+  {{ macros.setting_checkbox('main_auto_start', '자동 검사 사용', value=arg['main_auto_start'], desc=['FlaskFarm 시작 시 스케줄러에 등록합니다.']) }}
+  {{ macros.setting_input_text('main_interval', '자동 검사 주기', value=arg['main_interval'], desc=['분 단위 숫자 또는 Cron 표현식을 입력합니다.']) }}
+</form>
+
+<script>
+$(function() {
+  use_collapse('adult_enabled');
+  $('#general_db_path,#adult_db_path,#bookoasis_log_dir,#cover_root_path').prop('readonly', true);
+  updateBookOasisDerivedPaths();
+});
+$('#adult_enabled').change(function() { use_collapse('adult_enabled'); });
+
+function currentSettings() {
+  updateBookOasisDerivedPaths();
+  return getFormdata('#setting');
+}
+
+function bookoasisRootJoin(root, relativePath) {
+  root = String(root || '').trim().replace(/\\/g, '/');
+  if (!root) return '';
+  root = root === '/' ? '/' : root.replace(/\/+$/, '');
+  return root === '/' ? '/' + relativePath : root + '/' + relativePath;
+}
+
+function updateBookOasisDerivedPaths() {
+  var root = $('#bookoasis_root_path').val();
+  if (!String(root || '').trim()) return;
+  $('#general_db_path').val(bookoasisRootJoin(root, 'db/media_general.db'));
+  $('#adult_db_path').val(bookoasisRootJoin(root, 'db/media_adult.db'));
+  $('#bookoasis_log_dir').val(bookoasisRootJoin(root, 'logs'));
+  $('#cover_root_path').val(bookoasisRootJoin(root, 'covers'));
+}
+
+$("body").on('click', '#select_bookoasis_root_path_btn', function(e) {
+  e.preventDefault();
+  var input = $('#bookoasis_root_path');
+  globalSelectLocalFolder('BookOasis 기본 폴더 선택', input.val().trim() || '/', function(result) {
+    if (typeof result !== 'string' || !result.trim()) return;
+    input.val(result.trim());
+    updateBookOasisDerivedPaths();
+  });
+});
+
+$('#bookoasis_root_path').on('input change', updateBookOasisDerivedPaths);
+
+function showDatabaseDetails(dbType, view) {
+  var data = currentSettings() + '&db_type=' + encodeURIComponent(dbType);
+  bookoasisMateAjax('setting', 'database_details', data, function(ret) {
+    if (!ret.data || !ret.data.success) return;
+    var db = ret.data;
+    var label = dbType === 'adult' ? '성인 DB' : '일반 DB';
+    if (view === 'size') {
+      var sizeHtml =
+        '<p><strong>' + bookoasisMateEscape(label) + '</strong></p>' +
+        '<p class="doctor-path">' + bookoasisMateEscape(db.path || '') + '</p>' +
+        '<p>' + bookoasisMateEscape(bookoasisMateBytes(db.file_size) + ' (' + Number(db.file_size || 0).toLocaleString() + ' bytes)') + '</p>';
+      showModal(sizeHtml, 'DB 파일 크기', false);
+      return;
+    }
+    var rows = (db.libraries || []).map(function(item) {
+      return '<tr><td>' + Number(item.id || 0).toLocaleString() + '</td><td>' +
+        bookoasisMateEscape(item.name || '') + '</td></tr>';
+    }).join('');
+    var body = rows
+      ? '<div class="doctor-table-wrap"><table class="table table-sm doctor-table doctor-db-section-table"><thead><tr><th>라이브러리 ID</th><th>명칭</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+      : '<p>등록된 보관함 섹션이 없습니다.</p>';
+    showModal(body, label + ' 보관함 섹션 ' + Number((db.libraries || []).length).toLocaleString() + '개', false);
+  });
+}
+
+$("body").on('click', '#general_db_size_btn,#adult_db_size_btn', function(e) {
+  e.preventDefault();
+  showDatabaseDetails(this.id.indexOf('adult_') === 0 ? 'adult' : 'general', 'size');
+});
+
+$("body").on('click', '#general_db_libraries_btn,#adult_db_libraries_btn', function(e) {
+  e.preventDefault();
+  showDatabaseDetails(this.id.indexOf('adult_') === 0 ? 'adult' : 'general', 'libraries');
+});
+
+$('#setting_save_btn').click(function(e) {
+  e.preventDefault();
+  $.ajax({url:'/' + PACKAGE_NAME + '/ajax/setting_save', type:'POST', data:currentSettings(), dataType:'json', success:function(ret) {
+    notify(ret ? '설정을 저장했습니다.' : '설정 저장에 실패했습니다.', ret ? 'success' : 'warning');
+  }});
+});
+
+$('#connection_test_btn').click(function(e) {
+  e.preventDefault();
+  bookoasisMateAjax('setting', 'connection_test', currentSettings(), function(ret) {
+    if (!ret.data) return;
+    var lines = [];
+    (ret.data.databases || []).forEach(function(db) { lines.push(bookoasisMateEscape(db.label + ' DB: ' + (db.connected ? '연결 성공' : db.error))); });
+    lines.push(bookoasisMateEscape('상태 API: ' + (ret.data.api.success ? '연결 성공' : ret.data.api.message)));
+    lines.push(bookoasisMateEscape('관리자 API: ' + (ret.data.admin_api.success ? '로그인 성공' : ret.data.admin_api.message)));
+    lines.push(bookoasisMateEscape('로그 디렉터리: ' + (!ret.data.log_root.configured ? '미설정' : (ret.data.log_root.readable ? '읽기 가능 · ' + ret.data.log_root.files.length + '개 파일' : ret.data.log_root.error))));
+    lines.push(bookoasisMateEscape('표지 디렉터리: ' + (!ret.data.cover_root.configured ? '미설정' : (ret.data.cover_root.readable ? '읽기 가능' : '찾을 수 없음'))));
+    showModal(lines.join('<br>'), 'BookOasis 연결 테스트', false);
+  });
+});
+</script>
+{% endblock %}

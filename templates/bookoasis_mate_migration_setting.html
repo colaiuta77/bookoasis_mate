@@ -1,0 +1,278 @@
+{# 카테고리 내보내기와 신규·병합 가져오기 작업 설정을 제공합니다. #}
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+{{ macros.m_button_group([['migration_save_btn', '설정 저장']]) }}
+<form id="migration_setting">
+  {{ macros.setting_input_text_and_buttons('migration_work_dir', '이관 작업 디렉터리', [['select_migration_work_dir_btn', '경로 선택']], value=arg['migration_work_dir'], desc=['FlaskFarm 컨테이너에서 보이는 경로를 입력합니다.', '내보낸 .oasis.zip, 가져올 패키지와 DB 백업을 이 디렉터리에서 관리합니다.']) }}
+  <input type="hidden" id="migration_operation" name="migration_operation" value="{{ arg['migration_operation'] }}">
+  <input type="hidden" id="migration_export_library_ids" name="migration_export_library_ids" value="{{ arg['migration_export_library_ids'] }}">
+
+  <div class="doctor-section">
+    <h4>작업 유형</h4>
+    <div class="btn-group btn-group-sm" role="group">
+      <button type="button" id="migration_mode_export" class="btn btn-outline-primary">내보내기</button>
+      <button type="button" id="migration_mode_import" class="btn btn-outline-primary">가져오기</button>
+    </div>
+  </div>
+
+  <div id="migration_export_panel" class="doctor-section doctor-card">
+    <h4>내보내기 설정</h4>
+    <p class="doctor-muted">선택한 카테고리의 도서 메타데이터, 뷰어 offset과 표지를 공식 1.2 패키지로 저장합니다.</p>
+    <div class="form-group row">
+      <label class="col-sm-3 col-form-label">대상 DB</label>
+      <div class="col-sm-9">
+        <select id="migration_export_db_type" name="migration_export_db_type" class="form-control form-control-sm">
+          <option value="general" {% if arg['migration_export_db_type'] == 'general' %}selected{% endif %}>일반 DB</option>
+          {% if arg.get('adult_enabled') == 'True' %}
+          <option value="adult" {% if arg['migration_export_db_type'] == 'adult' %}selected{% endif %}>성인 DB</option>
+          {% endif %}
+        </select>
+      </div>
+    </div>
+    <div class="form-group row">
+      <label class="col-sm-3 col-form-label">카테고리</label>
+      <div class="col-sm-9">
+        <select id="migration_export_library_select" class="form-control form-control-sm" multiple size="10"></select>
+        <small class="form-text text-muted">Ctrl 또는 Shift를 사용해 여러 카테고리를 선택할 수 있습니다.</small>
+      </div>
+    </div>
+  </div>
+
+  <div id="migration_import_panel" class="doctor-section doctor-card">
+    <h4>가져오기 설정</h4>
+    <p class="doctor-muted">패키지를 신규 카테고리로 만들거나 기존 카테고리에 병합합니다.</p>
+    <input type="hidden" id="migration_import_mode" name="migration_import_mode" value="{{ arg['migration_import_mode'] }}">
+    <input type="hidden" id="migration_merge_library_id" name="migration_merge_library_id" value="{{ arg['migration_merge_library_id'] }}">
+    <div class="form-group row">
+      <label class="col-sm-3 col-form-label">가져오기 방식</label>
+      <div class="col-sm-9">
+        <div class="btn-group btn-group-sm" role="group">
+          <button type="button" id="migration_import_mode_new" class="btn btn-outline-primary">신규 카테고리</button>
+          <button type="button" id="migration_import_mode_merge" class="btn btn-outline-primary">기존 카테고리 병합</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-group row">
+      <label class="col-sm-3 col-form-label">패키지</label>
+      <div class="col-sm-9">
+        <div class="input-group input-group-sm">
+          <select id="migration_import_package_select" class="form-control"></select>
+          <div class="input-group-append">
+            <button type="button" id="migration_package_refresh_btn" class="btn btn-outline-secondary">새로고침</button>
+            <button type="button" id="migration_package_inspect_btn" class="btn btn-outline-info">패키지 검사</button>
+          </div>
+        </div>
+        <input type="hidden" id="migration_import_package" name="migration_import_package" value="{{ arg['migration_import_package'] }}">
+      </div>
+    </div>
+    <div class="form-group row">
+      <label class="col-sm-3 col-form-label">대상 DB</label>
+      <div class="col-sm-9">
+        <select id="migration_import_db_type" name="migration_import_db_type" class="form-control form-control-sm">
+          <option value="auto" {% if arg['migration_import_db_type'] == 'auto' %}selected{% endif %}>패키지 DB 유형 사용</option>
+          <option value="general" {% if arg['migration_import_db_type'] == 'general' %}selected{% endif %}>일반 DB</option>
+          {% if arg.get('adult_enabled') == 'True' %}
+          <option value="adult" {% if arg['migration_import_db_type'] == 'adult' %}selected{% endif %}>성인 DB</option>
+          {% endif %}
+        </select>
+      </div>
+    </div>
+    {{ macros.setting_input_text('migration_import_name', '신규 카테고리 이름', value=arg['migration_import_name'], desc=['비워두면 패키지의 원본 카테고리명을 사용합니다.', '같은 이름이 있으면 Imported 시각을 붙여 구분합니다.']) }}
+    <div id="migration_merge_library_group" class="form-group row">
+      <label class="col-sm-3 col-form-label">병합 대상 카테고리</label>
+      <div class="col-sm-9">
+        <select id="migration_merge_library_select" class="form-control form-control-sm"></select>
+        <small class="form-text text-muted">선택한 DB의 기존 카테고리에 도서와 물리 경로를 추가합니다.</small>
+      </div>
+    </div>
+    <div class="form-group row">
+      <label class="col-sm-3 col-form-label">대상 물리 경로</label>
+      <div class="col-sm-9">
+        <textarea id="migration_import_target_paths" name="migration_import_target_paths" class="form-control form-control-sm" rows="5" placeholder="/volume1/mnt/GDRIVE/READING/만화/완결A">{{ arg['migration_import_target_paths'] }}</textarea>
+        <button type="button" id="add_migration_import_target_path_btn" class="btn btn-sm btn-outline-secondary mt-2">대상 경로 추가</button>
+        <small class="form-text text-muted">개수 제한 없이 한 줄에 하나씩 입력합니다. 원본 경로 순서대로 대응하며, 경로가 부족하면 남은 도서는 첫 번째 대상 경로를 사용합니다.</small>
+      </div>
+    </div>
+    {{ macros.setting_checkbox('migration_backup_before_import', '가져오기 전 DB 백업', value=arg['migration_backup_before_import'], desc=['SQLite backup API로 작업 디렉터리의 backups 폴더에 대상 DB를 백업합니다.', '안전을 위해 기본값은 On입니다.']) }}
+    <div id="migration_package_info" class="doctor-card doctor-muted">패키지 검사를 실행하면 원본 경로와 포함 항목을 표시합니다.</div>
+  </div>
+</form>
+
+<script>
+var migrationSavedLibraries = ($('#migration_export_library_ids').val() || '').split(',').filter(Boolean);
+
+function migrationSetMode(mode) {
+  mode = mode === 'import' ? 'import' : 'export';
+  $('#migration_operation').val(mode);
+  $('#migration_export_panel').toggle(mode === 'export');
+  $('#migration_import_panel').toggle(mode === 'import');
+  $('#migration_mode_export').toggleClass('btn-primary', mode === 'export').toggleClass('btn-outline-primary', mode !== 'export');
+  $('#migration_mode_import').toggleClass('btn-primary', mode === 'import').toggleClass('btn-outline-primary', mode !== 'import');
+}
+
+function migrationSetImportMode(mode) {
+  mode = mode === 'merge' ? 'merge' : 'new';
+  $('#migration_import_mode').val(mode);
+  $('#migration_import_name').closest('.form-group').toggle(mode === 'new');
+  $('#migration_merge_library_group').toggle(mode === 'merge');
+  $('#migration_import_mode_new').toggleClass('btn-primary', mode === 'new').toggleClass('btn-outline-primary', mode !== 'new');
+  $('#migration_import_mode_merge').toggleClass('btn-primary', mode === 'merge').toggleClass('btn-outline-primary', mode !== 'merge');
+  if (mode === 'merge') {
+    if ($('#migration_import_db_type').val() === 'auto') {
+      $('#migration_import_db_type').val('general');
+    }
+    migrationLoadMergeLibraries();
+  }
+}
+
+function migrationSyncValues() {
+  $('#migration_export_library_ids').val(($('#migration_export_library_select').val() || []).join(','));
+  $('#migration_import_package').val($('#migration_import_package_select').val() || '');
+  $('#migration_merge_library_id').val($('#migration_merge_library_select').val() || '');
+}
+
+function migrationSelectFolder(title, initialPath, callback) {
+  globalSelectLocalFolder(title, initialPath || '/', function(result) {
+    if (typeof result === 'string' && result.trim()) callback(result.trim());
+  });
+}
+
+function migrationTargetPaths() {
+  return ($('#migration_import_target_paths').val() || '').split(/\r?\n/).map(function(path) {
+    return path.trim();
+  }).filter(Boolean);
+}
+
+function migrationAppendTargetPath(path) {
+  var paths = migrationTargetPaths();
+  if (paths.indexOf(path) < 0) paths.push(path);
+  $('#migration_import_target_paths').val(paths.join('\n'));
+}
+
+function migrationLoadLibraries() {
+  var select = $('#migration_export_library_select');
+  select.prop('disabled', true).empty().append($('<option>').text('불러오는 중...'));
+  bookoasisMateAjax('migration', 'libraries', {db_type:$('#migration_export_db_type').val()}, function(ret) {
+    select.empty();
+    (ret.data || []).forEach(function(item) {
+      var value = String(item.id);
+      select.append($('<option>').val(value).text(item.name + ' (' + value + ')').prop('selected', migrationSavedLibraries.indexOf(value) >= 0));
+    });
+    select.prop('disabled', false);
+  });
+}
+
+function migrationLoadMergeLibraries() {
+  if ($('#migration_import_mode').val() !== 'merge') return;
+  var dbType = $('#migration_import_db_type').val();
+  if (dbType === 'auto') return;
+  var select = $('#migration_merge_library_select');
+  var saved = $('#migration_merge_library_id').val();
+  select.prop('disabled', true).empty().append($('<option>').text('불러오는 중...'));
+  bookoasisMateAjax('migration', 'libraries', {db_type:dbType}, function(ret) {
+    select.empty().append($('<option>').val('').text('병합할 카테고리를 선택하세요'));
+    (ret.data || []).forEach(function(item) {
+      var value = String(item.id);
+      select.append($('<option>').val(value).text(item.name + ' (' + value + ')'));
+    });
+    if (saved) select.val(saved);
+    select.prop('disabled', false);
+  });
+}
+
+function migrationLoadPackages() {
+  var select = $('#migration_import_package_select');
+  var saved = $('#migration_import_package').val();
+  select.prop('disabled', true).empty().append($('<option>').text('불러오는 중...'));
+  bookoasisMateAjax('migration', 'packages', {work_dir:$('#migration_work_dir').val()}, function(ret) {
+    select.empty().append($('<option>').val('').text('패키지를 선택하세요'));
+    (ret.data || []).forEach(function(item) {
+      select.append($('<option>').val(item.path).text(item.name + ' · ' + bookoasisMateBytes(item.size)));
+    });
+    if (saved) select.val(saved);
+    select.prop('disabled', false);
+  });
+}
+
+function migrationRenderPackageInfo(data) {
+  var rootLines = (data.physical_paths || []).map(function(path, index) {
+    return '<li><code>' + bookoasisMateEscape(path) + '</code></li>';
+  }).join('');
+  $('#migration_package_info').html(
+    '<strong>' + bookoasisMateEscape(data.library_name || '') + '</strong><br>' +
+    '패키지 버전 ' + bookoasisMateEscape(data.export_version) +
+    ' · ' + bookoasisMateEscape(data.db_type) +
+    ' · 도서 ' + Number(data.books_count || 0).toLocaleString() + '권' +
+    ' · 표지 ' + Number(data.covers_count || 0).toLocaleString() + '개' +
+    ' · offset ' + Number(data.offsets_count || 0).toLocaleString() + '건' +
+    '<div class="mt-2"><strong>원본 DB 물리 경로</strong></div>' +
+    (rootLines ? '<ul class="mb-0 mt-1">' + rootLines + '</ul>' : '<div class="doctor-muted mt-1">기록된 원본 경로가 없습니다.</div>')
+  );
+}
+
+$('#migration_mode_export').click(function() { migrationSetMode('export'); });
+$('#migration_mode_import').click(function() { migrationSetMode('import'); });
+$('#migration_import_mode_new').click(function() { migrationSetImportMode('new'); });
+$('#migration_import_mode_merge').click(function() { migrationSetImportMode('merge'); });
+$('#migration_export_db_type').change(function() {
+  migrationSavedLibraries = [];
+  migrationLoadLibraries();
+});
+$('#migration_import_db_type').change(function() {
+  $('#migration_merge_library_id').val('');
+  migrationLoadMergeLibraries();
+});
+$('#migration_merge_library_select').change(migrationSyncValues);
+$('#migration_package_refresh_btn').click(migrationLoadPackages);
+$('#migration_import_package_select').change(migrationSyncValues);
+$("body").on('click', '#select_migration_work_dir_btn', function(e) {
+  e.preventDefault();
+  migrationSelectFolder('카테고리 이관 작업 폴더 선택', $('#migration_work_dir').val().trim(), function(path) {
+    $('#migration_work_dir').val(path);
+    migrationLoadPackages();
+  });
+});
+$("body").on('click', '#add_migration_import_target_path_btn', function(e) {
+  e.preventDefault();
+  var paths = migrationTargetPaths();
+  var initialPath = paths.length ? paths[paths.length - 1] : $('#migration_work_dir').val().trim();
+  migrationSelectFolder('가져오기 대상 물리 폴더 선택', initialPath, migrationAppendTargetPath);
+});
+$('#migration_package_inspect_btn').click(function() {
+  migrationSyncValues();
+  if (!$('#migration_import_package').val()) {
+    notify('검사할 패키지를 선택해 주세요.', 'warning');
+    return;
+  }
+  bookoasisMateAjax('migration', 'inspect', {
+    work_dir:$('#migration_work_dir').val(),
+    package_path:$('#migration_import_package').val()
+  }, function(ret) {
+    if (ret.data) migrationRenderPackageInfo(ret.data);
+  });
+});
+$('#migration_save_btn').click(function(e) {
+  e.preventDefault();
+  migrationSyncValues();
+  $.ajax({
+    url:'/' + PACKAGE_NAME + '/ajax/setting_save',
+    type:'POST',
+    data:getFormdata('#migration_setting'),
+    dataType:'json',
+    success:function(ret) {
+      notify(ret ? '카테고리 이관 설정을 저장했습니다.' : '설정 저장에 실패했습니다.', ret ? 'success' : 'warning');
+    }
+  });
+});
+
+$(document).ready(function() {
+  migrationSetMode($('#migration_operation').val());
+  migrationSetImportMode($('#migration_import_mode').val());
+  migrationLoadLibraries();
+  migrationLoadPackages();
+});
+</script>
+{% endblock %}

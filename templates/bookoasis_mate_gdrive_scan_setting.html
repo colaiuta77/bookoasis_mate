@@ -1,0 +1,66 @@
+{# gd-poller 변경 감지와 rclone VFS·BookOasis 스캔 연동값을 설정합니다. #}
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+{{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['gdrive_scan_wake_btn', '작업자 깨우기']]) }}
+<form id="setting">
+  <div class="doctor-section doctor-card">
+    <h3>Google Drive 변경 감지 연동</h3>
+    <p class="doctor-muted">gd-poller 이벤트를 먼저 FlaskFarm DB에 저장하고 버퍼 시간이 지난 뒤 rclone VFS 갱신과 BookOasis 보관함 증분 스캔을 실행합니다.</p>
+  </div>
+
+  {{ macros.setting_checkbox('gdrive_scan_enabled', '연동 사용', value=arg['gdrive_scan_enabled'], desc=['꺼져 있으면 외부 이벤트 API가 503으로 응답합니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_buffer_seconds', '이벤트 버퍼 시간(초)', value=arg['gdrive_scan_buffer_seconds'], desc=['기본 60초이며 같은 시간 구간의 동일 보관함 스캔 요청을 한 번으로 합칩니다.', '0이면 즉시 처리합니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_worker_interval', '작업자 확인 주기(초)', value=arg['gdrive_scan_worker_interval'], desc=['대기 이벤트를 확인하는 주기입니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_max_attempts', '최대 처리 횟수', value=arg['gdrive_scan_max_attempts'], desc=['실패 시 지수형 대기 후 재시도하며 마지막 실패는 변경 이벤트 메뉴에서 다시 실행할 수 있습니다.']) }}
+  {{ macros.setting_input_text('gdrive_scan_extensions', '대상 파일 확장자', value=arg['gdrive_scan_extensions'], desc=['쉼표로 구분합니다.', 'BookOasis 도서와 메타데이터 보조 파일 확장자를 기본값으로 제공합니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_rc_timeout', 'rclone RC 제한 시간(초)', value=arg['gdrive_scan_rc_timeout'], desc=['1~300초']) }}
+  {{ macros.setting_input_int('gdrive_scan_history_limit', '목록 페이지 크기 상한', value=arg['gdrive_scan_history_limit'], desc=['화면에서 한 페이지에 요청할 수 있는 최대 이벤트 수입니다. 10~1000건']) }}
+  {{ macros.setting_input_int('gdrive_scan_retention_days', 'DB 삭제 기간(일)', value=arg.get('gdrive_scan_retention_days', '30'), desc=['완료와 최종 실패 이벤트만 지정 기간이 지나면 삭제합니다.', '대기·재시도·처리 중 이벤트는 삭제하지 않습니다.']) }}
+  {{ macros.setting_checkbox('gdrive_scan_auto_cleanup', 'DB 자동 삭제', value=arg.get('gdrive_scan_auto_cleanup', 'True'), desc=['On이면 작업자가 보존기간이 지난 종료 이벤트를 주기적으로 삭제합니다.']) }}
+
+  <div class="form-group row">
+    <label class="col-sm-3 control-label">gd-poller → BookOasis 경로 매핑</label>
+    <div class="col-sm-9">
+      <textarea class="form-control" rows="5" id="gdrive_scan_path_mappings" name="gdrive_scan_path_mappings">{{ arg.get('gdrive_scan_path_mappings', '') }}</textarea>
+      <small class="form-text text-muted">한 줄에 <code>/gd-poller/경로 =&gt; /BookOasis DB의/보관함/경로</code>를 입력합니다. 가장 긴 접두사가 우선하며 대상은 <code>libraries.physical_path</code>와 같은 논리 경로여야 합니다.</small>
+    </div>
+  </div>
+
+  <div class="form-group row">
+    <label class="col-sm-3 control-label">rclone VFS 규칙</label>
+    <div class="col-sm-9">
+      <textarea class="form-control" rows="5" id="gdrive_scan_vfs_rules" name="gdrive_scan_vfs_rules">{{ arg.get('gdrive_scan_vfs_rules', '') }}</textarea>
+      <small class="form-text text-muted">한 줄에 <code>로컬경로|리모트경로|RC주소#VFS이름|사용자|비밀번호</code>를 입력합니다. 인증이 없으면 마지막 두 필드를 생략합니다.</small>
+    </div>
+  </div>
+</form>
+
+<div class="doctor-section doctor-card">
+  <h4>이벤트 API</h4>
+  <p><code>/bookoasis_mate/api/gdrive_scan/event</code></p>
+  <p class="doctor-muted">FlaskFarm 전역 API 키가 필요합니다. BookOasis 스캔 웹훅 토큰은 상단 설정 메뉴의 값을 사용합니다.</p>
+</div>
+
+<script>
+$('#setting_save_btn').click(function(e) {
+  e.preventDefault();
+  $.ajax({
+    url:'/' + PACKAGE_NAME + '/ajax/setting_save',
+    type:'POST',
+    data:getFormdata('#setting'),
+    dataType:'json',
+    success:function(ret) {
+      notify(ret ? '설정을 저장했습니다.' : '설정 저장에 실패했습니다.', ret ? 'success' : 'warning');
+    }
+  });
+});
+
+$('#gdrive_scan_wake_btn').click(function(e) {
+  e.preventDefault();
+  bookoasisMateAjax('gdrive_scan', 'wake', {}, function() {});
+});
+</script>
+{% endblock %}

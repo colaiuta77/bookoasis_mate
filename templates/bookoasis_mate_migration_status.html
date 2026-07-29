@@ -1,0 +1,144 @@
+{# 카테고리 이관 작업의 시작, 중지, 진행률과 로그를 표시합니다. #}
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+{{ macros.m_button_group([['migration_start_btn', '시작'], ['migration_stop_btn', '중지']]) }}
+<div class="doctor-section doctor-card">
+  <div class="d-flex justify-content-between align-items-center">
+    <strong id="migration_status_label">대기중</strong>
+    <span id="migration_elapsed" class="doctor-muted">0.0초</span>
+  </div>
+  <div class="progress mt-2" style="height:18px;">
+    <div id="migration_progress_bar" class="progress-bar progress-bar-striped" role="progressbar" style="width:0%">0%</div>
+  </div>
+  <div id="migration_status_message" class="doctor-muted mt-2">복사 설정을 저장한 뒤 시작하세요.</div>
+</div>
+
+<div class="doctor-section">
+  <h4>작업 결과</h4>
+  <div id="migration_result" class="doctor-card doctor-muted">완료된 작업 결과가 없습니다.</div>
+</div>
+
+<div class="doctor-section">
+  <h4>작업 로그</h4>
+  <div id="migration_log" class="doctor-cleanup-log">
+    <div class="doctor-muted">아직 실행한 작업이 없습니다.</div>
+  </div>
+</div>
+
+<script>
+var migrationStatusTimer = null;
+
+function migrationStatusText(value) {
+  if (value === 'run') return '실행중';
+  if (value === 'stop') return '사용자 중지';
+  if (value === 'error') return '실패';
+  return '대기중';
+}
+
+function migrationRenderStatus(data) {
+  data = data || {};
+  var running = data.is_working === 'run';
+  $('#migration_start_btn').prop('disabled', running);
+  $('#migration_stop_btn').prop('disabled', !running);
+  var operation = data.operation === 'import' ? '가져오기' : (data.operation === 'export' ? '내보내기' : '');
+  $('#migration_status_label').text((operation ? operation + ' · ' : '') + migrationStatusText(data.is_working));
+  $('#migration_elapsed').text(Number(data.elapsed_seconds || 0).toFixed(1) + '초');
+  var percent = Math.max(0, Math.min(100, Number(data.progress_percent || 0)));
+  $('#migration_progress_bar').css('width', percent + '%').text(percent + '%').toggleClass('progress-bar-animated', running);
+  var count = data.total > 0 ? ' (' + Number(data.current || 0).toLocaleString() + '/' + Number(data.total).toLocaleString() + ')' : '';
+  $('#migration_status_message').text((data.message || '대기중') + count + (data.error ? ' · ' + data.error : ''));
+
+  var result = $('#migration_result').empty();
+  if (!data.result) {
+    result.addClass('doctor-muted').text('완료된 작업 결과가 없습니다.');
+  } else if (data.operation === 'export') {
+    result.removeClass('doctor-muted');
+    result.append($('<div>').append($('<strong>').text('내보낸 패키지 ' + Number(data.result.count || 0).toLocaleString() + '개')));
+    (data.result.files || []).forEach(function(item) {
+      result.append($('<div>').addClass('mt-1').text(
+        (item.library_name || '') + ' · ' + (item.path || '') +
+        ' · 도서 ' + Number(item.books_count || 0).toLocaleString() + '권' +
+        ' · 표지 ' + Number(item.covers_count || 0).toLocaleString() + '개'
+      ));
+    });
+  } else {
+    result.removeClass('doctor-muted');
+    var isMerge = data.result.mode === 'merge';
+    result.append($('<div>').append($('<strong>').text(
+      (isMerge ? '병합 카테고리 ' : '신규 카테고리 ') + (data.result.library_name || '') +
+      ' (ID ' + Number(data.result.library_id || 0) + ')'
+    )));
+    result.append($('<div>').addClass('mt-1').text(
+      '원본 도서 ' + Number(data.result.source_books_count || data.result.books_count || 0).toLocaleString() + '권' +
+      ' · 가져옴 ' + Number(data.result.books_count || 0).toLocaleString() + '권' +
+      ' · 중복 건너뜀 ' + Number(data.result.skipped_duplicate_books_count || 0).toLocaleString() + '권' +
+      ' · 표지 ' + Number(data.result.covers_count || 0).toLocaleString() + '개' +
+      ' · offset ' + Number(data.result.offsets_count || 0).toLocaleString() + '건'
+    ));
+    result.append($('<div>').addClass('mt-1').text(
+      '대상 물리 경로 ' + Number((data.result.physical_paths || []).length).toLocaleString() + '개' +
+      ' · 새로 추가한 경로 ' + Number((data.result.added_physical_paths || []).length).toLocaleString() + '개' +
+      ' · 첫 경로 폴백 ' + Number(data.result.fallback_books_count || 0).toLocaleString() + '권'
+    ));
+    if (data.result.backup_path) {
+      result.append($('<div>').addClass('mt-1').text('DB 백업 · ' + data.result.backup_path));
+    }
+  }
+
+  var log = $('#migration_log').empty();
+  if (!(data.logs || []).length) {
+    log.append($('<div>').addClass('doctor-muted').text('아직 실행한 작업이 없습니다.'));
+  } else {
+    (data.logs || []).forEach(function(item) {
+      var row = $('<div>').addClass('doctor-cleanup-log-row');
+      row.append($('<span>').addClass('doctor-muted mr-2').text(item.time || ''));
+      row.append($('<span>').text(item.message || ''));
+      log.append(row);
+    });
+  }
+  var element = document.getElementById('migration_log');
+  if (element) element.scrollTop = element.scrollHeight;
+  if (running) migrationStartPolling();
+  else migrationStopPolling();
+}
+
+function migrationStartPolling() {
+  if (migrationStatusTimer) return;
+  migrationStatusTimer = setInterval(migrationRefreshStatus, 1000);
+}
+
+function migrationStopPolling() {
+  if (!migrationStatusTimer) return;
+  clearInterval(migrationStatusTimer);
+  migrationStatusTimer = null;
+}
+
+function migrationRefreshStatus() {
+  bookoasisMateAjax('migration', 'status', {}, function(ret) {
+    migrationRenderStatus(ret.data);
+  }, null, {global:false});
+}
+
+$('#migration_start_btn').click(function(e) {
+  e.preventDefault();
+  if (!confirm('저장된 복사 설정으로 카테고리 이관을 시작하시겠습니까?')) return;
+  bookoasisMateAjax('migration', 'start', {}, function(ret) {
+    if (ret.data && ret.data.status) migrationRenderStatus(ret.data.status);
+    migrationRefreshStatus();
+  });
+});
+$('#migration_stop_btn').click(function(e) {
+  e.preventDefault();
+  bookoasisMateAjax('migration', 'stop', {}, function(ret) {
+    if (ret.data && ret.data.status) migrationRenderStatus(ret.data.status);
+  });
+});
+
+$(document).ready(function() {
+  migrationRefreshStatus();
+});
+</script>
+{% endblock %}

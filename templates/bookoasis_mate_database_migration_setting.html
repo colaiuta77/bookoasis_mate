@@ -1,0 +1,523 @@
+{# Kavita 또는 BookOasis 원본을 선택해 통DB 이관을 설정하고 미리봅니다. #}
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+{{ macros.m_button_group([['database_migration_save_btn', '설정 저장']]) }}
+<form id="database_migration_setting">
+  <input type="hidden" id="database_migration_source" name="database_migration_source" value="{{ arg.get('database_migration_source', 'kavita') }}">
+
+  <div class="doctor-section">
+    <h4>이관 원본</h4>
+    <div class="btn-group btn-group-sm" role="group">
+      <button type="button" id="database_migration_mode_kavita" class="btn btn-outline-primary">Kavita 이관</button>
+      <button type="button" id="database_migration_mode_bookoasis" class="btn btn-outline-primary">BookOasis 패키지</button>
+    </div>
+  </div>
+
+  <div class="doctor-section doctor-card">
+    <h4>공통 설정</h4>
+    <p class="doctor-muted">두 이관 방식의 백업, 패키지와 임시 작업 파일을 같은 작업 디렉터리에서 관리합니다.</p>
+    {{ macros.setting_input_text_and_buttons('migration_work_dir', '이관 작업 디렉터리', [['select_database_migration_work_dir_btn', '경로 선택']], value=arg.get('migration_work_dir', ''), desc=['DB 백업과 임시 작업 파일을 저장합니다.']) }}
+  </div>
+
+  <div id="kavita_source_fields" class="doctor-section doctor-card">
+    <h4>Kavita → BookOasis 설정</h4>
+    <p class="doctor-muted">Kavita의 도서 메타데이터와 선택한 사용자 진행률을 BookOasis로 이관합니다.</p>
+    <div id="kavita_target_database_field" class="form-group row">
+      <label class="col-sm-3 col-form-label">BookOasis 대상 DB</label>
+      <div class="col-sm-9">
+        <select id="database_migration_target_db_type" name="kavita_target_db_type" class="form-control form-control-sm">
+          {% set target_db = arg.get('kavita_target_db_type', 'general') %}
+          <option value="general" {% if target_db == 'general' %}selected{% endif %}>일반 DB</option>
+          {% if arg.get('adult_enabled') == 'True' %}
+          <option value="adult" {% if target_db == 'adult' %}selected{% endif %}>성인 DB</option>
+          {% endif %}
+        </select>
+        <small class="form-text text-muted">일반·성인 DB는 안전한 백업과 롤백을 위해 한 번에 하나씩 실행합니다.</small>
+      </div>
+    </div>
+    {{ macros.setting_input_text_and_buttons('kavita_db_path', 'Kavita DB 파일', [['select_kavita_db_path_btn', '파일 선택']], value=arg.get('kavita_db_path', ''), desc=['FlaskFarm 컨테이너에서 보이는 kavita.db 파일을 선택합니다.']) }}
+    {{ macros.setting_input_text_and_buttons('kavita_cover_path', 'Kavita 표지 디렉터리', [['select_kavita_cover_path_btn', '경로 선택']], value=arg.get('kavita_cover_path', ''), desc=['Kavita config 아래 covers 디렉터리입니다.', '표지를 이관하지 않으면 비워둘 수 있습니다.']) }}
+    <input type="hidden" id="kavita_selected_libraries" name="kavita_selected_libraries" value="{{ arg.get('kavita_selected_libraries', '') }}">
+    <div class="form-group row">
+      <label class="col-sm-3 col-form-label">경로 프리픽스 매핑</label>
+      <div class="col-sm-9">
+        <textarea id="kavita_path_mappings" name="kavita_path_mappings" class="form-control form-control-sm" rows="4" placeholder="/kavita/books => /volume1/books">{{ arg.get('kavita_path_mappings', '') }}</textarea>
+        <small class="form-text text-muted">Kavita DB 검사 시 원본 도서 상대 경로와 BookOasis 도서 경로가 일치하면 빈 입력란에 안전한 프리픽스 제안값을 자동으로 채웁니다.</small>
+        <div class="input-group input-group-sm mt-2">
+          <input type="text" id="kavita_mapping_source" class="form-control" placeholder="Kavita 원본 폴더">
+          <div class="input-group-append"><button type="button" id="select_kavita_mapping_source_btn" class="btn btn-outline-secondary">원본 선택</button></div>
+          <input type="text" id="kavita_mapping_target" class="form-control" placeholder="BookOasis 대상 폴더">
+          <div class="input-group-append">
+            <button type="button" id="select_kavita_mapping_target_btn" class="btn btn-outline-secondary">대상 선택</button>
+            <button type="button" id="add_kavita_path_mapping_btn" class="btn btn-outline-primary">매핑 추가</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="form-group row">
+      <label class="col-sm-3 col-form-label">사용자 매핑</label>
+      <div class="col-sm-9">
+        <div id="kavita_user_mapping_selectors" class="doctor-card doctor-muted mb-2">Kavita DB 검사를 실행하면 사용자별 BookOasis 계정을 선택할 수 있습니다.</div>
+        <textarea id="kavita_user_mappings" name="kavita_user_mappings" class="form-control form-control-sm" rows="4" placeholder="kavita사용자 => bookoasis사용자">{{ arg.get('kavita_user_mappings', '') }}</textarea>
+        <small class="form-text text-muted">선택 결과는 기존 `Kavita 사용자 => BookOasis 사용자` 형식으로 저장됩니다. 같은 사용자명만 자동 선택하며 다른 이름은 직접 선택해야 합니다.</small>
+      </div>
+    </div>
+    {{ macros.setting_checkbox('kavita_import_covers', 'Kavita 표지 이관', value=arg.get('kavita_import_covers', 'True'), desc=['유효한 표지만 WebP로 변환합니다.']) }}
+    {{ macros.setting_checkbox('kavita_import_progress', '독서 진행률 이관', value=arg.get('kavita_import_progress', 'False'), desc=['명시적으로 매핑한 사용자만 반영합니다.']) }}
+    {{ macros.setting_checkbox('kavita_lock_metadata', '이관 메타데이터 잠금', value=arg.get('kavita_lock_metadata', 'True'), desc=['스캐너가 이관 메타데이터를 덮어쓰지 않도록 잠급니다.']) }}
+    {{ macros.setting_checkbox('kavita_backup_before_import', '실행 전 DB 백업', value=arg.get('kavita_backup_before_import', 'True'), desc=['실제 이관 전에 SQLite backup API로 백업합니다.']) }}
+    {{ macros.setting_checkbox('kavita_dry_run', 'Kavita Dry Run', value=arg.get('kavita_dry_run', 'True'), desc=['DB와 표지를 변경하지 않고 신규 생성·기존 갱신 예정 수를 계산합니다.']) }}
+    <div class="text-right"><button type="button" id="database_migration_kavita_inspect_btn" class="btn btn-outline-info btn-sm database-migration-inspect-btn">DB 검사·자동 설정</button></div>
+  </div>
+
+  <div id="bookoasis_source_fields">
+    <input type="hidden" id="bookoasis_package_action" name="bookoasis_package_action" value="{{ arg.get('bookoasis_package_action', 'import') }}">
+    <div class="doctor-section">
+      <h4>BookOasis 패키지 작업 유형</h4>
+      <div class="btn-group btn-group-sm" role="group">
+        <button type="button" id="bookoasis_package_mode_export" class="btn btn-outline-primary">내보내기</button>
+        <button type="button" id="bookoasis_package_mode_import" class="btn btn-outline-primary">가져오기</button>
+      </div>
+    </div>
+    <div id="bookoasis_export_panel" class="doctor-section doctor-card">
+      <h4>내보내기 설정</h4>
+      <p class="doctor-muted">현재 일반·성인 DB와 전체 표지를 공유 가능한 두 개의 패키지로 저장합니다.</p>
+      <div class="form-group row mb-0">
+        <label class="col-sm-3 col-form-label">패키지 이름</label>
+        <div class="col-sm-9">
+          <input type="text" id="bookoasis_export_name" name="bookoasis_export_name" class="form-control form-control-sm" value="{{ arg.get('bookoasis_export_name', 'dist_books') }}" placeholder="dist_books">
+          <small class="form-text text-muted">이관 작업 디렉터리에 `db_이름_날짜.tar.gz`와 `covers_이름_날짜.tar.gz`를 생성합니다. 일반·성인 DB는 SQLite backup API로 복사합니다.</small>
+        </div>
+      </div>
+      <div class="alert alert-info mt-3 mb-0">DB와 표지의 시점을 정확히 맞추려면 스캐너와 메타데이터 변경 작업을 멈춘 상태에서 내보내세요.</div>
+    </div>
+    <div id="bookoasis_import_panel" class="doctor-section doctor-card">
+      <h4>가져오기 설정</h4>
+      <p class="doctor-muted">공유받은 DB와 표지 패키지를 검사하고 현재 BookOasis 설치에 교체 적용합니다.</p>
+      <div class="alert alert-warning">현재 일반·성인 DB와 전체 표지 디렉터리를 공유 패키지 세트로 교체합니다. 기존 DB와 병합하지 않으며 사용자·진행률도 공유 DB 내용으로 바뀝니다.</div>
+      <input type="hidden" id="bookoasis_db_package_path" name="bookoasis_db_package_path" value="{{ arg.get('bookoasis_db_package_path', '') }}">
+      <input type="hidden" id="bookoasis_cover_package_path" name="bookoasis_cover_package_path" value="{{ arg.get('bookoasis_cover_package_path', '') }}">
+      <div class="form-group row">
+        <label class="col-sm-3 col-form-label">공유 DB 패키지</label>
+        <div class="col-sm-9">
+          <div class="input-group input-group-sm">
+            <select id="bookoasis_db_package_select" class="form-control"></select>
+            <div class="input-group-append">
+              <button type="button" id="bookoasis_package_refresh_btn" class="btn btn-outline-secondary">새로고침</button>
+              <button type="button" id="database_migration_database_inspect_btn" class="btn btn-outline-info">DB 패키지 검사</button>
+            </div>
+          </div>
+          <small class="form-text text-muted">작업 디렉터리의 `db_*.tar.gz` 파일을 선택합니다. 패키지 검사는 DB 구조·무결성·원본 경로만 확인합니다.</small>
+        </div>
+      </div>
+      <div class="form-group row">
+        <label class="col-sm-3 col-form-label">공유 표지 패키지</label>
+        <div class="col-sm-9">
+          <select id="bookoasis_cover_package_select" class="form-control form-control-sm"></select>
+          <small class="form-text text-muted">작업 디렉터리의 `covers_*.tar.gz` 파일을 별도로 선택합니다. Dry Run 또는 실제 가져오기를 시작할 때 필요합니다.</small>
+        </div>
+      </div>
+      <div class="form-group row">
+        <label class="col-sm-3 col-form-label">미디어 경로 매핑</label>
+        <div class="col-sm-9">
+          <textarea id="bookoasis_package_path_mappings" name="bookoasis_package_path_mappings" class="form-control form-control-sm" rows="5" placeholder="/원본/미디어 => /현재/미디어">{{ arg.get('bookoasis_package_path_mappings', '') }}</textarea>
+          <small class="form-text text-muted">`/books => /mnt/gds2`처럼 `/GDRIVE` 상위 폴더만 한 줄로 매핑하면 `/GDRIVE/READING/...` 하위 경로는 그대로 유지됩니다.</small>
+          <div class="input-group input-group-sm mt-2">
+            <input type="text" id="bookoasis_package_mapping_source" class="form-control" placeholder="공유 DB의 GDRIVE 상위 폴더">
+            <div class="input-group-append"><button type="button" id="select_bookoasis_package_source_btn" class="btn btn-outline-secondary">원본 선택</button></div>
+            <input type="text" id="bookoasis_package_mapping_target" class="form-control" placeholder="현재 서버의 GDRIVE 상위 폴더">
+            <div class="input-group-append">
+              <button type="button" id="select_bookoasis_package_target_btn" class="btn btn-outline-secondary">대상 선택</button>
+              <button type="button" id="add_bookoasis_package_mapping_btn" class="btn btn-outline-primary">매핑 추가</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {{ macros.setting_checkbox('bookoasis_backup_before_import', '실행 전 DB 백업', value=arg.get('bookoasis_backup_before_import', 'True'), desc=['현재 일반·성인 DB를 SQLite backup API로 백업합니다.', '현재 표지 디렉터리는 같은 상위 경로에 별도 백업 디렉터리로 보존합니다.']) }}
+      {{ macros.setting_checkbox('bookoasis_package_dry_run', 'BookOasis 패키지 Dry Run', value=arg.get('bookoasis_package_dry_run', 'True'), desc=['임시 DB와 임시 표지에서 압축 해제·경로 변경·무결성 검사를 끝까지 실행하되 현재 설치에는 적용하지 않습니다.']) }}
+      <div class="alert alert-danger mt-3 mb-0">Dry Run을 끈 실제 가져오기는 상태 화면에서 매번 BookOasis 중지 여부를 확인해야 시작됩니다. 상태 API가 healthy로 응답하면 적용을 차단합니다.</div>
+    </div>
+  </div>
+</form>
+
+<div class="doctor-section">
+  <h4>미리보기</h4>
+  <div id="database_migration_preview" class="doctor-card doctor-muted">미리보기 검사를 실행해 주세요.</div>
+</div>
+
+<script>
+function databaseMigrationBool(id) { return $('#' + id).prop('checked') ? 'True' : 'False'; }
+function databaseMigrationValues() {
+  var targetDb = $('#database_migration_target_db_type').val();
+  return {
+    database_migration_source:$('#database_migration_source').val(),
+    kavita_target_db_type:targetDb,
+    migration_work_dir:$('#migration_work_dir').val(),
+    kavita_db_path:$('#kavita_db_path').val(),
+    kavita_cover_path:$('#kavita_cover_path').val(),
+    kavita_selected_libraries:$('#kavita_selected_libraries').val(),
+    kavita_path_mappings:$('#kavita_path_mappings').val(),
+    kavita_user_mappings:$('#kavita_user_mappings').val(),
+    kavita_import_covers:databaseMigrationBool('kavita_import_covers'),
+    kavita_import_progress:databaseMigrationBool('kavita_import_progress'),
+    kavita_lock_metadata:databaseMigrationBool('kavita_lock_metadata'),
+    kavita_backup_before_import:databaseMigrationBool('kavita_backup_before_import'),
+    kavita_dry_run:databaseMigrationBool('kavita_dry_run'),
+    bookoasis_db_package_path:$('#bookoasis_db_package_path').val(),
+    bookoasis_cover_package_path:$('#bookoasis_cover_package_path').val(),
+    bookoasis_package_action:$('#bookoasis_package_action').val(),
+    bookoasis_export_name:$('#bookoasis_export_name').val(),
+    bookoasis_package_path_mappings:$('#bookoasis_package_path_mappings').val(),
+    bookoasis_backup_before_import:databaseMigrationBool('bookoasis_backup_before_import'),
+    bookoasis_package_dry_run:databaseMigrationBool('bookoasis_package_dry_run')
+  };
+}
+function databaseMigrationSetBookOasisAction(action) {
+  action = action === 'export' ? 'export' : 'import';
+  $('#bookoasis_package_action').val(action);
+  $('#bookoasis_export_panel').toggle(action === 'export');
+  $('#bookoasis_import_panel').toggle(action === 'import');
+  $('#bookoasis_package_mode_export').toggleClass('btn-primary', action === 'export').toggleClass('btn-outline-primary', action !== 'export');
+  $('#bookoasis_package_mode_import').toggleClass('btn-primary', action === 'import').toggleClass('btn-outline-primary', action !== 'import');
+  $('#database_migration_preview').addClass('doctor-muted').text(
+    action === 'export'
+      ? '내보내기는 상태 화면에서 시작하면 결과 파일 경로를 표시합니다.'
+      : '미리보기 검사를 실행해 주세요.'
+  );
+  if (action === 'import' && $('#database_migration_source').val() === 'bookoasis') {
+    databaseMigrationLoadPackages();
+  }
+}
+function databaseMigrationToggleSource() {
+  var kavita = $('#database_migration_source').val() === 'kavita';
+  $('#kavita_source_fields').toggle(kavita);
+  $('#kavita_target_database_field').toggle(kavita);
+  $('#bookoasis_source_fields').toggle(!kavita);
+  $('#database_migration_mode_kavita').toggleClass('btn-primary', kavita).toggleClass('btn-outline-primary', !kavita);
+  $('#database_migration_mode_bookoasis').toggleClass('btn-primary', !kavita).toggleClass('btn-outline-primary', kavita);
+  if (kavita) {
+    $('#database_migration_preview').addClass('doctor-muted').text('미리보기 검사를 실행해 주세요.');
+  } else {
+    databaseMigrationSetBookOasisAction($('#bookoasis_package_action').val());
+  }
+}
+function databaseMigrationSelectPath(inputId, title, isFile, callback) {
+  var input = $('#' + inputId);
+  var chooser = isFile ? globalSelectLocalFile : globalSelectLocalFolder;
+  chooser(title, input.val().trim() || '/', function(result) {
+    if (typeof result === 'string' && result.trim()) {
+      input.val(result.trim());
+      if (callback) callback(result.trim());
+    }
+  });
+}
+function databaseMigrationSyncPackages() {
+  $('#bookoasis_db_package_path').val($('#bookoasis_db_package_select').val() || '');
+  $('#bookoasis_cover_package_path').val($('#bookoasis_cover_package_select').val() || '');
+}
+function databaseMigrationPopulatePackageSelect(select, items, savedPath, emptyText) {
+  var matched = false;
+  select.empty().append($('<option>').val('').text(emptyText));
+  (items || []).forEach(function(item) {
+    select.append(
+      $('<option>').val(item.path || '').text(
+        (item.name || item.path) + ' · ' + bookoasisMateBytes(item.size || 0)
+      )
+    );
+    if (item.path === savedPath) matched = true;
+  });
+  if (savedPath && !matched) {
+    select.append($('<option>').val(savedPath).text('기존 선택 경로 · ' + savedPath));
+    matched = true;
+  }
+  if (matched) select.val(savedPath);
+  else if ((items || []).length) select.val(items[0].path || '');
+}
+function databaseMigrationLoadPackages() {
+  var dbSelect = $('#bookoasis_db_package_select');
+  var coverSelect = $('#bookoasis_cover_package_select');
+  var savedDb = $('#bookoasis_db_package_path').val();
+  var savedCover = $('#bookoasis_cover_package_path').val();
+  if ($('#bookoasis_package_action').val() !== 'import') return;
+  if (!$('#migration_work_dir').val().trim()) {
+    dbSelect.add(coverSelect).prop('disabled', true).empty().append($('<option>').text('이관 작업 디렉터리를 먼저 선택하세요'));
+    return;
+  }
+  dbSelect.add(coverSelect).prop('disabled', true).empty().append($('<option>').text('불러오는 중...'));
+  bookoasisMateAjax('database_migration', 'packages', {
+    migration_work_dir:$('#migration_work_dir').val()
+  }, function(ret) {
+    var packages = ret.data || {};
+    databaseMigrationPopulatePackageSelect(dbSelect, packages.databases || [], savedDb, '공유 DB 패키지를 선택하세요');
+    databaseMigrationPopulatePackageSelect(coverSelect, packages.covers || [], savedCover, '공유 표지 패키지를 선택하세요');
+    dbSelect.add(coverSelect).prop('disabled', false);
+    databaseMigrationSyncPackages();
+  });
+}
+function databaseMigrationParseMappingValues(value) {
+  var mappings = {};
+  (value || '').split(/\r?\n/).forEach(function(line) {
+    var index = line.indexOf('=>');
+    if (index < 0) return;
+    var source = line.substring(0, index).trim();
+    var target = line.substring(index + 2).trim();
+    if (source && target) mappings[source] = target;
+  });
+  return mappings;
+}
+function databaseMigrationHasUsefulPathMappings(value) {
+  var mappings = databaseMigrationParseMappingValues(value);
+  return Object.keys(mappings).some(function(source) {
+    var normalize = function(path) {
+      return String(path || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    };
+    return normalize(source) !== normalize(mappings[source]);
+  });
+}
+function databaseMigrationAppendPaths(root, label, paths) {
+  var items = paths || [];
+  root.append($('<div>').addClass('doctor-muted mt-2').text(
+    label + ' · ' + items.length + '개'
+  ));
+  items.slice(0, 20).forEach(function(path) {
+    root.append($('<div>').addClass('doctor-muted ml-3').text(path));
+  });
+  if (items.length > 20) {
+    root.append($('<div>').addClass('doctor-muted ml-3').text(
+      '외 ' + (items.length - 20) + '개'
+    ));
+  }
+}
+function databaseMigrationSyncKavitaUsers() {
+  var lines = $('#kavita_user_mapping_selectors .database-kavita-user-select').map(function() {
+    var target = $(this).val();
+    return target ? $(this).data('source') + ' => ' + target : null;
+  }).get();
+  $('#kavita_user_mappings').val(lines.join('\n'));
+}
+function databaseMigrationRenderKavitaUsers(data) {
+  var editor = $('#kavita_user_mapping_selectors').empty().removeClass('doctor-muted');
+  var sourceUsers = data.source_users || [];
+  var targetUsers = data.target_users || [];
+  var saved = databaseMigrationParseMappingValues($('#kavita_user_mappings').val());
+  var suggested = databaseMigrationParseMappingValues(
+    (data.suggested_user_mappings || []).join('\n')
+  );
+  if (!sourceUsers.length) {
+    editor.addClass('doctor-muted').text('Kavita 사용자 정보가 없습니다.');
+    $('#kavita_user_mappings').val('');
+    return;
+  }
+  sourceUsers.forEach(function(sourceUser) {
+    var row = $('<div>').addClass('form-row align-items-center mb-2');
+    row.append($('<div>').addClass('col-sm-5').append($('<strong>').text(sourceUser)));
+    var select = $('<select>')
+      .addClass('form-control form-control-sm database-kavita-user-select')
+      .attr('aria-label', sourceUser + '의 BookOasis 사용자')
+      .data('source', sourceUser)
+      .append($('<option>').val('').text('이관 안 함'));
+    targetUsers.forEach(function(targetUser) {
+      select.append($('<option>').val(targetUser).text(targetUser));
+    });
+    var selected = saved[sourceUser] || suggested[sourceUser] || '';
+    if (selected && targetUsers.indexOf(selected) < 0) {
+      select.append(
+        $('<option>').val(selected).text(selected + ' · 현재 DB에 없음')
+      );
+    }
+    select.val(selected);
+    row.append($('<div>').addClass('col-sm-7').append(select));
+    editor.append(row);
+  });
+  editor.append($('<small>').addClass('doctor-muted').text(
+    '대상 계정은 선택한 BookOasis DB의 users 테이블에서 조회했습니다.'
+  ));
+  editor.find('.database-kavita-user-select').change(
+    databaseMigrationSyncKavitaUsers
+  );
+  databaseMigrationSyncKavitaUsers();
+}
+function databaseMigrationRenderKavita(data, root) {
+  var pathMappings = $('#kavita_path_mappings');
+  var effectiveMappings = data.effective_path_mappings || [];
+  if (
+    !databaseMigrationHasUsefulPathMappings(pathMappings.val()) &&
+    effectiveMappings.length
+  ) {
+    pathMappings.val(effectiveMappings.join('\n'));
+    var first = effectiveMappings[0].split('=>');
+    if (first.length === 2) {
+      $('#kavita_mapping_source').val(first[0].trim());
+      $('#kavita_mapping_target').val(first[1].trim());
+    }
+  }
+  root.append($('<div>').append($('<strong>').text(
+    '도서 ' + Number(data.books_count || 0).toLocaleString() + '권 · ' +
+    '기존 도서 갱신 ' + Number(data.matched_books_count || 0).toLocaleString() + '권 · ' +
+    '신규 도서 생성 ' + Number(data.new_books_count || 0).toLocaleString() + '권'
+  )));
+  root.append($('<div>').addClass('doctor-muted mt-1').text(
+    '현재 BookOasis 대상 도서 ' + Number(data.target_books_count || 0).toLocaleString() + '권 · ' +
+    '표지 후보 ' + Number(data.cover_candidates_count || 0).toLocaleString() + '개 · ' +
+    '진행률 ' + Number(data.progress_count || 0).toLocaleString() + '건'
+  ));
+  if (data.path_mappings_auto_applied) {
+    root.append($('<div>').addClass('text-info mt-2').text(
+      'Kavita와 BookOasis의 도서 상대 경로를 대조해 경로 프리픽스 ' +
+      effectiveMappings.length + '개를 자동 적용했습니다.'
+    ));
+  } else if ((data.suggested_path_mappings || []).length) {
+    root.append($('<div>').addClass('doctor-muted mt-2').text(
+      '저장된 경로 매핑을 우선 적용했습니다. Kavita DB에서 확인한 자동 제안은 ' +
+      data.suggested_path_mappings.length + '개입니다.'
+    ));
+  } else if (Number(data.target_books_count || 0) === 0) {
+    root.append($('<div>').addClass('text-info mt-2').text(
+      '빈 BookOasis DB로 확인했습니다. Kavita 보관함과 도서를 신규 생성하며, 두 컨테이너의 미디어 경로가 같으면 경로 매핑은 비워도 됩니다.'
+    ));
+  }
+  databaseMigrationAppendPaths(root, 'Kavita 원본 경로', data.source_paths);
+  databaseMigrationAppendPaths(root, '기존 BookOasis 보관함 경로', data.target_paths);
+  databaseMigrationRenderKavitaUsers(data);
+  var saved = ($('#kavita_selected_libraries').val() || '').split(/\r?\n/).filter(Boolean);
+  (data.libraries || []).forEach(function(item) {
+    var label = $('<label>').addClass('d-block mt-2');
+    label.append($('<input type="checkbox" class="database-kavita-library-check mr-2">').val(item.name).prop('checked', !saved.length || saved.indexOf(item.name) >= 0));
+    label.append(document.createTextNode(
+      item.name + ' · ' + Number(item.books || 0).toLocaleString() + '권 · 기존 ' +
+      Number(item.matched || 0).toLocaleString() + '권 · 신규 ' +
+      Number(item.new || 0).toLocaleString() + '권'
+    ));
+    root.append(label);
+  });
+  $('.database-kavita-library-check').change(function() {
+    var names = $('.database-kavita-library-check:checked').map(function() { return $(this).val(); }).get();
+    $('#kavita_selected_libraries').val(names.join('\n'));
+  }).first().trigger('change');
+}
+function databaseMigrationRenderBookOasis(data, root) {
+  var databaseOnly = data.inspection_scope === 'database';
+  root.append($('<div>').append($('<strong>').text(
+    'DB 2개 · 보관함 ' + Number(data.libraries_count || 0).toLocaleString() + '개 · ' +
+    '도서 ' + Number(data.books_count || 0).toLocaleString() + '권 · ' +
+    (databaseOnly
+      ? 'DB 표지 참조 ' + Number(data.cover_references_count || 0).toLocaleString() + '건'
+      : '표지 파일 ' + Number(data.cover_files_count || 0).toLocaleString() + '개')
+  )));
+  var validationText = '도서 경로 충돌 ' + Number(data.path_collision_count || 0).toLocaleString() + '건';
+  if (!databaseOnly) {
+    validationText += ' · DB 참조 표지 누락 ' + Number(data.missing_cover_count || 0).toLocaleString() + '건' +
+      ' · 미참조 표지 ' + Number(data.unreferenced_cover_count || 0).toLocaleString() + '건';
+  }
+  root.append($('<div>').addClass((data.path_collision_count || data.missing_cover_count) ? 'text-danger mt-1' : 'doctor-muted mt-1').text(validationText));
+  root.append($('<div>').addClass('doctor-muted mt-1').text(
+    '사용자 ' + Number(data.users_count || 0).toLocaleString() + '명 · 진행률 ' +
+    Number(data.progress_count || 0).toLocaleString() + '건 · 경로 변경 도서 ' +
+    Number(data.changed_books_count || 0).toLocaleString() + '권'
+  ));
+  (data.databases || []).forEach(function(item) {
+    root.append($('<div>').addClass('mt-2').text(
+      (item.db_type === 'adult' ? '성인 DB' : '일반 DB') + ' · 보관함 ' +
+      Number(item.libraries_count || 0).toLocaleString() + '개 · 도서 ' +
+      Number(item.books_count || 0).toLocaleString() + '권 · quick_check ok'
+    ));
+  });
+  if ((data.source_paths || []).length) {
+    root.append($('<div>').addClass('doctor-muted mt-2').text('공유 DB 원본 경로'));
+    (data.source_paths || []).forEach(function(path) {
+      root.append($('<div>').addClass('doctor-muted ml-3').text(path));
+    });
+    if (data.suggested_mapping_source) {
+      root.append($('<div>').addClass('text-info mt-2').text(
+        '권장 원본 매핑 기준 · ' + data.suggested_mapping_source +
+        ' · /GDRIVE 이하 경로는 그대로 유지됩니다.'
+      ));
+    }
+    if (!$('#bookoasis_package_mapping_source').val().trim() && data.suggested_mapping_source) {
+      $('#bookoasis_package_mapping_source').val(data.suggested_mapping_source);
+    }
+  }
+  (data.missing_covers || []).slice(0, 10).forEach(function(path) {
+    root.append($('<div>').addClass('text-danger mt-1').text('누락 표지 · ' + path));
+  });
+}
+function databaseMigrationRenderPreview(data) {
+  var root = $('#database_migration_preview').empty().removeClass('doctor-muted');
+  if (data.source_type === 'bookoasis') databaseMigrationRenderBookOasis(data, root);
+  else databaseMigrationRenderKavita(data, root);
+}
+$('#database_migration_mode_kavita').click(function() {
+  $('#database_migration_source').val('kavita');
+  databaseMigrationToggleSource();
+});
+$('#database_migration_mode_bookoasis').click(function() {
+  $('#database_migration_source').val('bookoasis');
+  databaseMigrationToggleSource();
+});
+$('#bookoasis_package_mode_export').click(function() { databaseMigrationSetBookOasisAction('export'); });
+$('#bookoasis_package_mode_import').click(function() { databaseMigrationSetBookOasisAction('import'); });
+$('#bookoasis_db_package_select, #bookoasis_cover_package_select').change(databaseMigrationSyncPackages);
+$('#bookoasis_package_refresh_btn').click(databaseMigrationLoadPackages);
+$("body").on('click', '#select_database_migration_work_dir_btn', function(e) {
+  e.preventDefault();
+  databaseMigrationSelectPath('migration_work_dir', '통DB 이관 작업 폴더 선택', false, databaseMigrationLoadPackages);
+});
+$("body").on('click', '#select_kavita_db_path_btn', function(e) { e.preventDefault(); databaseMigrationSelectPath('kavita_db_path', 'Kavita DB 파일 선택', true); });
+$("body").on('click', '#select_kavita_cover_path_btn', function(e) { e.preventDefault(); databaseMigrationSelectPath('kavita_cover_path', 'Kavita 표지 폴더 선택', false); });
+$("body").on('click', '#select_kavita_mapping_source_btn', function(e) { e.preventDefault(); databaseMigrationSelectPath('kavita_mapping_source', 'Kavita 원본 미디어 폴더 선택', false); });
+$("body").on('click', '#select_kavita_mapping_target_btn', function(e) { e.preventDefault(); databaseMigrationSelectPath('kavita_mapping_target', 'BookOasis 대상 미디어 폴더 선택', false); });
+$("body").on('click', '#select_bookoasis_package_source_btn', function(e) { e.preventDefault(); databaseMigrationSelectPath('bookoasis_package_mapping_source', '공유 DB 원본 미디어 폴더 선택', false); });
+$("body").on('click', '#select_bookoasis_package_target_btn', function(e) { e.preventDefault(); databaseMigrationSelectPath('bookoasis_package_mapping_target', '현재 BookOasis 미디어 폴더 선택', false); });
+$('#add_kavita_path_mapping_btn').click(function(e) {
+  e.preventDefault();
+  var source = $('#kavita_mapping_source').val().trim();
+  var target = $('#kavita_mapping_target').val().trim();
+  if (!source || !target) { notify('원본과 대상 폴더를 모두 선택해 주세요.', 'warning'); return; }
+  var line = source + ' => ' + target;
+  var lines = ($('#kavita_path_mappings').val() || '').split(/\r?\n/).map(function(value) { return value.trim(); }).filter(Boolean);
+  if (lines.indexOf(line) < 0) lines.push(line);
+  $('#kavita_path_mappings').val(lines.join('\n'));
+});
+$('#add_bookoasis_package_mapping_btn').click(function(e) {
+  e.preventDefault();
+  var source = $('#bookoasis_package_mapping_source').val().trim();
+  var target = $('#bookoasis_package_mapping_target').val().trim();
+  if (!source || !target) { notify('공유 DB 원본과 현재 서버 대상 경로를 모두 입력해 주세요.', 'warning'); return; }
+  var line = source + ' => ' + target;
+  var lines = ($('#bookoasis_package_path_mappings').val() || '').split(/\r?\n/).map(function(value) { return value.trim(); }).filter(Boolean);
+  if (lines.indexOf(line) < 0) lines.push(line);
+  $('#bookoasis_package_path_mappings').val(lines.join('\n'));
+});
+$('.database-migration-inspect-btn').click(function(e) {
+  e.preventDefault();
+  bookoasisMateAjax('database_migration', 'inspect', databaseMigrationValues(), function(ret) {
+    if (ret.data) databaseMigrationRenderPreview(ret.data);
+  });
+});
+$('#database_migration_database_inspect_btn').click(function(e) {
+  e.preventDefault();
+  databaseMigrationSyncPackages();
+  if (!$('#bookoasis_db_package_path').val()) {
+    notify('검사할 공유 DB 패키지를 선택해 주세요.', 'warning');
+    return;
+  }
+  bookoasisMateAjax('database_migration', 'inspect_database', databaseMigrationValues(), function(ret) {
+    if (ret.data) databaseMigrationRenderPreview(ret.data);
+  });
+});
+$('#database_migration_save_btn').click(function(e) {
+  e.preventDefault();
+  $.ajax({
+    url:'/' + PACKAGE_NAME + '/ajax/setting_save',
+    type:'POST',
+    data:databaseMigrationValues(),
+    dataType:'json',
+    success:function(ret) { notify(ret ? '통DB 이관 설정을 저장했습니다.' : '설정 저장에 실패했습니다.', ret ? 'success' : 'warning'); }
+  });
+});
+$(document).ready(databaseMigrationToggleSource);
+</script>
+{% endblock %}

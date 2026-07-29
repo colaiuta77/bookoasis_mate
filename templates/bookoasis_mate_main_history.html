@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+<div class="doctor-toolbar">
+  <button id="refresh_btn" class="btn btn-sm btn-secondary">새로고침</button>
+  <button id="clear_btn" class="btn btn-sm btn-danger">이력 전체 삭제</button>
+</div>
+<div class="doctor-table-wrap"><table class="table table-sm doctor-table">
+  <thead><tr><th>실행 시각</th><th>실행 방식</th><th>상태</th><th>전체 도서</th><th>문제 도서</th><th>소요 시간</th></tr></thead>
+  <tbody id="history_rows"></tbody>
+</table></div>
+<div id="history_empty" class="doctor-empty" style="display:none">저장된 검사 이력이 없습니다.</div>
+
+<script>
+function loadHistory() {
+  bookoasisMateAjax('main', 'history', {}, function(ret) {
+    if (ret.ret !== 'success') return;
+    var body = document.getElementById('history_rows'); bookoasisMateClear(body);
+    $('#history_empty').toggle(ret.data.length === 0);
+    ret.data.forEach(function(item) {
+      var row = document.createElement('tr');
+      row.appendChild(bookoasisMateText('td', '', item.created_at || '-'));
+      row.appendChild(bookoasisMateText('td', '', item.trigger === 'schedule' ? '자동' : '수동'));
+      var statusCell = document.createElement('td'); statusCell.appendChild(bookoasisMateStatus(item.status)); row.appendChild(statusCell);
+      row.appendChild(bookoasisMateText('td', '', item.total_books || 0));
+      row.appendChild(bookoasisMateText('td', '', item.problem_books || 0));
+      row.appendChild(bookoasisMateText('td', '', (item.duration_ms || 0) + 'ms'));
+      body.appendChild(row);
+    });
+  });
+}
+$('#refresh_btn').click(function(e) { e.preventDefault(); loadHistory(); });
+$('#clear_btn').click(function(e) {
+  e.preventDefault();
+  if (!confirm('BookOasis Mate 검사 이력을 모두 삭제하시겠습니까?')) return;
+  bookoasisMateAjax('main', 'clear_history', {}, loadHistory);
+});
+$(document).ready(loadHistory);
+</script>
+{% endblock %}

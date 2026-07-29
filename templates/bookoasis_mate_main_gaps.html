@@ -1,0 +1,212 @@
+{# 시리즈 권차 중간 누락을 검색하고 신뢰도를 표시합니다. #}
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+<input type="hidden" id="doctor_bookoasis_url" value="{{ arg.get('bookoasis_url', '') }}">
+
+<div class="doctor-toolbar">
+  <select id="db_type" class="form-control form-control-sm">
+    <option value="general">일반 DB</option>
+    {% if arg.get('adult_enabled') == 'True' %}<option value="adult">성인 DB</option>{% endif %}
+  </select>
+  <select id="library_id" class="form-control form-control-sm" disabled>
+    <option value="">보관함 불러오는 중</option>
+  </select>
+  <input id="gap_search" class="form-control form-control-sm" placeholder="시리즈·보관함 검색">
+  <button id="gap_search_btn" class="btn btn-sm btn-primary">분석</button>
+  <button id="gap_export_btn" class="btn btn-sm btn-outline-success">CSV 내보내기</button>
+  <span id="gap_progress" class="doctor-progress" role="status" aria-live="polite"></span>
+  <span id="gap_export_progress" class="doctor-progress" role="status" aria-live="polite"></span>
+  <span id="gap_count" class="doctor-muted"></span>
+</div>
+<p class="doctor-muted">DB 제목과 원본 파일 경로의 E0001·선두 [01]·02#95(권차#페이지 수)·권·화·편·Vol 표기를 분석합니다. CSV는 현재 DB·보관함·검색 조건의 전체 누락 후보를 표지 없이 내보냅니다. 결과 행을 클릭하면 대표 도서의 BookOasis 상세 보기, 메타데이터 검색과 재스캔 메뉴가 열립니다.</p>
+<div class="doctor-table-wrap" style="display:none"><table class="table table-sm doctor-table doctor-gap-table">
+  <colgroup>
+    <col class="doctor-gap-col-cover">
+    <col class="doctor-gap-col-library">
+    <col class="doctor-gap-col-series">
+    <col class="doctor-gap-col-present">
+    <col class="doctor-gap-col-missing">
+  </colgroup>
+  <thead><tr><th>표지</th><th>보관함</th><th>시리즈</th><th>보유 권차</th><th>예상 누락</th></tr></thead>
+  <tbody id="gap_rows"></tbody>
+</table></div>
+<div id="gap_empty" class="doctor-empty">DB와 보관함을 선택한 후 분석 버튼을 눌러 주세요.</div>
+<div class="doctor-pagination"><button id="gap_prev" class="btn btn-sm btn-outline-secondary">이전</button><span id="gap_page"></span><button id="gap_next" class="btn btn-sm btn-outline-secondary">다음</button></div>
+
+<script>
+var gapPage = 1, gapPages = 1, gapLoading = false, gapExporting = false, gapLibrariesReady = false;
+var gapTimer = null, gapStartedAt = 0, gapExportTimer = null, gapExportStartedAt = 0;
+function formatRanges(values) {
+  if (!values || !values.length) return '-';
+  var parts = [], start = values[0], end = values[0];
+  for (var i = 1; i <= values.length; i++) {
+    if (i < values.length && values[i] === end + 1) { end = values[i]; continue; }
+    parts.push(start === end ? String(start) : start + '-' + end);
+    start = values[i]; end = values[i];
+  }
+  return parts.join(', ');
+}
+function renderGaps(data) {
+  var body = document.getElementById('gap_rows'); bookoasisMateClear(body);
+  $('#gap_count').text('누락 후보 ' + data.total + '개 시리즈 · 도서 ' + data.analyzed_books + '권 분석 · ' + (Number(data.duration_ms || 0) / 1000).toFixed(1) + '초');
+  $('#gap_empty').text('중간 누락으로 추정되는 시리즈가 없습니다.');
+  $('#gap_empty').toggle(data.items.length === 0); $('.doctor-table-wrap').toggle(data.items.length > 0);
+  data.items.forEach(function(item) {
+    var row = document.createElement('tr');
+    var coverCell = document.createElement('td');
+    if (item.cover_url) {
+      var image = document.createElement('img');
+      image.className = 'doctor-cover';
+      image.src = item.cover_url;
+      image.alt = '';
+      image.onerror = function() { this.style.display = 'none'; };
+      coverCell.appendChild(image);
+    }
+    row.appendChild(coverCell);
+    row.appendChild(bookoasisMateText('td', 'doctor-gap-library', item.library_name || '-'));
+    var seriesCell = document.createElement('td');
+    seriesCell.className = 'doctor-gap-series';
+    seriesCell.appendChild(bookoasisMateText('strong', 'doctor-gap-series-title', item.series_name));
+    var seriesMeta = document.createElement('div');
+    seriesMeta.className = 'doctor-gap-meta';
+    seriesMeta.appendChild(bookoasisMateText('span', 'doctor-muted', '인식 ' + item.parsed_count + '/' + item.book_count + '권'));
+    seriesMeta.appendChild(bookoasisMateText(
+      'span',
+      'doctor-gap-confidence doctor-gap-confidence-' + (item.confidence === 'high' ? 'high' : 'review'),
+      item.confidence === 'high' ? '신뢰도 높음' : '확인 필요'
+    ));
+    seriesCell.appendChild(seriesMeta);
+    row.appendChild(seriesCell);
+    row.appendChild(bookoasisMateText('td', 'doctor-gap-ranges doctor-muted', formatRanges(item.present)));
+    row.appendChild(bookoasisMateText('td', 'doctor-gap-ranges doctor-gap-missing', formatRanges(item.missing)));
+    bookoasisMateBindBookActions(row, item, function() { loadGaps(gapPage); });
+    body.appendChild(row);
+  });
+  gapPage = data.page; gapPages = Math.max(1, data.pages || 1);
+  $('#gap_page').text(gapPage + ' / ' + gapPages); $('#gap_prev').prop('disabled', gapPage <= 1); $('#gap_next').prop('disabled', gapPage >= gapPages);
+}
+function setGapLoading(loading) {
+  gapLoading = loading;
+  $('#gap_search_btn').text(loading ? '분석 중' : '분석');
+  updateGapControls();
+  $('.doctor-table-wrap').toggleClass('doctor-results-loading', loading).attr('aria-busy', loading ? 'true' : 'false');
+  if (gapTimer) { clearInterval(gapTimer); gapTimer = null; }
+  if (!loading) { $('#gap_progress').hide().text(''); return; }
+  gapStartedAt = Date.now();
+  function updateProgress() {
+    var seconds = Math.floor((Date.now() - gapStartedAt) / 1000);
+    $('#gap_progress').css('display', 'inline-flex').text('분석 중 · ' + seconds + '초');
+  }
+  updateProgress();
+  gapTimer = setInterval(updateProgress, 1000);
+}
+function updateGapControls() {
+  var busy = gapLoading || gapExporting;
+  $('#db_type, #gap_search, #gap_search_btn, #gap_export_btn').prop('disabled', busy);
+  $('#library_id').prop('disabled', busy || !gapLibrariesReady);
+}
+function setGapExporting(exporting) {
+  gapExporting = exporting;
+  $('#gap_export_btn').text(exporting ? 'CSV 생성 중' : 'CSV 내보내기');
+  updateGapControls();
+  if (gapExportTimer) { clearInterval(gapExportTimer); gapExportTimer = null; }
+  if (!exporting) { $('#gap_export_progress').hide().text(''); return; }
+  gapExportStartedAt = Date.now();
+  function updateExportProgress() {
+    var seconds = Math.floor((Date.now() - gapExportStartedAt) / 1000);
+    $('#gap_export_progress').css('display', 'inline-flex').text('CSV 생성 중 · ' + seconds + '초');
+  }
+  updateExportProgress();
+  gapExportTimer = setInterval(updateExportProgress, 1000);
+}
+function resetGapResults(message) {
+  bookoasisMateClear(document.getElementById('gap_rows'));
+  $('.doctor-table-wrap').hide();
+  $('#gap_empty').text(message || 'DB와 보관함을 선택한 후 분석 버튼을 눌러 주세요.').show();
+  $('#gap_count').text('');
+  gapPage = 1; gapPages = 1;
+  $('#gap_page').text('-'); $('#gap_prev, #gap_next').prop('disabled', true);
+}
+function loadGapLibraries() {
+  var dbType = $('#db_type').val();
+  var select = $('#library_id');
+  gapLibrariesReady = false;
+  select.prop('disabled', true).empty().append($('<option>', {value:'', text:'보관함 불러오는 중'}));
+  bookoasisMateAjax('main', 'scanner', {db_type:dbType, limit:10}, function(ret) {
+    if ($('#db_type').val() !== dbType || !ret.data) return;
+    select.empty().append($('<option>', {value:'', text:'전체 보관함'}));
+    ret.data.libraries.forEach(function(item) {
+      select.append($('<option>', {value:item.id, text:item.name || ('보관함 ' + item.id)}));
+    });
+    gapLibrariesReady = true;
+    select.prop('disabled', false);
+  }, function(xhr, status) {
+    if ($('#db_type').val() === dbType && status !== 'success') {
+      gapLibrariesReady = false;
+      select.empty().append($('<option>', {value:'', text:'보관함 불러오기 실패'})).prop('disabled', true);
+    }
+  });
+}
+function loadGaps(page) {
+  if (gapLoading) return;
+  setGapLoading(true);
+  bookoasisMateAjax('main', 'gaps', {
+    db_type:$('#db_type').val(), library_id:$('#library_id').val(), search:$('#gap_search').val(), page:page || 1
+  }, function(ret) {
+    if (ret.data) renderGaps(ret.data);
+  }, function(xhr, status) {
+    setGapLoading(false);
+    if (status !== 'success') $('#gap_count').text('분석 요청에 실패했습니다.');
+  });
+}
+function exportGapsCsv() {
+  if (gapLoading || gapExporting) return;
+  setGapExporting(true);
+  var params = new URLSearchParams();
+  params.append('db_type', $('#db_type').val());
+  params.append('library_id', $('#library_id').val());
+  params.append('search', $('#gap_search').val());
+  fetch('/' + PACKAGE_NAME + '/ajax/main/gaps_export', {
+    method:'POST',
+    credentials:'same-origin',
+    headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},
+    body:params.toString()
+  }).then(function(response) {
+    if (!response.ok) {
+      return response.json().catch(function() { return {}; }).then(function(data) {
+        throw new Error(data.msg || 'CSV 생성 요청에 실패했습니다.');
+      });
+    }
+    return response.blob().then(function(blob) {
+      return {blob:blob, disposition:response.headers.get('Content-Disposition') || '', count:response.headers.get('X-BookOasis-Export-Count') || '0'};
+    });
+  }).then(function(result) {
+    var match = /filename="?([^";]+)"?/i.exec(result.disposition);
+    var filename = match ? match[1] : 'bookoasis_series_gaps.csv';
+    var url = URL.createObjectURL(result.blob);
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    notify('시리즈 누락 ' + result.count + '건을 CSV로 내보냈습니다.', 'success');
+  }).catch(function(error) {
+    notify(error.message || 'CSV 생성 중 오류가 발생했습니다.', 'danger');
+  }).finally(function() {
+    setGapExporting(false);
+  });
+}
+$('#gap_search_btn').click(function(e) { e.preventDefault(); loadGaps(1); });
+$('#gap_export_btn').click(function(e) { e.preventDefault(); exportGapsCsv(); });
+$('#gap_search').keypress(function(e) { if (e.which === 13) { e.preventDefault(); loadGaps(1); } });
+$('#db_type').change(function() { resetGapResults(); loadGapLibraries(); });
+$('#library_id').change(function() { resetGapResults('선택한 보관함을 분석하려면 분석 버튼을 눌러 주세요.'); });
+$('#gap_prev').click(function() { if (gapPage > 1) loadGaps(gapPage - 1); });
+$('#gap_next').click(function() { if (gapPage < gapPages) loadGaps(gapPage + 1); });
+$(document).ready(function() { resetGapResults(); loadGapLibraries(); });
+</script>
+{% endblock %}

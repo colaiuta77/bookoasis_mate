@@ -1,0 +1,377 @@
+{# gd-poller 변경 이벤트를 보관함·상태별로 검색하고 안전하게 정리합니다. #}
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+<div class="doctor-gdrive-filter">
+  <select id="gdrive_event_order" class="form-control form-control-sm" title="정렬">
+    <option value="desc">최근순</option>
+    <option value="asc">오래된순</option>
+  </select>
+  <select id="gdrive_event_db_type" class="form-control form-control-sm" title="DB">
+    <option value="">전체 DB</option>
+    <option value="general">일반 DB</option>
+    <option value="adult">성인 DB</option>
+  </select>
+  <select id="gdrive_event_library" class="form-control form-control-sm" title="보관함">
+    <option value="">전체 보관함</option>
+    <option value="unassigned">미분류</option>
+  </select>
+  <select id="gdrive_event_status" class="form-control form-control-sm" title="상태">
+    <option value="">전체 상태</option>
+    <option value="queued">버퍼 대기</option>
+    <option value="retry">재시도 대기</option>
+    <option value="processing">처리 중</option>
+    <option value="completed">완료</option>
+    <option value="failed">실패</option>
+  </select>
+  <select id="gdrive_event_action" class="form-control form-control-sm" title="변경 유형">
+    <option value="">전체 변경</option>
+    <option value="create">CREATE</option>
+    <option value="edit">EDIT</option>
+    <option value="move">MOVE</option>
+    <option value="rename">RENAME</option>
+    <option value="delete">DELETE</option>
+    <option value="restore">RESTORE</option>
+  </select>
+  <select id="gdrive_event_page_size" class="form-control form-control-sm" title="페이지 크기">
+    <option value="20">20건</option>
+    <option value="50" selected>50건</option>
+    <option value="100">100건</option>
+    <option value="200">200건</option>
+  </select>
+  <div class="doctor-gdrive-search">
+    <input id="gdrive_event_search" class="form-control form-control-sm" placeholder="경로·보관함·오류 검색">
+    <button id="gdrive_event_search_btn" class="btn btn-sm btn-primary">검색</button>
+    <button id="gdrive_event_reset" class="btn btn-sm btn-outline-secondary">리셋</button>
+  </div>
+</div>
+
+<div class="doctor-gdrive-summary">
+  <span id="gdrive_worker_state" class="doctor-muted"></span>
+  <strong id="gdrive_event_summary"></strong>
+</div>
+
+<div id="gdrive_event_rows" class="doctor-gdrive-list"></div>
+<div id="gdrive_event_empty" class="doctor-empty" style="display:none;">조건에 맞는 변경 이벤트가 없습니다.</div>
+<div id="gdrive_event_pagination" class="doctor-pagination"></div>
+
+<div class="doctor-section doctor-card">
+  <h4>변경 이벤트 DB 정리</h4>
+  <p class="doctor-muted">설정의 보존기간을 적용합니다. 완료와 최종 실패 이벤트만 삭제하며 대기·재시도·처리 중인 작업은 보호합니다.</p>
+  <div class="doctor-cleanup-actions">
+    <button id="gdrive_cleanup_period" class="btn btn-sm btn-outline-warning">기간 적용 삭제</button>
+    <button id="gdrive_cleanup_all" class="btn btn-sm btn-outline-danger">종료 이력 전체 삭제</button>
+  </div>
+</div>
+
+<div id="gdrive_event_modal" class="doctor-action-modal" aria-hidden="true">
+  <div class="doctor-action-dialog" role="dialog" aria-modal="true" aria-labelledby="gdrive_event_modal_title">
+    <div class="doctor-action-dialog-header">
+      <h4 id="gdrive_event_modal_title">변경 이벤트 상세</h4>
+      <button id="gdrive_event_modal_close" type="button" class="doctor-action-close" aria-label="닫기">&times;</button>
+    </div>
+    <pre id="gdrive_event_modal_content" class="doctor-gdrive-json"></pre>
+  </div>
+</div>
+
+<script>
+var gdriveEventTimer = null;
+var gdriveEventRequestActive = false;
+var gdriveEventPage = 1;
+
+function gdriveEventStatusLabel(status) {
+  return {
+    queued:'버퍼 대기',
+    retry:'재시도 대기',
+    processing:'처리 중',
+    completed:'완료',
+    failed:'실패'
+  }[status] || status || '-';
+}
+
+function gdriveEventActionLabel(action) {
+  return String(action || '-').toUpperCase();
+}
+
+function gdriveEventDbLabel(dbType) {
+  return dbType === 'adult' ? '성인 DB' : (dbType === 'general' ? '일반 DB' : '미분류');
+}
+
+function gdriveEventButton(label, className, callback) {
+  var button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn btn-sm ' + className;
+  button.textContent = label;
+  button.addEventListener('click', callback);
+  return button;
+}
+
+function gdriveEventInfoLine(label, value, className) {
+  var line = document.createElement('div');
+  if (className) line.className = className;
+  line.appendChild(bookoasisMateText('strong', '', label));
+  line.appendChild(document.createTextNode(' ' + (value == null ? '-' : String(value))));
+  return line;
+}
+
+function showGdriveEventDetail(item) {
+  var content = {
+    id:item.id,
+    status:item.status,
+    action:item.action,
+    item_type:item.item_type,
+    path:item.path,
+    removed_path:item.removed_path,
+    mapped_path:item.mapped_path,
+    db_type:item.db_type,
+    library_id:item.library_id,
+    library_name:item.library_name,
+    attempts:item.attempts,
+    received_at:item.created_at,
+    updated_at:item.updated_at,
+    completed_at:item.completed_at,
+    error:item.error,
+    result:item.result
+  };
+  document.getElementById('gdrive_event_modal_content').textContent = JSON.stringify(content, null, 2);
+  var modal = document.getElementById('gdrive_event_modal');
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeGdriveEventDetail() {
+  var modal = document.getElementById('gdrive_event_modal');
+  modal.style.display = 'none';
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function renderGdriveLibraryOptions(libraries) {
+  var select = document.getElementById('gdrive_event_library');
+  var current = select.value;
+  while (select.options.length > 2) select.remove(2);
+  (libraries || []).forEach(function(item) {
+    var option = document.createElement('option');
+    option.value = String(item.db_type || '') + ':' + String(item.library_id);
+    option.dataset.dbType = item.db_type || '';
+    option.textContent =
+      (item.db_type === 'adult' ? '[성인] ' : '[일반] ') +
+      item.library_name + ' (#' + item.library_id + ')';
+    select.appendChild(option);
+  });
+  var found = Array.prototype.some.call(select.options, function(option) {
+    return option.value === current;
+  });
+  select.value = found ? current : '';
+}
+
+function renderGdrivePagination(data) {
+  var container = document.getElementById('gdrive_event_pagination');
+  bookoasisMateClear(container);
+  var page = Number(data.page || 1);
+  var pages = Number(data.pages || 1);
+  if (pages <= 1) return;
+
+  function addPage(label, target, disabled, active) {
+    var button = gdriveEventButton(label, active ? 'btn-primary' : 'btn-outline-primary', function() {
+      if (disabled || target === page) return;
+      gdriveEventPage = target;
+      loadGdriveEvents(true);
+    });
+    button.disabled = disabled;
+    container.appendChild(button);
+  }
+
+  addPage('이전', page - 1, page <= 1, false);
+  var start = Math.max(1, page - 2);
+  var end = Math.min(pages, page + 2);
+  if (start > 1) {
+    addPage('1', 1, false, page === 1);
+    if (start > 2) container.appendChild(bookoasisMateText('span', 'doctor-muted', '…'));
+  }
+  for (var value = start; value <= end; value += 1) {
+    addPage(String(value), value, false, value === page);
+  }
+  if (end < pages) {
+    if (end < pages - 1) container.appendChild(bookoasisMateText('span', 'doctor-muted', '…'));
+    addPage(String(pages), pages, false, page === pages);
+  }
+  addPage('다음', page + 1, page >= pages, false);
+}
+
+function renderGdriveEvents(data) {
+  data = data || {};
+  renderGdriveLibraryOptions(data.libraries);
+  var body = document.getElementById('gdrive_event_rows');
+  bookoasisMateClear(body);
+  var items = data.items || [];
+  items.forEach(function(item) {
+    var row = document.createElement('article');
+    row.className = 'doctor-gdrive-row';
+
+    var idColumn = document.createElement('div');
+    idColumn.className = 'doctor-gdrive-id';
+    idColumn.appendChild(bookoasisMateText('strong', '', '#' + item.id));
+    idColumn.appendChild(bookoasisMateText('span', 'doctor-muted', gdriveEventDbLabel(item.db_type)));
+    row.appendChild(idColumn);
+
+    var infoColumn = document.createElement('div');
+    infoColumn.className = 'doctor-gdrive-info';
+    var actionBadge = bookoasisMateText(
+      'span',
+      'doctor-gdrive-action doctor-gdrive-action-' + (item.action || 'unknown'),
+      gdriveEventActionLabel(item.action)
+    );
+    infoColumn.appendChild(actionBadge);
+    infoColumn.appendChild(bookoasisMateText('span', 'doctor-muted', item.item_type || '-'));
+    infoColumn.appendChild(bookoasisMateText(
+      'span',
+      'doctor-gdrive-status doctor-gdrive-status-' + (item.status || 'unknown'),
+      gdriveEventStatusLabel(item.status)
+    ));
+    infoColumn.appendChild(bookoasisMateText('span', 'doctor-muted', '시도 ' + (item.attempts || 0) + '회'));
+    row.appendChild(infoColumn);
+
+    var pathColumn = document.createElement('div');
+    pathColumn.className = 'doctor-gdrive-paths';
+    pathColumn.appendChild(gdriveEventInfoLine('경로', item.path, 'doctor-path'));
+    if (item.removed_path) {
+      pathColumn.appendChild(gdriveEventInfoLine('이전', item.removed_path, 'doctor-path doctor-gdrive-previous'));
+    }
+    pathColumn.appendChild(gdriveEventInfoLine(
+      '보관함',
+      item.library_name ? item.library_name + ' (#' + item.library_id + ')' : '미분류',
+      'doctor-gdrive-library'
+    ));
+    if (item.error) {
+      pathColumn.appendChild(bookoasisMateText('div', 'doctor-error doctor-gdrive-error', item.error));
+    }
+    row.appendChild(pathColumn);
+
+    var timeColumn = document.createElement('div');
+    timeColumn.className = 'doctor-gdrive-time';
+    timeColumn.appendChild(gdriveEventInfoLine('수신', item.created_at || '-'));
+    timeColumn.appendChild(gdriveEventInfoLine('완료', item.completed_at || '-'));
+    row.appendChild(timeColumn);
+
+    var actionColumn = document.createElement('div');
+    actionColumn.className = 'doctor-gdrive-actions';
+    actionColumn.appendChild(gdriveEventButton('JSON', 'btn-outline-primary', function() {
+      showGdriveEventDetail(item);
+    }));
+    if (item.status === 'failed') {
+      actionColumn.appendChild(gdriveEventButton('재시도', 'btn-outline-warning', function() {
+        bookoasisMateAjax('gdrive_scan', 'retry', {id:item.id}, function() {
+          loadGdriveEvents(false);
+        });
+      }));
+    }
+    if (item.status === 'completed' || item.status === 'failed') {
+      actionColumn.appendChild(gdriveEventButton('삭제', 'btn-outline-danger', function() {
+        if (!confirm('#' + item.id + ' 변경 이벤트를 삭제하시겠습니까?')) return;
+        bookoasisMateAjax('gdrive_scan', 'delete', {id:item.id}, function() {
+          loadGdriveEvents(false);
+        });
+      }));
+    }
+    row.appendChild(actionColumn);
+    body.appendChild(row);
+  });
+
+  document.getElementById('gdrive_event_empty').style.display = items.length ? 'none' : 'block';
+  var counts = data.counts || {};
+  document.getElementById('gdrive_event_summary').textContent =
+    '검색 ' + Number(data.total || 0).toLocaleString() + '건 · ' +
+    '대기 ' + ((counts.queued || 0) + (counts.retry || 0)) +
+    ' · 처리 ' + (counts.processing || 0) +
+    ' · 실패 ' + (counts.failed || 0);
+  var worker = data.worker || {};
+  document.getElementById('gdrive_worker_state').textContent =
+    '연동 ' + (data.enabled ? '사용 중' : '꺼짐') +
+    ' · 작업자 ' + (worker.alive ? '실행 중' : '중지') +
+    (worker.last_finished_at ? ' · 마지막 처리 ' + worker.last_finished_at : '') +
+    (worker.last_error ? ' · 최근 오류 ' + worker.last_error : '');
+  renderGdrivePagination(data);
+}
+
+function scheduleGdriveEventRefresh() {
+  if (gdriveEventTimer) clearTimeout(gdriveEventTimer);
+  gdriveEventTimer = setTimeout(function() { loadGdriveEvents(false); }, 3000);
+}
+
+function loadGdriveEvents(showLoading) {
+  if (gdriveEventRequestActive) return;
+  gdriveEventRequestActive = true;
+  bookoasisMateAjax('gdrive_scan', 'list', {
+    page:gdriveEventPage,
+    page_size:$('#gdrive_event_page_size').val(),
+    order:$('#gdrive_event_order').val(),
+    db_type:$('#gdrive_event_db_type').val(),
+    library_id:$('#gdrive_event_library').val(),
+    status:$('#gdrive_event_status').val(),
+    action:$('#gdrive_event_action').val(),
+    search:$('#gdrive_event_search').val()
+  }, function(ret) {
+    if (ret.ret === 'success') renderGdriveEvents(ret.data);
+  }, function() {
+    gdriveEventRequestActive = false;
+    scheduleGdriveEventRefresh();
+  }, {global:showLoading === true, silent:showLoading !== true});
+}
+
+function resetGdriveEventFilters() {
+  $('#gdrive_event_order').val('desc');
+  $('#gdrive_event_db_type').val('');
+  $('#gdrive_event_library').val('');
+  $('#gdrive_event_status').val('');
+  $('#gdrive_event_action').val('');
+  $('#gdrive_event_page_size').val('50');
+  $('#gdrive_event_search').val('');
+  gdriveEventPage = 1;
+  loadGdriveEvents(true);
+}
+
+$('#gdrive_event_search_btn').click(function(e) {
+  e.preventDefault();
+  gdriveEventPage = 1;
+  loadGdriveEvents(true);
+});
+$('#gdrive_event_reset').click(function(e) {
+  e.preventDefault();
+  resetGdriveEventFilters();
+});
+$('#gdrive_event_order, #gdrive_event_db_type, #gdrive_event_library, #gdrive_event_status, #gdrive_event_action, #gdrive_event_page_size').change(function() {
+  gdriveEventPage = 1;
+  loadGdriveEvents(false);
+});
+$('#gdrive_event_search').on('keydown', function(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    gdriveEventPage = 1;
+    loadGdriveEvents(true);
+  }
+});
+$('#gdrive_cleanup_period').click(function(e) {
+  e.preventDefault();
+  if (!confirm('설정한 보존기간이 지난 완료·최종 실패 이벤트를 삭제하시겠습니까?')) return;
+  bookoasisMateAjax('gdrive_scan', 'cleanup', {}, function() {
+    gdriveEventPage = 1;
+    loadGdriveEvents(false);
+  });
+});
+$('#gdrive_cleanup_all').click(function(e) {
+  e.preventDefault();
+  if (!confirm('완료·최종 실패 이벤트를 모두 삭제하시겠습니까? 대기 중인 작업은 유지됩니다.')) return;
+  bookoasisMateAjax('gdrive_scan', 'clear', {}, function() {
+    gdriveEventPage = 1;
+    loadGdriveEvents(false);
+  });
+});
+$('#gdrive_event_modal_close').click(closeGdriveEventDetail);
+$('#gdrive_event_modal').click(function(e) {
+  if (e.target === this) closeGdriveEventDetail();
+});
+loadGdriveEvents(true);
+</script>
+{% endblock %}
