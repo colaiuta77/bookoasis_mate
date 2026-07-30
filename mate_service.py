@@ -294,6 +294,20 @@ class BookOasisMateService:
                 self._admin_client_fingerprint = fingerprint
             return self._admin_client
 
+    @staticmethod
+    def _admin_credentials_configured(settings):
+        return bool(
+            str(settings.get("bookoasis_username") or "").strip()
+            and str(settings.get("bookoasis_password") or "")
+        )
+
+    @staticmethod
+    def _unsupported_admin_api(response):
+        return (
+            isinstance(response, dict)
+            and response.get("http_status") in {404, 405}
+        )
+
     def invalidate(self):
         with self._lock:
             self._cached_report = None
@@ -380,7 +394,25 @@ class BookOasisMateService:
                 duration_ms=self._duration_ms(started),
             )
             return data
-        response = self.admin_client(settings).queue_status()
+        client = self.admin_client(settings)
+        libraries_response = client.library_schedules(db_type)
+        data["library_source"] = "database"
+        data["library_api_error"] = ""
+        if (
+            isinstance(libraries_response, dict)
+            and libraries_response.get("success")
+            and isinstance(libraries_response.get("libraries"), list)
+        ):
+            data["libraries"] = libraries_response["libraries"]
+            data["library_source"] = "api"
+        else:
+            data["library_api_error"] = str(
+                libraries_response.get("message")
+                or libraries_response.get("error")
+                or "보관함 상태 API를 사용할 수 없습니다."
+            ) if isinstance(libraries_response, dict) else "보관함 상태 API 응답이 올바르지 않습니다."
+
+        response = client.queue_status()
         running = None
         pending = []
         live_error = ""
@@ -438,6 +470,7 @@ class BookOasisMateService:
     def _queue_task(task):
         if not isinstance(task, dict):
             return None
+        kwargs = task.get("kwargs") if isinstance(task.get("kwargs"), dict) else {}
         return {
             "type": str(task.get("type") or ""),
             "key": str(task.get("key") or ""),
@@ -445,6 +478,8 @@ class BookOasisMateService:
             "started_at": task.get("started_at"),
             "stage": str(task.get("stage") or ""),
             "library_name": str(task.get("library_name") or ""),
+            "library_id": kwargs.get("library_id"),
+            "db_type": str(kwargs.get("db_type") or ""),
         }
 
     def log_catalog(self):
@@ -484,7 +519,21 @@ class BookOasisMateService:
     def request_rescan(self, db_type="general", library_id=None, all_libraries=False, force=False):
         started = time.monotonic()
         settings = self.settings()
-        libraries = self.engine(settings).scanner_status(db_type=db_type, limit=10)["libraries"]
+        client = self.admin_client(settings)
+        libraries = []
+        if self._admin_credentials_configured(settings):
+            schedules = client.library_schedules(db_type)
+            if (
+                isinstance(schedules, dict)
+                and schedules.get("success")
+                and isinstance(schedules.get("libraries"), list)
+            ):
+                libraries = schedules["libraries"]
+        if not libraries:
+            libraries = self.engine(settings).scanner_status(
+                db_type=db_type,
+                limit=10,
+            )["libraries"]
         if all_libraries:
             selected = libraries
         else:
@@ -495,23 +544,124 @@ class BookOasisMateService:
             selected = [item for item in libraries if int(item["id"]) == selected_id]
         if not selected:
             raise ValueError("재스캔할 보관함을 찾을 수 없습니다.")
-        client = BookOasisClient(settings.get("bookoasis_url"), settings.get("api_timeout", 30))
-        results = [client.request_scan(settings.get("webhook_token"), item["id"], db_type, _as_bool(force)) for item in selected]
+        force = _as_bool(force)
+        api_response = None
+        if self._admin_credentials_configured(settings):
+            api_response = (
+                client.scan_all_libraries(db_type, force)
+                if all_libraries
+                else client.scan_library(selected[0]["id"], db_type, force)
+            )
+            if not self._unsupported_admin_api(api_response):
+                success = bool(
+                    isinstance(api_response, dict)
+                    and api_response.get("success")
+                )
+                data = {
+                    "success": success,
+                    "requested": len(selected),
+                    "queued": len(selected) if success else 0,
+                    "already_queued": 0,
+                    "source": "admin_api",
+                    "message": (
+                        api_response.get("message")
+                        or api_response.get("error")
+                        or "재스캔 요청을 처리했습니다."
+                    ) if isinstance(api_response, dict) else "BookOasis 관리자 API 응답이 올바르지 않습니다.",
+                    "results": [api_response] if isinstance(api_response, dict) else [],
+                }
+                self._debug(
+                    "재스캔 요청 완료",
+                    db_type=db_type,
+                    scope="all" if all_libraries else "single",
+                    source=data["source"],
+                    requested=data["requested"],
+                    queued=data["queued"],
+                    already_queued=0,
+                    success=str(data["success"]).lower(),
+                    duration_ms=self._duration_ms(started),
+                )
+                return data
+
+        results = [
+            client.request_scan(
+                settings.get("webhook_token"),
+                item["id"],
+                db_type,
+                force,
+            )
+            for item in selected
+        ]
         data = {
             "success": all(result["success"] for result in results),
             "requested": len(results),
             "queued": sum(1 for result in results if result["success"] and not result.get("already_queued")),
             "already_queued": sum(1 for result in results if result.get("already_queued")),
+            "source": "webhook_fallback",
+            "message": next(
+                (
+                    result.get("message")
+                    for result in results
+                    if result.get("message")
+                ),
+                "재스캔 요청을 처리했습니다.",
+            ),
             "results": results,
         }
         self._debug(
             "재스캔 요청 완료",
             db_type=db_type,
             scope="all" if all_libraries else "single",
+            source=data["source"],
             requested=data["requested"],
             queued=data["queued"],
             already_queued=data["already_queued"],
             success=str(data["success"]).lower(),
+            duration_ms=self._duration_ms(started),
+        )
+        return data
+
+    def cancel_library_scan(self, library_id, db_type="general"):
+        started = time.monotonic()
+        data = self.admin_client().cancel_library_scan(library_id, db_type)
+        self._debug(
+            "보관함 스캔 취소 요청 완료",
+            db_type=db_type,
+            library_id=library_id,
+            success=str(bool(data.get("success"))).lower(),
+            duration_ms=self._duration_ms(started),
+        )
+        return data
+
+    def scan_library_covers(self, library_id, db_type="general"):
+        started = time.monotonic()
+        data = self.admin_client().scan_library_covers(library_id, db_type)
+        self._debug(
+            "보관함 표지 스캔 요청 완료",
+            db_type=db_type,
+            library_id=library_id,
+            success=str(bool(data.get("success"))).lower(),
+            duration_ms=self._duration_ms(started),
+        )
+        return data
+
+    def clear_scan_queue(self):
+        started = time.monotonic()
+        data = self.admin_client().clear_queue()
+        self._debug(
+            "스캔 대기열 정리 완료",
+            success=str(bool(data.get("success"))).lower(),
+            duration_ms=self._duration_ms(started),
+        )
+        return data
+
+    def cancel_scan_queue_task(self, task_key):
+        started = time.monotonic()
+        data = self.admin_client().cancel_queue_task(task_key)
+        self._debug(
+            "스캔 대기 작업 취소 완료",
+            task_key=str(task_key or "")[:80],
+            success=str(bool(data.get("success"))).lower(),
             duration_ms=self._duration_ms(started),
         )
         return data
@@ -532,15 +682,53 @@ class BookOasisMateService:
 
     def metadata_plugins(self):
         started = time.monotonic()
-        data = self.admin_client().metadata_plugins()
-        if data.get("success"):
+        client = self.admin_client()
+        searchable = client.metadata_plugins()
+        managed = client.metadata_plugins_manage()
+        data = searchable
+        if searchable.get("success"):
+            active = {
+                str(item.get("id") or ""): item
+                for item in searchable.get("plugins", [])
+                if isinstance(item, dict) and item.get("id")
+            }
+            plugins = []
+            if managed.get("success"):
+                for item in managed.get("plugins", []):
+                    if not isinstance(item, dict) or not item.get("id") or not item.get("is_searchable", True):
+                        continue
+                    plugin_id = str(item["id"])
+                    schema = item.get("config_schema") if isinstance(item.get("config_schema"), list) else []
+                    config = item.get("config") if isinstance(item.get("config"), dict) else {}
+                    required_keys = [
+                        str(field.get("key") or "")
+                        for field in schema
+                        if isinstance(field, dict) and field.get("required") and field.get("key")
+                    ]
+                    plugins.append({
+                        "id": plugin_id,
+                        "name": str(item.get("name") or plugin_id),
+                        "enabled": bool(item.get("enabled")),
+                        "configured": all(bool(config.get(key)) for key in required_keys),
+                        "active": plugin_id in active,
+                        "update_supported": bool(item.get("update_manifest")),
+                    })
+            else:
+                plugins = [
+                    {
+                        "id": plugin_id,
+                        "name": str(item.get("name") or plugin_id),
+                        "enabled": True,
+                        "configured": True,
+                        "active": True,
+                        "update_supported": False,
+                    }
+                    for plugin_id, item in active.items()
+                ]
             data = {
                 "success": True,
-                "plugins": [
-                    {"id": str(item.get("id") or ""), "name": str(item.get("name") or item.get("id") or "")}
-                    for item in data.get("plugins", [])
-                    if item.get("id")
-                ],
+                "plugins": plugins,
+                "diagnostics_supported": bool(managed.get("success")),
             }
         self._debug(
             "메타데이터 플러그인 조회 완료",
@@ -1430,6 +1618,29 @@ class BookOasisMateService:
                 selected_libraries=None,
             )
             data["source_type"] = "kavita"
+            settings = self.settings()
+            data["target_users_source"] = "database"
+            if self._admin_credentials_configured(settings):
+                permissions = self.admin_client(settings).permissions()
+                api_users = []
+                if isinstance(permissions, dict) and permissions.get("success"):
+                    api_users = sorted({
+                        str(item.get("username") or "").strip()
+                        for item in permissions.get("users", [])
+                        if isinstance(item, dict) and str(item.get("username") or "").strip()
+                    })
+                if api_users:
+                    data["target_users"] = api_users
+                    targets_by_casefold = {
+                        username.casefold(): username
+                        for username in api_users
+                    }
+                    data["suggested_user_mappings"] = [
+                        f"{source_user} => {targets_by_casefold[source_user.casefold()]}"
+                        for source_user in data.get("source_users", [])
+                        if source_user.casefold() in targets_by_casefold
+                    ]
+                    data["target_users_source"] = "permissions_api"
         else:
             data = engine.inspect(
                 config["bookoasis_db_package_path"],

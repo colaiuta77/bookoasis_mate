@@ -8,7 +8,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 class _DummyColumn:
@@ -839,7 +839,22 @@ class FlaskFarmLoaderTest(unittest.TestCase):
                     "plugins": [{"id": "aladin", "name": "알라딘", "config": {"API_KEY": "plugin-secret"}}],
                 },
             ):
-                plugins = service.metadata_plugins()
+                with patch(
+                    "bookoasis_mate.mate_service.BookOasisClient.metadata_plugins_manage",
+                    return_value={
+                        "success": True,
+                        "plugins": [{
+                            "id": "aladin",
+                            "name": "알라딘",
+                            "enabled": True,
+                            "is_searchable": True,
+                            "config_schema": [{"key": "API_KEY", "required": True}],
+                            "config": {"API_KEY": "plugin-secret"},
+                            "update_manifest": {"enabled": True},
+                        }],
+                    },
+                ):
+                    plugins = service.metadata_plugins()
             with patch(
                 "bookoasis_mate.mate_service.BookOasisClient.search_metadata",
                 return_value={"success": True, "results": [{"title": "검색 결과"}]},
@@ -851,7 +866,17 @@ class FlaskFarmLoaderTest(unittest.TestCase):
             ):
                 applied = service.apply_metadata(9, {"title": "검색 결과"}, "aladin", "general")
 
-        self.assertEqual([{"id": "aladin", "name": "알라딘"}], plugins["plugins"])
+        self.assertEqual(
+            [{
+                "id": "aladin",
+                "name": "알라딘",
+                "enabled": True,
+                "configured": True,
+                "active": True,
+                "update_supported": True,
+            }],
+            plugins["plugins"],
+        )
         self.assertNotIn("plugin-secret", str(plugins))
         self.assertTrue(searched["success"])
         self.assertTrue(applied["success"])
@@ -1017,6 +1042,14 @@ class FlaskFarmLoaderTest(unittest.TestCase):
 
         with patch("bookoasis_mate.mate_service.BookOasisMateEngine.scanner_status", return_value=db_snapshot):
             with patch.object(service, "admin_client") as mocked_admin:
+                mocked_admin.return_value.library_schedules.return_value = {
+                    "success": True,
+                    "libraries": [{
+                        "id": 3,
+                        "name": "API 보관함",
+                        "scan_status": "scanning",
+                    }],
+                }
                 mocked_admin.return_value.queue_status.return_value = queue_response
                 with patch(
                     "bookoasis_mate.mate_service.read_lazy_progress",
@@ -1026,8 +1059,126 @@ class FlaskFarmLoaderTest(unittest.TestCase):
 
         self.assertEqual("running", result["tasks"][0]["display_status"])
         self.assertTrue(result["tasks"][0]["is_active"])
+        self.assertEqual("api", result["library_source"])
+        self.assertEqual("API 보관함", result["libraries"][0]["name"])
         self.assertEqual("lazy_scan", result["live_queue"]["running"]["type"])
         self.assertEqual(12, result["lazy_progress"]["done"])
+
+    def test_service_prefers_admin_scan_api_when_credentials_exist(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            db_path = Path(tempdir) / "media_general.db"
+            connection = sqlite3.connect(db_path)
+            connection.execute("CREATE TABLE libraries (id INTEGER PRIMARY KEY, name TEXT)")
+            connection.execute("INSERT INTO libraries VALUES (1, '첫째')")
+            connection.commit()
+            connection.close()
+            _DummySetting.values = {
+                "general_db_path": str(db_path),
+                "bookoasis_url": "http://bookoasis:5930",
+                "bookoasis_username": "admin",
+                "bookoasis_password": "secret-password",
+                "webhook_token": "secret",
+            }
+            package = self._load_package(_DummyDb())
+            service = package.P.bookoasis_mate_service
+
+            with patch.object(service, "admin_client") as mocked_admin:
+                mocked_admin.return_value.scan_library.return_value = {
+                    "success": True,
+                    "message": "관리자 API 등록",
+                }
+                result = service.request_rescan(
+                    library_id=1,
+                    all_libraries=False,
+                )
+
+        self.assertTrue(result["success"])
+        self.assertEqual("admin_api", result["source"])
+        mocked_admin.return_value.scan_library.assert_called_once_with(
+            1,
+            "general",
+            False,
+        )
+        mocked_admin.return_value.request_scan.assert_not_called()
+
+    def test_service_falls_back_to_webhook_when_scan_api_is_unsupported(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            db_path = Path(tempdir) / "media_general.db"
+            connection = sqlite3.connect(db_path)
+            connection.execute("CREATE TABLE libraries (id INTEGER PRIMARY KEY, name TEXT)")
+            connection.execute("INSERT INTO libraries VALUES (1, '첫째')")
+            connection.commit()
+            connection.close()
+            _DummySetting.values = {
+                "general_db_path": str(db_path),
+                "bookoasis_url": "http://bookoasis:5930",
+                "bookoasis_username": "admin",
+                "bookoasis_password": "secret-password",
+                "webhook_token": "secret",
+            }
+            package = self._load_package(_DummyDb())
+            service = package.P.bookoasis_mate_service
+
+            with patch.object(service, "admin_client") as mocked_admin:
+                mocked_admin.return_value.library_schedules.return_value = {
+                    "success": False,
+                    "http_status": 404,
+                }
+                mocked_admin.return_value.scan_library.return_value = {
+                    "success": False,
+                    "http_status": 404,
+                }
+                mocked_admin.return_value.request_scan.return_value = {
+                    "success": True,
+                    "already_queued": False,
+                    "message": "웹훅 등록",
+                }
+                result = service.request_rescan(library_id=1)
+
+        self.assertTrue(result["success"])
+        self.assertEqual("webhook_fallback", result["source"])
+        mocked_admin.return_value.request_scan.assert_called_once_with(
+            "secret",
+            1,
+            "general",
+            False,
+        )
+
+    def test_kavita_preview_prefers_permissions_api_users(self):
+        _DummySetting.values = {
+            "database_migration_source": "kavita",
+            "bookoasis_url": "http://bookoasis:5930",
+            "bookoasis_username": "admin",
+            "bookoasis_password": "secret-password",
+        }
+        package = self._load_package(_DummyDb())
+        service = package.P.bookoasis_mate_service
+        engine = Mock()
+        engine.inspect.return_value = {
+            "books_count": 1,
+            "matched_books_count": 0,
+            "source_users": ["Reader"],
+            "target_users": ["db-user"],
+            "suggested_user_mappings": [],
+        }
+
+        with patch.object(service, "_database_migration_engine", return_value=engine):
+            with patch.object(service, "admin_client") as mocked_admin:
+                mocked_admin.return_value.permissions.return_value = {
+                    "success": True,
+                    "users": [
+                        {"id": 1, "username": "reader"},
+                        {"id": 2, "username": "admin"},
+                    ],
+                }
+                result = service.inspect_database_migration()
+
+        self.assertEqual("permissions_api", result["target_users_source"])
+        self.assertEqual(["admin", "reader"], result["target_users"])
+        self.assertEqual(
+            ["Reader => reader"],
+            result["suggested_user_mappings"],
+        )
 
     def test_main_ajax_routes_bookoasis_log_commands(self):
         package = self._load_package(_DummyDb())
@@ -1095,6 +1246,50 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         mocked_scan.assert_called_once_with("8", "adult")
         self.assertEqual("success", apply_response["ret"])
         mocked_apply.assert_called_once_with("8", {"title": "검색 결과"}, "aladin", "adult")
+
+    def test_main_ajax_routes_scanner_control_commands(self):
+        package = self._load_package(_DummyDb())
+        module = package.P.module_list[0]
+        cases = [
+            (
+                "cancel_library_scan",
+                "cancel_library_scan",
+                {"library_id": "7", "db_type": "adult"},
+                ("7", "adult"),
+            ),
+            (
+                "scan_library_covers",
+                "scan_library_covers",
+                {"library_id": "7", "db_type": "adult"},
+                ("7", "adult"),
+            ),
+            (
+                "clear_scan_queue",
+                "clear_scan_queue",
+                {},
+                (),
+            ),
+            (
+                "cancel_scan_queue_task",
+                "cancel_scan_queue_task",
+                {"task_key": "library_scan_adult_7"},
+                ("library_scan_adult_7",),
+            ),
+        ]
+
+        for command, method_name, form, expected_args in cases:
+            with self.subTest(command=command):
+                with patch.object(
+                    module.service,
+                    method_name,
+                    return_value={"success": True, "message": "완료"},
+                ) as mocked_method:
+                    response = module.process_ajax(
+                        command,
+                        types.SimpleNamespace(form=form),
+                    )
+                self.assertEqual("success", response["ret"])
+                mocked_method.assert_called_once_with(*expected_args)
 
     def test_service_runs_orphan_cover_dry_run_in_background(self):
         with tempfile.TemporaryDirectory() as tempdir:

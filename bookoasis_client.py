@@ -106,13 +106,19 @@ class BookOasisClient:
     def _valid_db_type(db_type):
         return db_type if db_type in {"general", "adult"} else None
 
-    def scan_book(self, book_id, db_type="general"):
+    def _valid_positive_id(self, value, label):
         try:
-            book_id = int(book_id)
+            value = int(value)
         except (TypeError, ValueError):
-            return self._admin_error("도서 ID가 올바르지 않습니다.")
-        if book_id <= 0:
-            return self._admin_error("도서 ID가 올바르지 않습니다.")
+            return None, self._admin_error(f"{label}가 올바르지 않습니다.")
+        if value <= 0:
+            return None, self._admin_error(f"{label}가 올바르지 않습니다.")
+        return value, None
+
+    def scan_book(self, book_id, db_type="general"):
+        book_id, error = self._valid_positive_id(book_id, "도서 ID")
+        if error:
+            return error
         db_type = self._valid_db_type(db_type)
         if not db_type:
             return self._admin_error("DB 유형이 올바르지 않습니다.")
@@ -125,10 +131,96 @@ class BookOasisClient:
     def metadata_plugins(self):
         return self._admin_request("api/media/metadata/plugins")
 
+    def metadata_plugins_manage(self):
+        return self._admin_request("api/media/metadata/plugins/manage")
+
+    def permissions(self):
+        return self._admin_request("api/admin/permissions")
+
+    def library_schedules(self, db_type="general"):
+        db_type = self._valid_db_type(db_type)
+        if not db_type:
+            return self._admin_error("DB 유형이 올바르지 않습니다.")
+        return self._admin_request(
+            "api/media/libraries/schedules",
+            query={"type": db_type},
+        )
+
+    def scan_library(self, library_id, db_type="general", force=False):
+        library_id, error = self._valid_positive_id(library_id, "보관함 ID")
+        if error:
+            return error
+        db_type = self._valid_db_type(db_type)
+        if not db_type:
+            return self._admin_error("DB 유형이 올바르지 않습니다.")
+        return self._admin_request(
+            f"api/media/libraries/{library_id}/scan",
+            method="POST",
+            form={
+                "type": db_type,
+                "force": "true" if force else "false",
+            },
+        )
+
+    def scan_all_libraries(self, db_type="general", force=False):
+        db_type = self._valid_db_type(db_type)
+        if not db_type:
+            return self._admin_error("DB 유형이 올바르지 않습니다.")
+        return self._admin_request(
+            "api/media/libraries/scan-all",
+            method="POST",
+            form={
+                "type": db_type,
+                "force": "true" if force else "false",
+            },
+        )
+
+    def cancel_library_scan(self, library_id, db_type="general"):
+        library_id, error = self._valid_positive_id(library_id, "보관함 ID")
+        if error:
+            return error
+        db_type = self._valid_db_type(db_type)
+        if not db_type:
+            return self._admin_error("DB 유형이 올바르지 않습니다.")
+        return self._admin_request(
+            f"api/media/libraries/{library_id}/cancel-scan",
+            method="POST",
+            form={"type": db_type},
+        )
+
+    def scan_library_covers(self, library_id, db_type="general"):
+        library_id, error = self._valid_positive_id(library_id, "보관함 ID")
+        if error:
+            return error
+        db_type = self._valid_db_type(db_type)
+        if not db_type:
+            return self._admin_error("DB 유형이 올바르지 않습니다.")
+        return self._admin_request(
+            f"api/media/libraries/{library_id}/scan-covers",
+            method="POST",
+            form={"type": db_type},
+        )
+
     def queue_status(self):
         return self._admin_request(
             "api/media/system/queue",
             query={"_ts": str(time.time_ns())},
+        )
+
+    def clear_queue(self):
+        return self._admin_request(
+            "api/media/system/queue/clear",
+            method="POST",
+        )
+
+    def cancel_queue_task(self, task_key):
+        task_key = str(task_key or "").strip()
+        if not task_key:
+            return self._admin_error("대기열 작업 키가 비어 있습니다.")
+        return self._admin_request(
+            "api/media/system/queue/cancel",
+            method="POST",
+            form={"task_id": task_key},
         )
 
     def search_metadata(self, query, source=None, db_type="general"):
@@ -145,13 +237,10 @@ class BookOasisClient:
         return self._admin_request("api/media/books/search-metadata", query=params)
 
     def apply_metadata(self, book_id, item_data, source=None, db_type="general"):
-        try:
-            book_id = int(book_id)
-        except (TypeError, ValueError):
-            return self._admin_error("도서 ID가 올바르지 않습니다.")
+        book_id, error = self._valid_positive_id(book_id, "도서 ID")
+        if error:
+            return error
         db_type = self._valid_db_type(db_type)
-        if book_id <= 0:
-            return self._admin_error("도서 ID가 올바르지 않습니다.")
         if not db_type:
             return self._admin_error("DB 유형이 올바르지 않습니다.")
         if not isinstance(item_data, dict) or not item_data:

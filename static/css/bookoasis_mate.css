@@ -125,6 +125,10 @@
 .doctor-live-progress-text { display:flex; justify-content:space-between; gap:12px; margin-top:6px; font-size:.84rem; }
 .doctor-live-progress .doctor-path { margin-top:5px; }
 .doctor-live-error { margin-top:10px; color:#b06a00; font-size:.85rem; }
+.doctor-pending-queue { margin-top:14px; padding-top:12px; border-top:1px solid #dee2e6; }
+.doctor-pending-queue h6 { margin-bottom:5px; }
+.doctor-pending-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid #e9ecef; }
+.doctor-library-actions { display:flex; flex-wrap:wrap; gap:5px; min-width:230px; }
 .doctor-active-row { background:rgba(25,135,84,.07); }
 .doctor-live-status { color:#198754; font-weight:700; }
 .doctor-log-toolbar, .doctor-log-filter { margin-bottom:10px; }
@@ -169,6 +173,7 @@
   .doctor-metadata-description { color:#ced4da; }
   .doctor-cleanup-status, .doctor-cleanup-log-row { border-color:#495057; }
   .doctor-live-progress-track { background:#495057; }
+  .doctor-pending-queue, .doctor-pending-row { border-color:#495057; }
   .doctor-log-summary { border-color:#6c757d; }
   .doctor-gdrive-summary, .doctor-gdrive-row { border-color:#495057; }
   .doctor-gdrive-library { color:#ced4da; }

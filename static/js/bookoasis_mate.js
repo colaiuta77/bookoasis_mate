@@ -262,7 +262,12 @@ function bookoasisMatePopulateMetadataPlugins(plugins) {
   (plugins || []).forEach(function(plugin) {
     var option = document.createElement('option');
     option.value = plugin.id || '';
-    option.textContent = plugin.name || plugin.id || '이름 없는 플러그인';
+    var state = '';
+    if (plugin.enabled === false || plugin.active === false) state = ' · 비활성';
+    else if (plugin.configured === false) state = ' · 필수 설정 필요';
+    else if (plugin.update_supported) state = ' · 자체 업데이트 지원';
+    option.textContent = (plugin.name || plugin.id || '이름 없는 플러그인') + state;
+    option.disabled = plugin.enabled === false || plugin.active === false || plugin.configured === false;
     select.appendChild(option);
   });
   if (!select.options.length) {
@@ -270,13 +275,34 @@ function bookoasisMatePopulateMetadataPlugins(plugins) {
     empty.value = '';
     empty.textContent = '활성 검색 플러그인 없음';
     select.appendChild(empty);
+  } else {
+    var selected = Array.prototype.some.call(select.options, function(option) {
+      if (option.disabled) return false;
+      option.selected = true;
+      return true;
+    });
+    if (!selected) {
+      var unavailable = document.createElement('option');
+      unavailable.value = '';
+      unavailable.textContent = '사용 가능한 검색 플러그인 없음';
+      unavailable.selected = true;
+      select.insertBefore(unavailable, select.firstChild);
+    }
   }
 }
 
 function bookoasisMateLoadMetadataPlugins() {
   if (bookoasisMateMetadataPlugins) {
     bookoasisMatePopulateMetadataPlugins(bookoasisMateMetadataPlugins);
-    bookoasisMateSetMetadataStatus(bookoasisMateMetadataPlugins.length ? '검색 플러그인을 선택해 주세요.' : '활성화된 검색 플러그인이 없습니다.', false);
+    var cachedAvailable = bookoasisMateMetadataPlugins.filter(function(plugin) {
+      return plugin.enabled !== false && plugin.active !== false && plugin.configured !== false;
+    }).length;
+    bookoasisMateSetMetadataStatus(
+      bookoasisMateMetadataPlugins.length
+        ? '사용 가능한 검색 플러그인 ' + cachedAvailable + '개 · 비활성 또는 설정 필요 항목은 선택할 수 없습니다.'
+        : '활성화된 검색 플러그인이 없습니다.',
+      false
+    );
     return;
   }
   bookoasisMateSetMetadataStatus('검색 플러그인을 불러오는 중입니다.', true);
@@ -287,7 +313,15 @@ function bookoasisMateLoadMetadataPlugins() {
     }
     bookoasisMateMetadataPlugins = ret.data.plugins || [];
     bookoasisMatePopulateMetadataPlugins(bookoasisMateMetadataPlugins);
-    bookoasisMateSetMetadataStatus(bookoasisMateMetadataPlugins.length ? '검색 플러그인을 선택해 주세요.' : '활성화된 검색 플러그인이 없습니다.', false);
+    var available = bookoasisMateMetadataPlugins.filter(function(plugin) {
+      return plugin.enabled !== false && plugin.active !== false && plugin.configured !== false;
+    }).length;
+    bookoasisMateSetMetadataStatus(
+      bookoasisMateMetadataPlugins.length
+        ? '사용 가능한 검색 플러그인 ' + available + '개 · 비활성 또는 설정 필요 항목은 선택할 수 없습니다.'
+        : '활성화된 검색 플러그인이 없습니다.',
+      false
+    );
   }, function(xhr, status) {
     if (status !== 'success') bookoasisMateSetMetadataStatus('플러그인 목록 요청에 실패했습니다.', false);
   });

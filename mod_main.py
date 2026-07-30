@@ -101,7 +101,46 @@ class ModuleMain(PluginModuleBase):
                 )
                 return jsonify({
                     "ret": "success" if data["success"] else "warning",
-                    "msg": f"재스캔 요청 {data['requested']}건 중 {data['queued']}건을 대기열에 등록했습니다.",
+                    "msg": data.get("message") or (
+                        f"재스캔 요청 {data['requested']}건 중 "
+                        f"{data['queued']}건을 처리했습니다."
+                    ),
+                    "data": data,
+                })
+            if command == "cancel_library_scan":
+                data = self.service.cancel_library_scan(
+                    req.form.get("library_id"),
+                    req.form.get("db_type", "general"),
+                )
+                return jsonify({
+                    "ret": "success" if data.get("success") else "danger",
+                    "msg": data.get("message") or data.get("error") or "보관함 스캔 취소 요청을 처리했습니다.",
+                    "data": data,
+                })
+            if command == "scan_library_covers":
+                data = self.service.scan_library_covers(
+                    req.form.get("library_id"),
+                    req.form.get("db_type", "general"),
+                )
+                return jsonify({
+                    "ret": "success" if data.get("success") else "danger",
+                    "msg": data.get("message") or data.get("error") or "보관함 표지 스캔 요청을 처리했습니다.",
+                    "data": data,
+                })
+            if command == "clear_scan_queue":
+                data = self.service.clear_scan_queue()
+                return jsonify({
+                    "ret": "success" if data.get("success") else "danger",
+                    "msg": data.get("message") or data.get("error") or "스캔 대기열 정리를 처리했습니다.",
+                    "data": data,
+                })
+            if command == "cancel_scan_queue_task":
+                data = self.service.cancel_scan_queue_task(
+                    req.form.get("task_key"),
+                )
+                return jsonify({
+                    "ret": "success" if data.get("success") else "danger",
+                    "msg": data.get("message") or data.get("error") or "대기 작업 취소를 처리했습니다.",
                     "data": data,
                 })
             if command == "book_scan":
