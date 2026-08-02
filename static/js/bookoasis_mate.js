@@ -58,6 +58,7 @@ function bookoasisMateEscape(value) {
 
 var bookoasisMateBookActionItem = null;
 var bookoasisMateBookActionRefresh = null;
+var bookoasisMateBookActionOptions = null;
 var bookoasisMateMetadataPlugins = null;
 
 function bookoasisMateButton(text, className) {
@@ -75,6 +76,7 @@ function bookoasisMateEnsureBookActionUi() {
   menu.setAttribute('role', 'menu');
   var detailButton = bookoasisMateButton('↗ BookOasis에서 상세 보기', 'doctor-action-menu-item');
   var scanButton = bookoasisMateButton('↻ 개별 도서 재스캔', 'doctor-action-menu-item');
+  scanButton.id = 'doctor-action-scan-button';
   var metadataButton = bookoasisMateButton('⌕ 플러그인 메타데이터 검색', 'doctor-action-menu-item');
   detailButton.addEventListener('click', function(event) {
     event.stopPropagation();
@@ -172,11 +174,14 @@ function bookoasisMateHideBookActionMenu() {
   if (menu) menu.style.display = 'none';
 }
 
-function bookoasisMateShowBookActionMenu(event, item, refreshCallback) {
+function bookoasisMateShowBookActionMenu(event, item, refreshCallback, options) {
   bookoasisMateEnsureBookActionUi();
   bookoasisMateBookActionItem = item;
   bookoasisMateBookActionRefresh = refreshCallback || null;
+  bookoasisMateBookActionOptions = options || {};
   var menu = document.getElementById('doctor-book-action-menu');
+  var scanButton = document.getElementById('doctor-action-scan-button');
+  if (scanButton) scanButton.style.display = bookoasisMateBookActionOptions.showScan === false ? 'none' : '';
   menu.style.display = 'block';
   menu.style.left = Math.max(8, event.clientX) + 'px';
   menu.style.top = Math.max(8, event.clientY) + 'px';
@@ -185,20 +190,20 @@ function bookoasisMateShowBookActionMenu(event, item, refreshCallback) {
   if (rect.bottom > window.innerHeight - 8) menu.style.top = Math.max(8, window.innerHeight - rect.height - 8) + 'px';
 }
 
-function bookoasisMateBindBookActions(row, item, refreshCallback) {
+function bookoasisMateBindBookActions(row, item, refreshCallback, options) {
   bookoasisMateEnsureBookActionUi();
   row.classList.add('doctor-action-row');
   row.tabIndex = 0;
   row.title = '클릭하여 도서 작업 열기';
   row.addEventListener('click', function(event) {
     event.stopPropagation();
-    bookoasisMateShowBookActionMenu(event, item, refreshCallback);
+    bookoasisMateShowBookActionMenu(event, item, refreshCallback, options);
   });
   row.addEventListener('keydown', function(event) {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       var rect = row.getBoundingClientRect();
-      bookoasisMateShowBookActionMenu({clientX: rect.left + 24, clientY: rect.top + 24}, item, refreshCallback);
+      bookoasisMateShowBookActionMenu({clientX: rect.left + 24, clientY: rect.top + 24}, item, refreshCallback, options);
     }
   });
 }
@@ -214,14 +219,23 @@ function bookoasisMateBookDetailUrl(item) {
   if (!/^https?:\/\/[^/]+/i.test(baseUrl)) return '';
   var seriesName = String((item && (item.series_name || item.title)) || '').trim();
   if (!seriesName) return '';
-  var libraryId = item && item.library_id ? String(item.library_id) : 'all';
-  var params = [
-    'series=' + encodeURIComponent(seriesName),
-    'libraryId=' + encodeURIComponent(libraryId)
-  ];
-  if (item && item.id) params.push('repBookId=' + encodeURIComponent(item.id));
-  if (item && item.title) params.push('displayTitle=' + encodeURIComponent(item.title));
-  return baseUrl + '/#detail?' + params.join('&');
+  var libraryId = item && item.library_id ? item.library_id : 'all';
+  try {
+    var payload = {
+      s: seriesName,
+      l: libraryId,
+      r: item && item.id ? item.id : null,
+      d: item && item.title ? String(item.title) : null
+    };
+    var bytes = new TextEncoder().encode(JSON.stringify(payload));
+    var binary = '';
+    bytes.forEach(function(value) { binary += String.fromCharCode(value); });
+    var token = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return baseUrl + '/#detail?v=' + token;
+  } catch (error) {
+    return baseUrl + '/#detail?series=' + encodeURIComponent(seriesName) +
+      '&libraryId=' + encodeURIComponent(libraryId);
+  }
 }
 
 function bookoasisMateOpenSelectedBookDetail() {
@@ -434,4 +448,148 @@ function bookoasisMateApplyMetadata(metadata, source, button) {
       bookoasisMateSetMetadataStatus('메타데이터 적용 요청에 실패했습니다.', false);
     }
   });
+}
+
+function bookoasisMateBatchRescanController(options) {
+  options = options || {};
+  var pollTimer = null;
+  var availableCount = 0;
+  var running = false;
+  var lastRenderKey = '';
+
+  function statusLabel(value) {
+    if (value === 'run') return '실행중';
+    if (value === 'stop') return '사용자 중지';
+    if (value === 'error') return '오류';
+    return '대기중';
+  }
+
+  function updateButtons() {
+    $('#batch_rescan_start').prop('disabled', running || availableCount <= 0);
+    $('#batch_rescan_stop').prop('disabled', !running);
+    if (options.onRunningChange) options.onRunningChange(running);
+  }
+
+  function renderItems(data) {
+    var container = document.getElementById('batch_rescan_log');
+    if (!container) return;
+    bookoasisMateClear(container);
+    var items = data.items || [];
+    if (!items.length) {
+      container.appendChild(bookoasisMateText(
+        'div',
+        'doctor-empty',
+        data.is_working === 'run' ? '첫 번째 도서의 재스캔 결과를 기다리고 있습니다.' : '처리 결과가 없습니다.'
+      ));
+      return;
+    }
+    items.forEach(function(item) {
+      var row = document.createElement('div');
+      row.className = 'doctor-cleanup-log-row';
+      var title = bookoasisMateText('div', '', item.title || ('도서 ' + item.book_id));
+      title.appendChild(bookoasisMateText('div', 'doctor-muted', 'Book ID ' + item.book_id));
+      var detail = document.createElement('div');
+      detail.className = 'doctor-cleanup-log-detail';
+      detail.appendChild(bookoasisMateText(
+        'strong',
+        'doctor-batch-result doctor-batch-result-' + item.status,
+        item.status === 'success' ? '완료' : '실패'
+      ));
+      if (item.message) detail.appendChild(bookoasisMateText('span', 'doctor-muted', item.message));
+      row.appendChild(title);
+      row.appendChild(detail);
+      container.appendChild(row);
+    });
+    if (data.truncated) {
+      container.insertBefore(bookoasisMateText(
+        'div', 'doctor-muted doctor-cleanup-truncated', '최근 처리 결과 200건만 표시합니다.'
+      ), container.firstChild);
+    }
+  }
+
+  function render(data) {
+    data = data || {};
+    running = data.is_working === 'run';
+    var current = Number(data.current || 0);
+    var total = Number(data.total || 0);
+    var percent = total ? Math.min(100, Math.round(current * 100 / total)) : Number(data.progress_percent || 0);
+    $('#batch_rescan_bar').css('width', percent + '%');
+    $('#batch_rescan_progress_text').text(
+      current.toLocaleString() + ' / ' + total.toLocaleString() + '권 · ' + percent + '%'
+    );
+    var parts = [
+      statusLabel(data.is_working),
+      data.source_label || '검색 결과',
+      data.db_type === 'adult' ? '성인 DB' : '일반 DB',
+      '성공 ' + Number(data.success_count || 0).toLocaleString() + '권',
+      '실패 ' + Number(data.failed_count || 0).toLocaleString() + '권'
+    ];
+    if (data.elapsed_seconds) parts.push(Number(data.elapsed_seconds).toFixed(1) + '초');
+    $('#batch_rescan_status_text').text(parts.join(' · ') + (data.message ? ' — ' + data.message : ''));
+    $('#batch_rescan_error').text(data.error || '').toggle(Boolean(data.error));
+    var renderKey = [
+      data.is_working, data.current, data.success_count, data.failed_count,
+      data.truncated, (data.items || []).length
+    ].join(':');
+    if (renderKey !== lastRenderKey) {
+      lastRenderKey = renderKey;
+      renderItems(data);
+    }
+    updateButtons();
+    if (running) startPolling(); else stopPolling();
+  }
+
+  function refresh() {
+    bookoasisMateAjax('main', 'batch_rescan_status', {}, function(ret) {
+      if (ret.data) render(ret.data);
+    }, null, {global:false, silent:true});
+  }
+
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(refresh, 1000);
+  }
+
+  function stopPolling() {
+    if (!pollTimer) return;
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  function start() {
+    if (running || availableCount <= 0) return;
+    var message = '현재 검색 조건의 전체 결과 ' + availableCount.toLocaleString() +
+      '권을 순차 재스캔하시겠습니까? 대량 작업은 오래 걸릴 수 있으며 중지할 수 있습니다.';
+    if (!confirm(message)) return;
+    var payload = options.getPayload ? options.getPayload() : {};
+    bookoasisMateAjax('main', 'batch_rescan_start', payload, function(ret) {
+      if (ret.data && ret.data.status) render(ret.data.status);
+    });
+  }
+
+  function stop() {
+    if (!running) return;
+    bookoasisMateAjax('main', 'batch_rescan_stop', {}, function(ret) {
+      if (ret.data && ret.data.status) render(ret.data.status);
+    });
+  }
+
+  $('#batch_rescan_start').off('click.bookoasisMate').on('click.bookoasisMate', function(event) {
+    event.preventDefault();
+    start();
+  });
+  $('#batch_rescan_stop').off('click.bookoasisMate').on('click.bookoasisMate', function(event) {
+    event.preventDefault();
+    stop();
+  });
+
+  return {
+    refresh: refresh,
+    render: render,
+    setAvailableCount: function(value) {
+      availableCount = Math.max(0, Number(value || 0));
+      updateButtons();
+    },
+    destroy: stopPolling
+  };
 }

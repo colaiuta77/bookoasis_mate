@@ -115,6 +115,12 @@
 .doctor-cleanup-result-deleted { color:#198754; }
 .doctor-cleanup-result-error { color:#dc3545; }
 .doctor-cleanup-truncated { padding:8px; text-align:center; }
+.doctor-batch-card { margin:12px 0 16px; }
+.doctor-batch-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.doctor-batch-log { max-height:320px; margin-top:12px; overflow:auto; border-top:1px solid #dee2e6; }
+.doctor-batch-result { min-width:42px; text-align:right; }
+.doctor-batch-result-success { color:#198754; }
+.doctor-batch-result-error { color:#dc3545; }
 .doctor-live-card { margin-bottom:18px; }
 .doctor-live-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .doctor-live-header h5 { margin-bottom:4px; }
@@ -171,12 +177,18 @@
   .doctor-action-menu-item { color:#f8f9fa; }
   .doctor-action-dialog-header, .doctor-metadata-card { border-color:#495057; }
   .doctor-metadata-description { color:#ced4da; }
-  .doctor-cleanup-status, .doctor-cleanup-log-row { border-color:#495057; }
+  .doctor-cleanup-status, .doctor-cleanup-log-row, .doctor-batch-log { border-color:#495057; }
   .doctor-live-progress-track { background:#495057; }
   .doctor-pending-queue, .doctor-pending-row { border-color:#495057; }
   .doctor-log-summary { border-color:#6c757d; }
   .doctor-gdrive-summary, .doctor-gdrive-row { border-color:#495057; }
   .doctor-gdrive-library { color:#ced4da; }
+}
+
+@media (max-width: 720px) {
+  .doctor-batch-header { flex-direction:column; }
+  .doctor-cleanup-log-row { grid-template-columns:1fr; }
+  .doctor-cleanup-log-detail { justify-content:flex-start; }
 }
 @media (max-width: 1180px) {
   .doctor-overview-groups { grid-template-columns:repeat(2,minmax(160px,1fr)); }

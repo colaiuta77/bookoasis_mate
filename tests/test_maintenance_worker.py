@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from maintenance_worker import run_worker
 
@@ -132,6 +133,67 @@ class MaintenanceWorkerTest(unittest.TestCase):
         self.assertEqual(100, status["progress_percent"])
         self.assertEqual(1, status["result"]["count"])
         self.assertEqual("카테고리 내보내기를 완료했습니다.", status["message"])
+
+    def test_batch_book_rescan_worker_tracks_results_and_removes_secret_config(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            db_path = root / "media_general.db"
+            connection = sqlite3.connect(db_path)
+            connection.executescript(
+                """
+                CREATE TABLE books (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT,
+                    series_name TEXT
+                );
+                INSERT INTO books VALUES (1, '성공 도서', '성공 시리즈');
+                INSERT INTO books VALUES (2, '실패 도서', '실패 시리즈');
+                """
+            )
+            connection.commit()
+            connection.close()
+            config_path = root / "config.json"
+            status_path = root / "status.json"
+            stop_path = root / "stop"
+            config = {
+                "job_type": "batch_book_rescan",
+                "delete_config_after_read": True,
+                "db_type": "general",
+                "db_path": str(db_path),
+                "book_ids": [1, 2],
+                "source": "issues",
+                "source_label": "문제 도서",
+                "bookoasis_url": "http://bookoasis:5930",
+                "bookoasis_username": "admin",
+                "bookoasis_password": "secret",
+                "api_timeout": 30,
+            }
+            config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+
+            with patch("maintenance_worker.BookOasisClient") as client_class:
+                client = client_class.return_value
+                client.login_admin.return_value = {"success": True}
+                client.scan_book.side_effect = [
+                    {"success": True, "message": "완료"},
+                    {"success": False, "message": "실패 원인"},
+                ]
+                return_code = run_worker(config_path, status_path, stop_path)
+            status = self._read_status(status_path)
+
+        self.assertEqual(0, return_code)
+        self.assertFalse(config_path.exists())
+        self.assertEqual("wait", status["is_working"])
+        self.assertEqual(2, status["current"])
+        self.assertEqual(1, status["success_count"])
+        self.assertEqual(1, status["failed_count"])
+        self.assertEqual(["성공 도서", "실패 도서"], [item["title"] for item in status["items"]])
+        self.assertNotIn("secret", json.dumps(status, ensure_ascii=False))
+        client_class.assert_called_once_with(
+            "http://bookoasis:5930",
+            30,
+            username="admin",
+            password="secret",
+        )
 
 
 if __name__ == "__main__":

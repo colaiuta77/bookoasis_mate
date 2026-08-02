@@ -941,6 +941,9 @@ class FlaskFarmLoaderTest(unittest.TestCase):
                         page=2,
                         page_size=1,
                     )
+                    cached_ids = package.P.bookoasis_mate_service.cover_issue_book_ids(
+                        mode="resolution",
+                    )
 
         self.assertEqual([3], [item["id"] for item in first["items"]])
         self.assertEqual([5], [item["id"] for item in second["items"]])
@@ -951,6 +954,7 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         self.assertEqual(2, first["issue_count"])
         self.assertFalse(first["cache_hit"])
         self.assertTrue(second["cache_hit"])
+        self.assertEqual([3, 5], cached_ids)
         self.assertEqual(2, mocked_items.call_count)
         self.assertEqual(5, mocked_inspect.call_count)
         self.assertGreaterEqual(first["duration_ms"], 0)
@@ -1246,6 +1250,107 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         mocked_scan.assert_called_once_with("8", "adult")
         self.assertEqual("success", apply_response["ret"])
         mocked_apply.assert_called_once_with("8", {"title": "검색 결과"}, "aladin", "adult")
+
+    def test_main_ajax_routes_batch_rescan_commands(self):
+        package = self._load_package(_DummyDb())
+        module = package.P.module_list[0]
+
+        with patch.object(
+            module.service,
+            "start_batch_rescan",
+            return_value={"started": True, "message": "시작", "status": {"is_working": "run"}},
+        ) as mocked_start:
+            start_response = module.process_ajax(
+                "batch_rescan_start",
+                types.SimpleNamespace(form={
+                    "source": "issues",
+                    "db_type": "adult",
+                    "library_id": "7",
+                    "issue_type": "pages",
+                    "mode": "missing",
+                    "search": "검색어",
+                }),
+            )
+        with patch.object(
+            module.service,
+            "batch_rescan_status",
+            return_value={"is_working": "run"},
+        ):
+            status_response = module.process_ajax(
+                "batch_rescan_status",
+                types.SimpleNamespace(form={}),
+            )
+        with patch.object(
+            module.service,
+            "stop_batch_rescan",
+            return_value={"requested": True, "message": "중지", "status": {"is_working": "run"}},
+        ):
+            stop_response = module.process_ajax(
+                "batch_rescan_stop",
+                types.SimpleNamespace(form={}),
+            )
+
+        self.assertEqual("success", start_response["ret"])
+        mocked_start.assert_called_once_with(
+            source="issues",
+            db_type="adult",
+            library_id="7",
+            issue_type="pages",
+            mode="missing",
+            search="검색어",
+        )
+        self.assertEqual("run", status_response["data"]["is_working"])
+        self.assertEqual("success", stop_response["ret"])
+
+    def test_service_starts_filtered_batch_rescan_with_sensitive_external_config(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            db_path = Path(tempdir) / "media_general.db"
+            db_path.write_bytes(b"database")
+            _DummySetting.values = {
+                "general_db_path": str(db_path),
+                "bookoasis_url": "http://bookoasis:5930",
+                "bookoasis_username": "admin",
+                "bookoasis_password": "secret",
+                "api_timeout": "30",
+            }
+            package = self._load_package(_DummyDb())
+            service = package.P.bookoasis_mate_service
+            engine = Mock()
+            engine.get_target.return_value = types.SimpleNamespace(path=str(db_path))
+            engine.issue_book_ids.return_value = [9, 3, 9]
+            client = Mock()
+            client.login_admin.return_value = {"success": True}
+            process = Mock(pid=321)
+
+            with patch.object(service, "engine", return_value=engine):
+                with patch.object(service, "admin_client", return_value=client):
+                    with patch.object(
+                        service,
+                        "_launch_maintenance_worker",
+                        return_value=process,
+                    ) as mocked_launch:
+                        result = service.start_batch_rescan(
+                            "issues",
+                            db_type="general",
+                            library_id="2",
+                            issue_type="pages",
+                            search="대상",
+                        )
+
+        self.assertTrue(result["started"])
+        self.assertEqual(2, result["status"]["total"])
+        engine.issue_book_ids.assert_called_once_with(
+            db_type="general",
+            library_id="2",
+            issue_type="pages",
+            search="대상",
+        )
+        args, kwargs = mocked_launch.call_args
+        worker_config = args[1]
+        self.assertEqual([3, 9], worker_config["book_ids"])
+        self.assertEqual("secret", worker_config["bookoasis_password"])
+        self.assertTrue(worker_config["delete_config_after_read"])
+        self.assertTrue(kwargs["sensitive_config"])
 
     def test_main_ajax_routes_scanner_control_commands(self):
         package = self._load_package(_DummyDb())

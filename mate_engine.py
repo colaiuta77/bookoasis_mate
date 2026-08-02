@@ -559,6 +559,66 @@ class BookOasisMateEngine:
         pages = (int(total) + page_size - 1) // page_size
         return {"items": items, "total": int(total), "page": page, "page_size": page_size, "pages": pages}
 
+    def issue_book_ids(self, db_type="general", library_id=None, issue_type="all", search=""):
+        target = self.get_target(db_type)
+        search = str(search or "").strip()
+        issue_type = issue_type if issue_type in PROBLEM_BOOK_LABELS else "all"
+        selected_library_id = None
+        if str(library_id or "").strip():
+            try:
+                selected_library_id = int(library_id)
+            except (TypeError, ValueError):
+                raise ValueError("보관함 ID가 올바르지 않습니다.")
+            if selected_library_id <= 0:
+                raise ValueError("보관함 ID가 올바르지 않습니다.")
+
+        with closing(self._connect(target)) as connection:
+            parts = self._book_query_parts(connection)
+            expressions = {
+                key: value
+                for key, value in parts["expressions"].items()
+                if key in PROBLEM_BOOK_LABELS
+            }
+            if issue_type != "all" and issue_type not in expressions:
+                return []
+            if selected_library_id is not None and "library_id" not in parts["columns"]:
+                return []
+
+            conditions = [parts["active"]]
+            conditions.append(
+                expressions[issue_type]
+                if issue_type != "all"
+                else "(" + " OR ".join(expressions.values()) + ")"
+            )
+            params = []
+            if selected_library_id is not None:
+                conditions.append("b.library_id = ?")
+                params.append(selected_library_id)
+            if search:
+                search_fields = [
+                    f"COALESCE(b.{name}, '')"
+                    for name in ("title", "series_name", "author")
+                    if name in parts["columns"]
+                ]
+                if search_fields:
+                    conditions.append(
+                        "(" + " OR ".join(f"{field} LIKE ?" for field in search_fields) + ")"
+                    )
+                    params.extend([f"%{search}%"] * len(search_fields))
+
+            rows = connection.execute(
+                f"""
+                {parts['duplicate_cte']}
+                SELECT b.id
+                FROM books b
+                {parts['duplicate_join']}
+                WHERE {' AND '.join(conditions)}
+                ORDER BY b.id
+                """,
+                params,
+            )
+            return [int(row[0]) for row in rows if int(row[0] or 0) > 0]
+
     def scanner_status(self, db_type="general", limit=100):
         target = self.get_target(db_type)
         limit = _as_int(limit, 100, 10, 500)

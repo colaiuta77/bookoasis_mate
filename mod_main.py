@@ -153,6 +153,32 @@ class ModuleMain(PluginModuleBase):
                     "msg": data.get("message") or data.get("error") or "개별 도서 재스캔 요청을 처리했습니다.",
                     "data": data,
                 })
+            if command == "batch_rescan_start":
+                data = self.service.start_batch_rescan(
+                    source=req.form.get("source"),
+                    db_type=req.form.get("db_type", "general"),
+                    library_id=req.form.get("library_id"),
+                    issue_type=req.form.get("issue_type", "all"),
+                    mode=req.form.get("mode", "missing"),
+                    search=req.form.get("search", ""),
+                )
+                return jsonify({
+                    "ret": "success" if data.get("started") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
+            if command == "batch_rescan_status":
+                return jsonify({
+                    "ret": "success",
+                    "data": self.service.batch_rescan_status(),
+                })
+            if command == "batch_rescan_stop":
+                data = self.service.stop_batch_rescan()
+                return jsonify({
+                    "ret": "success" if data.get("requested") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
             if command == "metadata_plugins":
                 data = self.service.metadata_plugins()
                 return jsonify({

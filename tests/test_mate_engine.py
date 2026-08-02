@@ -171,6 +171,21 @@ class BookOasisMateEngineTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             engine.list_issues(library_id="invalid", page_size=10)
 
+    def test_issue_book_ids_snapshot_matches_active_filters(self):
+        engine = BookOasisMateEngine(self.settings)
+
+        all_ids = engine.issue_book_ids()
+        library_ids = engine.issue_book_ids(library_id=2)
+        duplicate_ids = engine.issue_book_ids(issue_type="duplicate_isbn")
+        searched_ids = engine.issue_book_ids(search="문제 도서")
+
+        self.assertEqual([2, 3, 4], all_ids)
+        self.assertEqual([2], library_ids)
+        self.assertEqual([3, 4], duplicate_ids)
+        self.assertEqual([2], searched_ids)
+        with self.assertRaises(ValueError):
+            engine.issue_book_ids(library_id="invalid")
+
     def test_missing_isbn_is_optional(self):
         engine = BookOasisMateEngine(self.settings)
         disabled = engine.list_issues(issue_type="isbn")

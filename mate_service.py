@@ -137,6 +137,11 @@ class BookOasisMateService:
         self._orphan_cleanup_status_path = None
         self._orphan_cleanup_stop_path = None
         self._orphan_cleanup_status = self._empty_orphan_cleanup_status()
+        self._batch_rescan_process = None
+        self._batch_rescan_status_path = None
+        self._batch_rescan_stop_path = None
+        self._batch_rescan_status = self._empty_batch_rescan_status()
+        self._batch_rescan_invalidated_finished_at = ""
         self._migration_stop = threading.Event()
         self._migration_process = None
         self._migration_status_path = None
@@ -186,6 +191,29 @@ class BookOasisMateService:
             "message": "대기중",
             "logs": [],
             "result": None,
+            "error": "",
+        }
+
+    @staticmethod
+    def _empty_batch_rescan_status():
+        return {
+            "is_working": "wait",
+            "job_type": "batch_book_rescan",
+            "source": "",
+            "source_label": "",
+            "db_type": "general",
+            "current": 0,
+            "total": 0,
+            "success_count": 0,
+            "failed_count": 0,
+            "progress_percent": 0,
+            "started_at": "",
+            "finished_at": "",
+            "elapsed_seconds": 0,
+            "message": "대기중",
+            "items": [],
+            "truncated": False,
+            "stopped": False,
             "error": "",
         }
 
@@ -889,11 +917,8 @@ class BookOasisMateService:
             "cache_hit": cache_hit,
         }
 
-    def covers(self, db_type="general", library_id=None, mode="missing", search="", page=1, page_size=None, force=False):
-        started = time.monotonic()
-        settings = self.settings()
-        page = _as_int(page, 1, 1, 100000)
-        page_size = _as_int(page_size or min(settings["page_size"], 25), 25, 1, 200)
+    @staticmethod
+    def _cover_query_context(settings, db_type, library_id, mode, search):
         mode = {"http": "missing", "file": "resolution"}.get(mode, mode)
         mode = mode if mode in {"missing", "resolution", "file_size", "aspect"} else "missing"
         target_issue = {
@@ -904,7 +929,6 @@ class BookOasisMateService:
         }[mode]
         file_mode = mode != "missing"
         search = str(search or "").strip()
-        force = _as_bool(force, False)
         cache_key = (
             db_type,
             str(library_id or ""),
@@ -918,6 +942,21 @@ class BookOasisMateService:
             settings["cover_min_file_size_kb"],
             settings["cover_min_aspect_percent"],
         )
+        return mode, target_issue, file_mode, search, cache_key
+
+    def covers(self, db_type="general", library_id=None, mode="missing", search="", page=1, page_size=None, force=False):
+        started = time.monotonic()
+        settings = self.settings()
+        page = _as_int(page, 1, 1, 100000)
+        page_size = _as_int(page_size or min(settings["page_size"], 25), 25, 1, 200)
+        mode, target_issue, file_mode, search, cache_key = self._cover_query_context(
+            settings,
+            db_type,
+            library_id,
+            mode,
+            search,
+        )
+        force = _as_bool(force, False)
         with self._lock:
             cached = self._cover_issue_cache if self._cover_issue_cache_key == cache_key else None
 
@@ -1019,6 +1058,26 @@ class BookOasisMateService:
         )
         return data
 
+    def cover_issue_book_ids(self, db_type="general", library_id=None, mode="missing", search=""):
+        settings = self.settings()
+        mode, unused_issue, unused_file_mode, search, cache_key = self._cover_query_context(
+            settings,
+            db_type,
+            library_id,
+            mode,
+            search,
+        )
+        del unused_issue, unused_file_mode
+        with self._lock:
+            cached = self._cover_issue_cache if self._cover_issue_cache_key == cache_key else None
+            if cached is None:
+                raise ValueError("현재 조건의 표지 검사 결과가 없습니다. 먼저 검사 버튼을 눌러 주세요.")
+            return sorted({
+                int(item.get("id"))
+                for item in cached.get("items", [])
+                if str(item.get("id") or "").isdigit() and int(item.get("id")) > 0
+            })
+
     @staticmethod
     def _maintenance_worker_paths(root_path, job_name):
         root = Path(str(root_path or "")).expanduser().resolve()
@@ -1080,11 +1139,13 @@ class BookOasisMateService:
             self._write_database_migration_json(status_path, status)
         return status
 
-    def _launch_maintenance_worker(self, paths, config, initial_status):
+    def _launch_maintenance_worker(self, paths, config, initial_status, sensitive_config=False):
         paths["config"].parent.mkdir(parents=True, exist_ok=True)
         if paths["stop"].exists():
             paths["stop"].unlink()
         self._write_database_migration_json(paths["config"], config)
+        if sensitive_config and os.name != "nt":
+            os.chmod(paths["config"], 0o600)
         self._write_database_migration_json(paths["status"], initial_status)
         worker_script = Path(__file__).with_name("maintenance_worker.py")
         command = [
@@ -1103,6 +1164,200 @@ class BookOasisMateService:
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
+
+    def _batch_rescan_paths(self, settings=None):
+        settings = settings or self.settings()
+        db_path = str(settings.get("general_db_path") or "").strip()
+        if not db_path:
+            return None
+        return self._maintenance_worker_paths(
+            Path(db_path).expanduser().resolve().parent / ".bookoasis_mate_jobs",
+            "batch_book_rescan",
+        )
+
+    def batch_rescan_status(self):
+        with self._lock:
+            paths = self._batch_rescan_paths()
+            if paths is not None:
+                external = self._external_job_status(
+                    self._batch_rescan_status_path or paths["status"],
+                    "batch_book_rescan",
+                    self._batch_rescan_process,
+                    "검색 결과 일괄 재스캔 프로세스가 종료되었습니다.",
+                )
+                if external:
+                    self._batch_rescan_status = copy.deepcopy(external)
+                    finished_at = str(external.get("finished_at") or "")
+                    if (
+                        finished_at
+                        and finished_at != self._batch_rescan_invalidated_finished_at
+                        and external.get("is_working") in {"wait", "stop"}
+                    ):
+                        self._batch_rescan_invalidated_finished_at = finished_at
+                        self.invalidate()
+            return copy.deepcopy(self._batch_rescan_status)
+
+    def start_batch_rescan(
+        self,
+        source,
+        db_type="general",
+        library_id=None,
+        issue_type="all",
+        mode="missing",
+        search="",
+    ):
+        source = str(source or "").strip()
+        if source not in {"issues", "covers"}:
+            raise ValueError("일괄 재스캔 대상 화면이 올바르지 않습니다.")
+        db_type = str(db_type or "general").strip()
+        settings = self.settings()
+        target = self.engine(settings).get_target(db_type)
+        if not self._admin_credentials_configured(settings):
+            raise ValueError("BookOasis 관리자 계정과 비밀번호를 먼저 설정해 주세요.")
+
+        current_status = self.batch_rescan_status()
+        with self._lock:
+            if current_status.get("is_working") == "run":
+                return {
+                    "started": False,
+                    "message": "검색 결과 일괄 재스캔이 이미 실행 중입니다.",
+                    "status": current_status,
+                }
+
+        if source == "issues":
+            book_ids = self.engine(settings).issue_book_ids(
+                db_type=db_type,
+                library_id=library_id,
+                issue_type=issue_type,
+                search=search,
+            )
+            source_label = "문제 도서"
+            filter_summary = {
+                "library_id": str(library_id or ""),
+                "issue_type": str(issue_type or "all"),
+                "search": str(search or ""),
+            }
+        else:
+            book_ids = self.cover_issue_book_ids(
+                db_type=db_type,
+                library_id=library_id,
+                mode=mode,
+                search=search,
+            )
+            source_label = "표지 검사"
+            filter_summary = {
+                "library_id": str(library_id or ""),
+                "mode": str(mode or "missing"),
+                "search": str(search or ""),
+            }
+        book_ids = sorted({int(book_id) for book_id in book_ids if int(book_id or 0) > 0})
+        if not book_ids:
+            return {
+                "started": False,
+                "message": "현재 검색 조건에 재스캔할 도서가 없습니다.",
+                "status": current_status,
+            }
+
+        login = self.admin_client(settings).login_admin()
+        if not login.get("success"):
+            raise ValueError(login.get("message") or "BookOasis 관리자 연결에 실패했습니다.")
+
+        started_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        initial_status = self._empty_batch_rescan_status()
+        initial_status.update(
+            {
+                "is_working": "run",
+                "source": source,
+                "source_label": source_label,
+                "db_type": db_type,
+                "current": 0,
+                "total": len(book_ids),
+                "started_at": started_at,
+                "message": f"{source_label} 검색 결과를 재스캔할 준비를 하고 있습니다.",
+                "filters": filter_summary,
+            }
+        )
+        paths = self._batch_rescan_paths(settings)
+        if paths is None:
+            raise ValueError("일괄 재스캔 상태를 저장할 DB 경로가 설정되지 않았습니다.")
+        worker_config = {
+            "job_type": "batch_book_rescan",
+            "delete_config_after_read": True,
+            "db_type": db_type,
+            "db_path": str(target.path or ""),
+            "book_ids": book_ids,
+            "source": source,
+            "source_label": source_label,
+            "bookoasis_url": settings.get("bookoasis_url"),
+            "bookoasis_username": settings.get("bookoasis_username"),
+            "bookoasis_password": settings.get("bookoasis_password"),
+            "api_timeout": settings.get("api_timeout", 30),
+        }
+        try:
+            process = self._launch_maintenance_worker(
+                paths,
+                worker_config,
+                initial_status,
+                sensitive_config=True,
+            )
+        except Exception as error:
+            initial_status.update(
+                {
+                    "is_working": "error",
+                    "message": "검색 결과 일괄 재스캔 프로세스를 시작하지 못했습니다.",
+                    "error": str(error),
+                }
+            )
+            with self._lock:
+                self._batch_rescan_status = initial_status
+            raise
+
+        with self._lock:
+            self._batch_rescan_process = process
+            self._batch_rescan_status_path = paths["status"]
+            self._batch_rescan_stop_path = paths["stop"]
+            self._batch_rescan_status = copy.deepcopy(initial_status)
+        self._debug(
+            "검색 결과 일괄 재스캔 별도 프로세스 시작",
+            pid=process.pid,
+            source=source,
+            db_type=db_type,
+            books=len(book_ids),
+        )
+        return {
+            "started": True,
+            "message": f"검색 결과 {len(book_ids):,}권의 일괄 재스캔을 시작했습니다.",
+            "status": self.batch_rescan_status(),
+        }
+
+    def stop_batch_rescan(self):
+        current_status = self.batch_rescan_status()
+        with self._lock:
+            if current_status.get("is_working") != "run":
+                return {
+                    "requested": False,
+                    "message": "실행 중인 검색 결과 일괄 재스캔이 없습니다.",
+                    "status": current_status,
+                }
+            stop_path = self._batch_rescan_stop_path
+            if stop_path is None:
+                paths = self._batch_rescan_paths()
+                stop_path = paths["stop"] if paths is not None else None
+            if stop_path is not None:
+                stop_path.parent.mkdir(parents=True, exist_ok=True)
+                stop_path.touch()
+            self._batch_rescan_status["message"] = "현재 도서 처리 후 중지합니다."
+            if self._batch_rescan_status_path is not None:
+                self._write_database_migration_json(
+                    self._batch_rescan_status_path,
+                    self._batch_rescan_status,
+                )
+        self._debug("검색 결과 일괄 재스캔 중지 요청")
+        return {
+            "requested": True,
+            "message": "일괄 재스캔 중지를 요청했습니다.",
+            "status": self.batch_rescan_status(),
+        }
 
     def _orphan_cleanup_paths(self, cover_root=None):
         root = str(
