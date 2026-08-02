@@ -58,8 +58,12 @@ ISSUE_DIAGNOSTIC_RULES = {
     "pages": {
         "column": "books.total_pages",
         "value_key": "total_pages",
-        "rule": "NULL 또는 0 이하",
-        "sql": "COALESCE(books.total_pages, 0) <= 0",
+        "rule": "NULL 또는 0 이하이며 원격 ZIP/CBZ 분석 제한 대상이 아님",
+        "sql": (
+            "COALESCE(books.total_pages, 0) <= 0 AND NOT "
+            "(COALESCE(libraries.is_remote, 0) = 1 AND "
+            "LOWER(COALESCE(books.file_format, '')) IN ('zip', 'cbz'))"
+        ),
     },
     "file_size": {
         "column": "books.file_size",
@@ -215,11 +219,31 @@ class BookOasisMateEngine:
 
         library_join = ""
         library_name = "NULL AS library_name"
+        library_columns = set()
         if "libraries" in tables and "library_id" in columns:
             library_columns = self._columns(connection, "libraries")
             if {"id", "name"}.issubset(library_columns):
                 library_join = "LEFT JOIN libraries l ON l.id = b.library_id"
                 library_name = "l.name AS library_name"
+
+        informational_expressions = {}
+        if library_join and "is_remote" in library_columns and "file_format" in columns:
+            remote_archive = (
+                "(COALESCE(l.is_remote, 0) = 1 AND "
+                "LOWER(TRIM(COALESCE(b.file_format, ''))) IN ('zip', 'cbz'))"
+            )
+            if "pages" in expressions:
+                missing_pages = expressions["pages"]
+                expressions["pages"] = f"({missing_pages}) AND NOT {remote_archive}"
+                informational_expressions["remote_page_limited"] = (
+                    f"({missing_pages}) AND {remote_archive}"
+                )
+            if "cover" in expressions:
+                missing_cover = expressions["cover"]
+                expressions["cover"] = f"({missing_cover}) AND NOT {remote_archive}"
+                informational_expressions["remote_cover_limited"] = (
+                    f"({missing_cover}) AND {remote_archive}"
+                )
 
         return {
             "tables": tables,
@@ -231,6 +255,7 @@ class BookOasisMateEngine:
             "duplicate_count": duplicate_count,
             "library_join": library_join,
             "library_name": library_name,
+            "informational_expressions": informational_expressions,
         }
 
     def _book_summary(self, connection):
@@ -244,6 +269,13 @@ class BookOasisMateEngine:
                 if expression
                 else f"0 AS {issue_type}"
             )
+        for key in ("remote_page_limited", "remote_cover_limited"):
+            expression = parts["informational_expressions"].get(key)
+            select_items.append(
+                f"SUM(CASE WHEN {expression} THEN 1 ELSE 0 END) AS {key}"
+                if expression
+                else f"0 AS {key}"
+            )
 
         problem_expression = " OR ".join(expressions.values()) or "0"
         select_items.append(
@@ -254,6 +286,7 @@ class BookOasisMateEngine:
             SELECT {', '.join(select_items)}
             FROM books b
             {parts['duplicate_join']}
+            {parts['library_join']}
             WHERE {parts['active']}
         """
         row = connection.execute(query).fetchone()
@@ -350,16 +383,16 @@ class BookOasisMateEngine:
             columns = self._columns(connection, "scanner_tasks")
             if "status" in columns:
                 recent_condition = (
-                    "enqueue_at >= datetime('now', '-7 days') OR status IN ('pending', 'running')"
+                    "enqueue_at >= datetime('now', '-7 days') OR status IN ('pending', 'running', 'exit_pending')"
                     if "enqueue_at" in columns
-                    else "status IN ('pending', 'running', 'failed')"
+                    else "status IN ('pending', 'running', 'exit_pending', 'failed')"
                 )
                 row = connection.execute(
                     f"""
                     SELECT
                         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS recent_failed_tasks,
                         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_tasks,
-                        SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_tasks
+                        SUM(CASE WHEN status IN ('running', 'exit_pending') THEN 1 ELSE 0 END) AS running_tasks
                     FROM scanner_tasks
                     WHERE {recent_condition}
                     """
@@ -438,7 +471,16 @@ class BookOasisMateEngine:
 
     def build_report(self):
         databases = [self.inspect_target(target) for target in self.targets()]
-        totals = {key: 0 for key in ["total_books", "problem_books", *ISSUE_LABELS.keys()]}
+        totals = {
+            key: 0
+            for key in [
+                "total_books",
+                "problem_books",
+                *ISSUE_LABELS.keys(),
+                "remote_page_limited",
+                "remote_cover_limited",
+            ]
+        }
         scanner_totals = {
             key: 0
             for key in (
@@ -612,6 +654,7 @@ class BookOasisMateEngine:
                 SELECT b.id
                 FROM books b
                 {parts['duplicate_join']}
+                {parts['library_join']}
                 WHERE {' AND '.join(conditions)}
                 ORDER BY b.id
                 """,
@@ -630,9 +673,38 @@ class BookOasisMateEngine:
                 columns = self._columns(connection, "libraries")
                 select = [
                     f"{column}" if column in columns else f"NULL AS {column}"
-                    for column in ("id", "name", "last_scanned_at", "scan_status", "is_remote", "cron_schedule")
+                    for column in (
+                        "id",
+                        "name",
+                        "last_scanned_at",
+                        "scan_status",
+                        "is_remote",
+                        "cron_schedule",
+                        "vfs_refresh_before_scan",
+                        "rclone_rc_url",
+                    )
                 ]
                 libraries = [dict(row) for row in connection.execute(f"SELECT {', '.join(select)} FROM libraries ORDER BY name").fetchall()]
+                checkpoint_counts = {}
+                if "scanner_progress" in tables:
+                    progress_columns = self._columns(connection, "scanner_progress")
+                    if "library_id" in progress_columns:
+                        checkpoint_counts = {
+                            str(row["library_id"]): int(row["folder_count"] or 0)
+                            for row in connection.execute(
+                                """
+                                SELECT library_id, COUNT(*) AS folder_count
+                                FROM scanner_progress
+                                GROUP BY library_id
+                                """
+                            ).fetchall()
+                        }
+                for library in libraries:
+                    rc_url = str(library.pop("rclone_rc_url", "") or "").strip()
+                    library["rclone_rc_configured"] = bool(rc_url)
+                    library["checkpoint_folders"] = checkpoint_counts.get(
+                        str(library.get("id")), 0
+                    )
             if "scanner_tasks" in tables:
                 columns = self._columns(connection, "scanner_tasks")
                 select = [

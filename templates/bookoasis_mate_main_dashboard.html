@@ -77,14 +77,16 @@ function doctorSummaryOverview(totals, scanner, staleDays) {
   ]));
   groups.appendChild(doctorMetricGroup('메타데이터 누락', [
     {label:'표지 없음', value:doctorFormatCount(totals.cover, '권')},
+    {label:'원격 표지 추출 제한', value:doctorFormatCount(totals.remote_cover_limited, '권')},
     {label:'저자 없음', value:doctorFormatCount(totals.author, '권')},
     {label:'출판사 없음', value:doctorFormatCount(totals.publisher, '권')},
     {label:'소개 없음', value:doctorFormatCount(totals.summary, '권')}
   ]));
   groups.appendChild(doctorMetricGroup('파일 및 페이지', [
     {label:'페이지 수 미기록', value:doctorFormatCount(totals.pages, '권')},
+    {label:'원격 페이지 분석 제한', value:doctorFormatCount(totals.remote_page_limited, '권')},
     {label:'파일 크기 미기록', value:doctorFormatCount(totals.file_size, '권')},
-    {label:'페이지 수 기록', value:doctorFormatCount(Math.max(0, totalBooks - Number(totals.pages || 0)), '권')},
+    {label:'페이지 수 기록', value:doctorFormatCount(Math.max(0, totalBooks - Number(totals.pages || 0) - Number(totals.remote_page_limited || 0)), '권')},
     {label:'파일 크기 기록', value:doctorFormatCount(Math.max(0, totalBooks - Number(totals.file_size || 0)), '권')}
   ]));
   groups.appendChild(doctorMetricGroup('스캔 상태', [
@@ -97,7 +99,7 @@ function doctorSummaryOverview(totals, scanner, staleDays) {
   card.appendChild(bookoasisMateText(
     'div',
     'doctor-overview-note',
-    '활성 도서 기준입니다. 문제 유형은 서로 중복될 수 있습니다. 스캔 실패는 최근 7일 · 장기 미스캔은 ' + staleDays + '일 기준입니다.'
+    '활성 도서 기준입니다. 원격 ZIP/CBZ의 내부 표지·페이지 분석 제한은 점검 필요에서 제외합니다. 문제 유형은 서로 중복될 수 있습니다. 스캔 실패는 최근 7일 · 장기 미스캔은 ' + staleDays + '일 기준입니다.'
   ));
   return card;
 }

@@ -26,7 +26,8 @@
   <h5>스캔 상태</h5>
   <ul>
     <li><strong>설명</strong> — 보관함 상태, 최근 스캔 작업과 현재 실행 중인 BookOasis·Lazy Scanner 작업을 함께 보여줍니다.</li>
-    <li><strong>동작 방식</strong> — DB 작업 이력과 BookOasis 관리자 API의 실시간 상태를 결합해 표시하며 자동 갱신을 켜면 2초마다 새로 조회합니다. 보관함별 또는 전체 재스캔은 사용자가 버튼을 눌렀을 때 BookOasis API에 요청합니다.</li>
+    <li><strong>동작 방식</strong> — DB 작업 이력과 BookOasis 관리자 API의 실시간 상태를 결합해 표시하며 자동 갱신을 켜면 2초마다 새로 조회합니다. <code>exit_pending</code>은 메모리 환수 후 자동 재개되는 실행 흐름으로 집계하고, 체크포인트는 중단 후 이어서 처리할 수 있도록 저장된 완료 폴더 수입니다.</li>
+    <li>원격 보관함은 VFS 사전 갱신 설정과 RC 주소 설정 여부만 표시하며 주소나 인증정보 자체는 화면에 전달하지 않습니다. 보관함별 또는 전체 재스캔은 사용자가 버튼을 눌렀을 때 BookOasis API에 요청합니다.</li>
   </ul>
 </div>
 
@@ -56,7 +57,7 @@
 <div class="doctor-section doctor-card">
   <h4>페이지 수·파일 크기 판정 기준</h4>
   <ul>
-    <li><strong>페이지 수 미기록</strong>은 <code>books.total_pages</code>가 0 이하이거나 값이 없는 도서입니다.</li>
+    <li><strong>페이지 수 미기록</strong>은 <code>books.total_pages</code>가 0 이하이거나 값이 없는 도서입니다. 단, BookOasis가 내부 분석을 의도적으로 생략하는 원격 ZIP·CBZ는 점검 필요에서 제외하고 <strong>원격 페이지 분석 제한</strong>으로 별도 집계합니다.</li>
     <li><strong>파일 크기 미기록</strong>은 <code>books.file_size</code>가 0 이하이거나 값이 없는 도서입니다.</li>
     <li>두 항목은 값이 너무 크거나 작은지를 판정하는 이상치 검사가 아니라, 아직 값이 기록되지 않은 도서를 찾는 검사입니다.</li>
   </ul>
@@ -70,6 +71,7 @@
     <li>페이지 수가 0인 ZIP·CBZ·PDF·이미지 폴더는 상세 정보 또는 뷰어 요청 과정에서 페이지 수를 다시 계산해 DB에 저장할 수 있습니다.</li>
     <li>EPUB은 신규 스캔 시 호환용 페이지 수 100을 저장합니다. TXT는 페이지 수 계산 경로가 없어 0이 유지될 수 있습니다.</li>
     <li>Lazy Scanner는 ZIP·CBZ 오프셋 생성 시 페이지 수를 갱신하지만 <code>books.file_size</code>는 갱신하지 않습니다.</li>
+    <li>원격 ZIP·CBZ는 네트워크 부하 방지를 위해 전체 스캔에서 내부 오프셋과 아카이브 첫 페이지 표지 추출을 생략할 수 있습니다. 이때 페이지·표지 미기록은 상태 요약에서 원격 분석 제한으로 분리됩니다.</li>
     <li>메타데이터 잠금은 표지·제목·저자 같은 메타데이터 갱신을 제한합니다. 파일 크기와 오프셋 기반 페이지 수 저장에는 적용되지 않습니다.</li>
   </ul>
 </div>
@@ -91,6 +93,7 @@
     <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/tools/scanner/db_writer.py" target="_blank" rel="noopener noreferrer">scanner/db_writer.py</a> — 신규·기존 도서 DB 저장.</li>
     <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/services/book_info_service.py" target="_blank" rel="noopener noreferrer">book_info_service.py</a> — 상세·뷰어 요청 시 페이지 수 보정.</li>
     <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/tools/lazy_scanner.py" target="_blank" rel="noopener noreferrer">lazy_scanner.py</a> — 오프셋과 페이지 수 갱신.</li>
+    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/docs/spec_scanner_logic.md" target="_blank" rel="noopener noreferrer">spec_scanner_logic.md</a> — 체크포인트, 원격 경로, VFS와 예외 필터를 포함한 스캐너 명세.</li>
   </ul>
 </div>
 {% endblock %}

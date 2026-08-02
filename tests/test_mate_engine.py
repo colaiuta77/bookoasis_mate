@@ -112,6 +112,78 @@ class BookOasisMateEngineTest(unittest.TestCase):
             ),
         )
 
+    def test_exit_pending_is_counted_as_an_active_scanner_task(self):
+        connection = sqlite3.connect(self.db_path)
+        connection.execute(
+            """
+            INSERT INTO scanner_tasks VALUES
+              (3, 'lazy_scan', 'lazy_scan', 'exit_pending', 'RAM 환수 재기동',
+               CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL)
+            """
+        )
+        connection.commit()
+        connection.close()
+
+        report = BookOasisMateEngine(self.settings).build_report()
+
+        self.assertEqual(1, report["scanner"]["running_tasks"])
+
+    def test_remote_archive_page_limit_is_informational_not_a_problem(self):
+        remote_db = Path(self.tempdir.name) / "remote.db"
+        connection = sqlite3.connect(remote_db)
+        connection.executescript(
+            """
+            CREATE TABLE libraries (
+                id INTEGER PRIMARY KEY, name TEXT, is_remote INTEGER
+            );
+            CREATE TABLE books (
+                id INTEGER PRIMARY KEY, library_id INTEGER, title TEXT,
+                file_format TEXT, total_pages INTEGER, cover_image TEXT,
+                is_deleted INTEGER DEFAULT 0
+            );
+            INSERT INTO libraries VALUES (1, '원격 만화', 1);
+            INSERT INTO books VALUES (1, 1, '원격 도서', 'cbz', 0, '', 0);
+            """
+        )
+        connection.commit()
+        connection.close()
+        settings = dict(self.settings, general_db_path=str(remote_db))
+        engine = BookOasisMateEngine(settings)
+
+        report = engine.build_report()
+        pages = engine.list_issues(issue_type="pages", page_size=10)
+
+        self.assertEqual(0, report["totals"]["pages"])
+        self.assertEqual(1, report["totals"]["remote_page_limited"])
+        self.assertEqual(1, report["totals"]["remote_cover_limited"])
+        self.assertEqual(0, report["totals"]["problem_books"])
+        self.assertEqual(0, pages["total"])
+
+    def test_scanner_status_includes_checkpoint_and_vfs_flags_without_rc_url(self):
+        connection = sqlite3.connect(self.db_path)
+        connection.execute("ALTER TABLE libraries ADD COLUMN vfs_refresh_before_scan INTEGER DEFAULT 0")
+        connection.execute("ALTER TABLE libraries ADD COLUMN rclone_rc_url TEXT")
+        connection.execute(
+            "UPDATE libraries SET vfs_refresh_before_scan=1, rclone_rc_url='http://user:password@127.0.0.1:5572' WHERE id=2"
+        )
+        connection.execute(
+            "CREATE TABLE scanner_progress (library_id TEXT, folder_path TEXT)"
+        )
+        connection.executemany(
+            "INSERT INTO scanner_progress VALUES (?, ?)",
+            [("2", "/comics/A"), ("2", "/comics/B")],
+        )
+        connection.commit()
+        connection.close()
+
+        status = BookOasisMateEngine(self.settings).scanner_status()
+        remote = next(item for item in status["libraries"] if item["id"] == 2)
+
+        self.assertEqual(2, remote["checkpoint_folders"])
+        self.assertEqual(1, remote["vfs_refresh_before_scan"])
+        self.assertTrue(remote["rclone_rc_configured"])
+        self.assertNotIn("rclone_rc_url", remote)
+
     def test_issue_list_filters_searches_and_paginates(self):
         engine = BookOasisMateEngine(self.settings)
         connection = sqlite3.connect(self.db_path)
@@ -144,7 +216,10 @@ class BookOasisMateEngineTest(unittest.TestCase):
         self.assertEqual("페이지 수 미기록", reasons["pages"]["label"])
         self.assertEqual("books.total_pages", reasons["pages"]["column"])
         self.assertEqual(0, reasons["pages"]["value"])
-        self.assertEqual("NULL 또는 0 이하", reasons["pages"]["rule"])
+        self.assertEqual(
+            "NULL 또는 0 이하이며 원격 ZIP/CBZ 분석 제한 대상이 아님",
+            reasons["pages"]["rule"],
+        )
         self.assertEqual("파일 크기 미기록", reasons["file_size"]["label"])
         self.assertTrue(diagnostics["classification"]["active_filter"]["matched"])
         self.assertEqual("general", diagnostics["book"]["db_type"])

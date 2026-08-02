@@ -431,7 +431,31 @@ class BookOasisMateService:
             and libraries_response.get("success")
             and isinstance(libraries_response.get("libraries"), list)
         ):
-            data["libraries"] = libraries_response["libraries"]
+            database_libraries = {
+                str(item.get("id")): item
+                for item in data.get("libraries", [])
+                if isinstance(item, dict) and item.get("id") is not None
+            }
+            api_libraries = []
+            for raw_item in libraries_response["libraries"]:
+                if not isinstance(raw_item, dict):
+                    continue
+                item = dict(raw_item)
+                database_item = database_libraries.get(str(item.get("id")), {})
+                rc_url = str(item.pop("rclone_rc_url", "") or "").strip()
+                item.pop("physical_path", None)
+                item["rclone_rc_configured"] = bool(
+                    rc_url or database_item.get("rclone_rc_configured")
+                )
+                item["checkpoint_folders"] = int(
+                    database_item.get("checkpoint_folders") or 0
+                )
+                if item.get("vfs_refresh_before_scan") is None:
+                    item["vfs_refresh_before_scan"] = database_item.get(
+                        "vfs_refresh_before_scan"
+                    )
+                api_libraries.append(item)
+            data["libraries"] = api_libraries
             data["library_source"] = "api"
         else:
             data["library_api_error"] = str(

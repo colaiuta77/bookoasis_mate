@@ -43,7 +43,7 @@
 
 <h4>보관함 상태</h4>
 <div class="doctor-table-wrap"><table class="table table-sm doctor-table">
-  <thead><tr><th>보관함</th><th>상태</th><th>마지막 스캔</th><th>스케줄</th><th>원격</th><th>작업</th></tr></thead>
+  <thead><tr><th>보관함</th><th>상태</th><th>마지막 스캔</th><th>스케줄</th><th>원격</th><th>VFS</th><th>체크포인트</th><th>작업</th></tr></thead>
   <tbody id="library_rows"></tbody>
 </table></div>
 <div id="library_empty" class="doctor-empty" style="display:none">등록된 보관함이 없습니다.</div>
@@ -147,6 +147,19 @@ function renderScanner(data) {
     row.appendChild(bookoasisMateText('td', 'doctor-muted', item.last_scanned_at || '미실행'));
     row.appendChild(bookoasisMateText('td', '', item.cron_schedule || '-'));
     row.appendChild(bookoasisMateText('td', '', Number(item.is_remote || 0) ? '예' : '아니요'));
+    row.appendChild(bookoasisMateText(
+      'td',
+      'doctor-muted',
+      Number(item.is_remote || 0)
+        ? ((Number(item.vfs_refresh_before_scan || 0) ? '설정 On' : '자동 감지') +
+          ' · ' + (item.rclone_rc_configured ? 'RC 설정' : '기본 RC'))
+        : '-'
+    ));
+    row.appendChild(bookoasisMateText(
+      'td',
+      Number(item.checkpoint_folders || 0) ? 'doctor-live-status' : 'doctor-muted',
+      Number(item.checkpoint_folders || 0) ? item.checkpoint_folders + '개 폴더' : '-'
+    ));
     var actionCell = document.createElement('td');
     actionCell.className = 'doctor-library-actions';
     var scanButton = bookoasisMateText('button', 'btn btn-sm btn-outline-warning', '재스캔');

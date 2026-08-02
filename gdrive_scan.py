@@ -157,7 +157,11 @@ def is_relevant_event(item_type, path, removed_path, extensions):
     if item_type == "directory":
         return True
     paths = [value for value in (path, removed_path) if value]
-    return any(posixpath.splitext(value)[1].lower() in extensions for value in paths)
+    return any(
+        posixpath.basename(value).lower() == ".bookoasisignore"
+        or posixpath.splitext(value)[1].lower() in extensions
+        for value in paths
+    )
 
 
 def validate_event(action, item_type, path, removed_path="", extensions=None):

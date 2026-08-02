@@ -1022,7 +1022,13 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         package = self._load_package(_DummyDb())
         service = package.P.bookoasis_mate_service
         db_snapshot = {
-            "libraries": [],
+            "libraries": [{
+                "id": 3,
+                "name": "DB 보관함",
+                "checkpoint_folders": 7,
+                "vfs_refresh_before_scan": 0,
+                "rclone_rc_configured": False,
+            }],
             "tasks": [{
                 "id": 10,
                 "task_type": "lazy_scan",
@@ -1052,6 +1058,8 @@ class FlaskFarmLoaderTest(unittest.TestCase):
                         "id": 3,
                         "name": "API 보관함",
                         "scan_status": "scanning",
+                        "vfs_refresh_before_scan": 1,
+                        "rclone_rc_url": "http://user:password@127.0.0.1:5572",
                     }],
                 }
                 mocked_admin.return_value.queue_status.return_value = queue_response
@@ -1065,6 +1073,9 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         self.assertTrue(result["tasks"][0]["is_active"])
         self.assertEqual("api", result["library_source"])
         self.assertEqual("API 보관함", result["libraries"][0]["name"])
+        self.assertEqual(7, result["libraries"][0]["checkpoint_folders"])
+        self.assertTrue(result["libraries"][0]["rclone_rc_configured"])
+        self.assertNotIn("rclone_rc_url", result["libraries"][0])
         self.assertEqual("lazy_scan", result["live_queue"]["running"]["type"])
         self.assertEqual(12, result["lazy_progress"]["done"])
 

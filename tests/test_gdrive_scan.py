@@ -79,6 +79,24 @@ class GDriveScanTest(unittest.TestCase):
         self.assertFalse(file_event["relevant"])
         self.assertTrue(directory_event["relevant"])
 
+    def test_bookoasis_ignore_control_file_is_relevant_without_extension(self):
+        created = validate_event(
+            "create",
+            "file",
+            "/GDRIVE/READING/만화/.bookoasisignore",
+            extensions=".cbz,.epub",
+        )
+        deleted = validate_event(
+            "delete",
+            "file",
+            "/GDRIVE/READING/만화/.bookoasisignore",
+            removed_path="/GDRIVE/READING/만화/.bookoasisignore",
+            extensions=".cbz,.epub",
+        )
+
+        self.assertTrue(created["relevant"])
+        self.assertTrue(deleted["relevant"])
+
     def test_move_event_refreshes_old_and_new_parents(self):
         operations = event_vfs_operations(
             {
