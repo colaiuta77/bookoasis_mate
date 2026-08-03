@@ -948,7 +948,7 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         self.assertNotIn("secret-password", log_text)
         self.assertNotIn("검색어", log_text)
 
-    def test_cover_service_paginates_cached_issue_results(self):
+    def test_cover_service_paginates_cached_missing_cover_results(self):
         with tempfile.TemporaryDirectory() as cover_root:
             _DummySetting.values = {
                 "bookoasis_url": "http://bookoasis:5930",
@@ -968,9 +968,9 @@ class FlaskFarmLoaderTest(unittest.TestCase):
                 },
                 {
                     "items": [
-                        {"id": 3, "cover_path": "1/small.webp", "title": "저해상도"},
-                        {"id": 4, "cover_path": "1/missing.webp", "title": "파일 없음"},
-                        {"id": 5, "cover_path": "1/tiny.webp", "title": "작은 파일"},
+                        {"id": 3, "cover_path": "", "title": "표지 없음 2"},
+                        {"id": 4, "cover_path": "1/cover.webp", "title": "정상 2"},
+                        {"id": 5, "cover_path": "1/cover2.webp", "title": "정상 3"},
                     ],
                     "total": 5,
                     "page": 2,
@@ -978,39 +978,24 @@ class FlaskFarmLoaderTest(unittest.TestCase):
                     "pages": 2,
                 },
             ]
-            statuses = {
-                "": {"status": "missing_reference"},
-                "1/normal.webp": {"status": "ok"},
-                "1/small.webp": {"status": "low_resolution", "issues": ["low_resolution"], "width": 100, "height": 140},
-                "1/missing.webp": {"status": "missing_file"},
-                "1/tiny.webp": {"status": "low_resolution", "issues": ["low_resolution", "small_file"]},
-            }
-
             with patch(
                 "bookoasis_mate.mate_service.BookOasisMateEngine.cover_items",
                 side_effect=sources,
             ) as mocked_items:
-                with patch(
-                    "bookoasis_mate.mate_service.inspect_cover_file",
-                    side_effect=lambda root, path, **kwargs: statuses[path],
-                ) as mocked_inspect:
-                    first = package.P.bookoasis_mate_service.covers(
-                        mode="resolution",
-                        page=1,
-                        page_size=1,
-                        force=True,
-                    )
-                    second = package.P.bookoasis_mate_service.covers(
-                        mode="resolution",
-                        page=2,
-                        page_size=1,
-                    )
-                    cached_ids = package.P.bookoasis_mate_service.cover_issue_book_ids(
-                        mode="resolution",
-                    )
+                first = package.P.bookoasis_mate_service.covers(
+                    mode="missing",
+                    page=1,
+                    page_size=1,
+                    force=True,
+                )
+                second = package.P.bookoasis_mate_service.covers(
+                    mode="missing",
+                    page=2,
+                    page_size=1,
+                )
 
-        self.assertEqual([3], [item["id"] for item in first["items"]])
-        self.assertEqual([5], [item["id"] for item in second["items"]])
+        self.assertEqual([1], [item["id"] for item in first["items"]])
+        self.assertEqual([3], [item["id"] for item in second["items"]])
         self.assertEqual(2, first["total"])
         self.assertEqual(5, first["source_total"])
         self.assertEqual(2, first["pages"])
@@ -1018,12 +1003,10 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         self.assertEqual(2, first["issue_count"])
         self.assertFalse(first["cache_hit"])
         self.assertTrue(second["cache_hit"])
-        self.assertEqual([3, 5], cached_ids)
         self.assertEqual(2, mocked_items.call_count)
-        self.assertEqual(5, mocked_inspect.call_count)
         self.assertGreaterEqual(first["duration_ms"], 0)
 
-    def test_cover_service_separates_inspection_modes_and_legacy_aliases(self):
+    def test_cover_service_keeps_missing_alias_and_requires_background_file_result(self):
         with tempfile.TemporaryDirectory() as cover_root:
             _DummySetting.values = {
                 "bookoasis_url": "http://bookoasis:5930",
@@ -1042,29 +1025,139 @@ class FlaskFarmLoaderTest(unittest.TestCase):
                 "page_size": 1000,
                 "pages": 1,
             }
-            statuses = {
-                "": {"status": "missing_reference"},
-                "1/low.webp": {"status": "low_resolution", "issues": ["low_resolution"]},
-                "1/small.webp": {"status": "small_file", "issues": ["small_file"]},
-                "1/wide.webp": {"status": "abnormal_aspect_ratio", "issues": ["abnormal_aspect_ratio"]},
-            }
-
             with patch("bookoasis_mate.mate_service.BookOasisMateEngine.cover_items", return_value=source):
-                with patch(
-                    "bookoasis_mate.mate_service.inspect_cover_file",
-                    side_effect=lambda root, path, **kwargs: statuses[path],
-                ):
-                    missing = package.P.bookoasis_mate_service.covers(mode="http", force=True)
-                    resolution = package.P.bookoasis_mate_service.covers(mode="file", force=True)
-                    file_size = package.P.bookoasis_mate_service.covers(mode="file_size", force=True)
-                    aspect = package.P.bookoasis_mate_service.covers(mode="aspect", force=True)
+                missing = package.P.bookoasis_mate_service.covers(mode="http", force=True)
+                with self.assertRaisesRegex(ValueError, "백그라운드 검사를 시작"):
+                    package.P.bookoasis_mate_service.covers(mode="file", force=True)
 
         self.assertEqual("missing", missing["mode"])
         self.assertEqual([1], [item["id"] for item in missing["items"]])
-        self.assertEqual("resolution", resolution["mode"])
-        self.assertEqual([2], [item["id"] for item in resolution["items"]])
-        self.assertEqual([3], [item["id"] for item in file_size["items"]])
-        self.assertEqual([4], [item["id"] for item in aspect["items"]])
+
+    def test_cover_inspection_rejects_invalid_library_id(self):
+        _DummySetting.values = {
+            "general_db_path": "media_general.db",
+            "bookoasis_url": "http://bookoasis:5930",
+        }
+        package = self._load_package(_DummyDb())
+        service = package.P.bookoasis_mate_service
+
+        with self.assertRaisesRegex(ValueError, "보관함 ID"):
+            service._cover_inspection_criteria(
+                service.settings(),
+                "general",
+                "not-a-number",
+                "",
+            )
+
+    def test_service_starts_persistent_cover_inspection_without_credentials(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            db_path = root / "media_general.db"
+            cover_root = root / "covers"
+            db_path.write_bytes(b"database")
+            cover_root.mkdir()
+            _DummySetting.values = {
+                "general_db_path": str(db_path),
+                "adult_db_path": "",
+                "bookoasis_url": "http://bookoasis:5930",
+                "bookoasis_username": "admin",
+                "bookoasis_password": "secret-password",
+                "cover_root_path": str(cover_root),
+                "cover_min_width": "200",
+                "cover_min_height": "280",
+                "cover_min_file_size_kb": "15",
+                "cover_min_aspect_percent": "45",
+            }
+            package = self._load_package(_DummyDb())
+            service = package.P.bookoasis_mate_service
+            process = Mock(pid=4321)
+
+            with patch.object(service, "_launch_maintenance_worker", return_value=process) as mocked_launch:
+                started = service.start_cover_inspection(
+                    db_type="general",
+                    library_id="7",
+                    mode="resolution",
+                    search="대상",
+                )
+
+            args, kwargs = mocked_launch.call_args
+            config = args[1]
+
+        self.assertTrue(started["started"])
+        self.assertEqual("cover_inspection", config["job_type"])
+        self.assertEqual("7", config["library_id"])
+        self.assertNotIn("bookoasis_username", config["settings"])
+        self.assertNotIn("bookoasis_password", config["settings"])
+        self.assertFalse(kwargs.get("sensitive_config", False))
+
+    def test_service_restores_and_filters_persistent_cover_inspection_result(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            db_path = root / "media_general.db"
+            db_path.write_bytes(b"database")
+            _DummySetting.values = {
+                "general_db_path": str(db_path),
+                "bookoasis_url": "http://bookoasis:5930",
+                "page_size": "25",
+            }
+            package = self._load_package(_DummyDb())
+            service = package.P.bookoasis_mate_service
+            paths = service._cover_inspection_paths()
+            unused_criteria, fingerprint = service._cover_inspection_criteria(
+                service.settings(),
+                "general",
+                "7",
+                "대상",
+            )
+            del unused_criteria
+            paths["status"].parent.mkdir(parents=True, exist_ok=True)
+            paths["status"].write_text(
+                json.dumps(
+                    {
+                        "job_type": "cover_inspection",
+                        "is_working": "wait",
+                        "db_type": "general",
+                        "library_id": "7",
+                        "search": "대상",
+                        "mode": "resolution",
+                        "result_ready": True,
+                        "fingerprint": fingerprint,
+                        "current": 3,
+                        "total": 3,
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            paths["result"].write_text(
+                json.dumps(
+                    {
+                        "fingerprint": fingerprint,
+                        "source_total": 3,
+                        "inspected_count": 3,
+                        "duration_ms": 1200,
+                        "items": [
+                            {"id": 1, "inspection": {"issues": ["low_resolution"]}},
+                            {"id": 2, "inspection": {"issues": ["small_file"]}},
+                            {"id": 3, "inspection": {"issues": ["low_resolution", "abnormal_aspect_ratio"]}},
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            restored = service.cover_inspection_status(mode="aspect", page=1, page_size=25)
+            ids = service.cover_issue_book_ids(
+                db_type="general",
+                library_id="7",
+                mode="file_size",
+                search="대상",
+            )
+
+        self.assertEqual([3], [item["id"] for item in restored["data"]["items"]])
+        self.assertEqual("aspect", restored["data"]["mode"])
+        self.assertEqual([2], ids)
 
     def test_main_ajax_logs_start_and_finish(self):
         package = self._load_package(_DummyDb())
@@ -1375,6 +1468,54 @@ class FlaskFarmLoaderTest(unittest.TestCase):
             search="검색어",
         )
         self.assertEqual("run", status_response["data"]["is_working"])
+        self.assertEqual("success", stop_response["ret"])
+
+    def test_main_ajax_routes_cover_inspection_commands(self):
+        package = self._load_package(_DummyDb())
+        module = package.P.module_list[0]
+
+        with patch.object(
+            module.service,
+            "start_cover_inspection",
+            return_value={"started": True, "message": "시작", "status": {"is_working": "run"}},
+        ) as mocked_start:
+            start_response = module.process_ajax(
+                "cover_inspection_start",
+                types.SimpleNamespace(form={
+                    "db_type": "adult",
+                    "library_id": "7",
+                    "mode": "aspect",
+                    "search": "검색어",
+                }),
+            )
+        with patch.object(
+            module.service,
+            "cover_inspection_status",
+            return_value={"status": {"is_working": "run"}, "data": None},
+        ) as mocked_status:
+            status_response = module.process_ajax(
+                "cover_inspection_status",
+                types.SimpleNamespace(form={"mode": "file_size", "page": "2"}),
+            )
+        with patch.object(
+            module.service,
+            "stop_cover_inspection",
+            return_value={"requested": True, "message": "중지", "status": {"is_working": "run"}},
+        ):
+            stop_response = module.process_ajax(
+                "cover_inspection_stop",
+                types.SimpleNamespace(form={}),
+            )
+
+        self.assertEqual("success", start_response["ret"])
+        mocked_start.assert_called_once_with(
+            db_type="adult",
+            library_id="7",
+            mode="aspect",
+            search="검색어",
+        )
+        mocked_status.assert_called_once_with(mode="file_size", page="2", page_size=None)
+        self.assertEqual("run", status_response["data"]["status"]["is_working"])
         self.assertEqual("success", stop_response["ret"])
 
     def test_service_starts_filtered_batch_rescan_with_sensitive_external_config(self):

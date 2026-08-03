@@ -261,6 +261,32 @@ class ModuleMain(PluginModuleBase):
                     force=req.form.get("force"),
                 )
                 return jsonify({"ret": "success", "data": data})
+            if command == "cover_inspection_start":
+                data = self.service.start_cover_inspection(
+                    db_type=req.form.get("db_type", "general"),
+                    library_id=req.form.get("library_id"),
+                    mode=req.form.get("mode", "resolution"),
+                    search=req.form.get("search", ""),
+                )
+                return jsonify({
+                    "ret": "success" if data.get("started") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
+            if command == "cover_inspection_status":
+                data = self.service.cover_inspection_status(
+                    mode=req.form.get("mode", "resolution"),
+                    page=req.form.get("page", 1),
+                    page_size=req.form.get("page_size") or None,
+                )
+                return jsonify({"ret": "success", "data": data})
+            if command == "cover_inspection_stop":
+                data = self.service.stop_cover_inspection()
+                return jsonify({
+                    "ret": "success" if data.get("requested") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
             if command == "orphan_cleanup_start":
                 data = self.service.start_orphan_cleanup(
                     db_type=req.form.get("db_type", "general"),

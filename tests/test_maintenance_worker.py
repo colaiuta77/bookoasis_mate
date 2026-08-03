@@ -313,6 +313,72 @@ class MaintenanceWorkerTest(unittest.TestCase):
         self.assertEqual(1, status["failed_count"])
         self.assertIn("3회", status["items"][0]["message"])
 
+    def test_cover_inspection_worker_persists_shared_file_analysis(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            config_path = root / "config.json"
+            status_path = root / "status.json"
+            result_path = root / "result.json"
+            stop_path = root / "stop"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "job_type": "cover_inspection",
+                        "settings": {
+                            "cover_root_path": str(root),
+                            "cover_min_width": 200,
+                            "cover_min_height": 280,
+                            "cover_min_file_size_kb": 15,
+                            "cover_min_aspect_percent": 45,
+                        },
+                        "db_type": "general",
+                        "library_id": "7",
+                        "search": "표지",
+                        "fingerprint": "test-fingerprint",
+                        "result_path": str(result_path),
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            source = {
+                "items": [
+                    {"id": 1, "title": "정상", "cover_path": "7/ok.webp"},
+                    {"id": 2, "title": "복합 문제", "cover_path": "7/bad.webp"},
+                ],
+                "total": 2,
+                "page": 1,
+                "pages": 1,
+            }
+
+            with patch("maintenance_worker.BookOasisMateEngine") as engine_class:
+                engine_class.return_value.cover_items.return_value = source
+                with patch(
+                    "maintenance_worker.inspect_cover_file",
+                    side_effect=[
+                        {"status": "ok", "issues": []},
+                        {
+                            "status": "low_resolution",
+                            "issues": ["low_resolution", "small_file"],
+                            "width": 100,
+                            "height": 140,
+                        },
+                    ],
+                ):
+                    return_code = run_worker(config_path, status_path, stop_path)
+            status = self._read_status(status_path)
+            result = self._read_status(result_path)
+
+        self.assertEqual(0, return_code)
+        self.assertEqual("wait", status["is_working"])
+        self.assertEqual(2, status["current"])
+        self.assertEqual(2, status["total"])
+        self.assertTrue(status["result_ready"])
+        self.assertEqual(1, status["issue_counts"]["low_resolution"])
+        self.assertEqual(1, status["issue_counts"]["small_file"])
+        self.assertEqual([2], [item["id"] for item in result["items"]])
+        self.assertEqual("test-fingerprint", result["fingerprint"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,7 @@
 # FlaskFarm 설정과 진단 엔진, 검사 이력 저장을 연결합니다.
 import copy
 import csv
+import hashlib
 import io
 import json
 import os
@@ -8,7 +9,6 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -20,7 +20,6 @@ from .category_migration import (
     parse_library_ids,
     parse_paths,
 )
-from .cover_inspector import inspect_cover_file
 from .kavita_migration import KavitaMigrationEngine, parse_name_list
 from .mate_engine import BookOasisMateEngine, _as_bool, _as_int
 
@@ -142,6 +141,10 @@ class BookOasisMateService:
         self._batch_rescan_stop_path = None
         self._batch_rescan_status = self._empty_batch_rescan_status()
         self._batch_rescan_invalidated_finished_at = ""
+        self._cover_inspection_process = None
+        self._cover_inspection_status_path = None
+        self._cover_inspection_stop_path = None
+        self._cover_inspection_status = self._empty_cover_inspection_status()
         self._migration_stop = threading.Event()
         self._migration_process = None
         self._migration_status_path = None
@@ -213,6 +216,34 @@ class BookOasisMateService:
             "message": "대기중",
             "items": [],
             "truncated": False,
+            "stopped": False,
+            "error": "",
+        }
+
+    @staticmethod
+    def _empty_cover_inspection_status():
+        return {
+            "is_working": "wait",
+            "job_type": "cover_inspection",
+            "db_type": "general",
+            "library_id": "",
+            "search": "",
+            "mode": "resolution",
+            "fingerprint": "",
+            "current": 0,
+            "total": 0,
+            "progress_percent": 0,
+            "issue_counts": {
+                "low_resolution": 0,
+                "small_file": 0,
+                "abnormal_aspect_ratio": 0,
+            },
+            "result_ready": False,
+            "started_at": "",
+            "finished_at": "",
+            "elapsed_seconds": 0,
+            "message": "대기중",
+            "logs": [],
             "stopped": False,
             "error": "",
         }
@@ -986,65 +1017,55 @@ class BookOasisMateService:
             mode,
             search,
         )
+        if file_mode:
+            restored = self.cover_inspection_status(
+                mode=mode,
+                page=page,
+                page_size=page_size,
+            )
+            if restored.get("data") is None:
+                raise ValueError(
+                    "현재 조건의 표지 정밀 검사 결과가 없습니다. 검사 버튼을 눌러 백그라운드 검사를 시작해 주세요."
+                )
+            return restored["data"]
         force = _as_bool(force, False)
         with self._lock:
             cached = self._cover_issue_cache if self._cover_issue_cache_key == cache_key else None
 
         cache_hit = not force and cached is not None
         if not cache_hit:
-            root = settings.get("cover_root_path")
-            if file_mode and (not root or not Path(root).is_dir()):
-                raise FileNotFoundError("설정된 표지 디렉터리를 찾을 수 없습니다.")
             engine = self.engine(settings)
             issues = []
             source_total = 0
             inspected_count = 0
             source_page = 1
-            executor = ThreadPoolExecutor(max_workers=4) if file_mode else None
-            try:
-                while True:
-                    batch = engine.cover_items(
-                        db_type=db_type,
-                        library_id=library_id,
-                        search=search,
-                        page=source_page,
-                        page_size=1000,
-                    )
-                    if source_page == 1:
-                        source_total = batch["total"]
-                    items = batch["items"]
-                    if file_mode:
-                        inspections = list(executor.map(
-                            lambda item: inspect_cover_file(
-                                root,
-                                item.get("cover_path"),
-                                min_width=settings["cover_min_width"],
-                                min_height=settings["cover_min_height"],
-                                min_file_size=settings["cover_min_file_size_kb"] * 1024,
-                                min_aspect_ratio=settings["cover_min_aspect_percent"] / 100,
-                            ),
-                            items,
-                        ))
-                    else:
-                        inspections = [
-                            {"status": "missing_reference"} if not item.get("cover_path") else {"status": "ok"}
-                            for item in items
-                        ]
-                    inspected_count += len(items)
-                    for item, inspection in zip(items, inspections):
-                        issue_codes = inspection.get("issues") or [inspection.get("status")]
-                        if target_issue not in issue_codes:
-                            continue
-                        inspection["status"] = target_issue
-                        inspection["issues"] = [target_issue]
-                        item["inspection"] = inspection
-                        issues.append(item)
-                    if source_page >= batch["pages"] or not items:
-                        break
-                    source_page += 1
-            finally:
-                if executor is not None:
-                    executor.shutdown(wait=True)
+            while True:
+                batch = engine.cover_items(
+                    db_type=db_type,
+                    library_id=library_id,
+                    search=search,
+                    page=source_page,
+                    page_size=1000,
+                )
+                if source_page == 1:
+                    source_total = batch["total"]
+                items = batch["items"]
+                inspections = [
+                    {"status": "missing_reference"} if not item.get("cover_path") else {"status": "ok"}
+                    for item in items
+                ]
+                inspected_count += len(items)
+                for item, inspection in zip(items, inspections):
+                    issue_codes = inspection.get("issues") or [inspection.get("status")]
+                    if target_issue not in issue_codes:
+                        continue
+                    inspection["status"] = target_issue
+                    inspection["issues"] = [target_issue]
+                    item["inspection"] = inspection
+                    issues.append(item)
+                if source_page >= batch["pages"] or not items:
+                    break
+                source_page += 1
 
             cached = {
                 "items": issues,
@@ -1088,6 +1109,247 @@ class BookOasisMateService:
         )
         return data
 
+    def _cover_inspection_paths(self, settings=None):
+        settings = settings or self.settings()
+        db_path = str(
+            settings.get("general_db_path")
+            or settings.get("adult_db_path")
+            or ""
+        ).strip()
+        if not db_path:
+            return None
+        paths = self._maintenance_worker_paths(
+            Path(db_path).expanduser().resolve().parent / ".bookoasis_mate_jobs",
+            "cover_inspection",
+        )
+        paths["result"] = paths["status"].with_name(
+            ".bookoasis_mate_cover_inspection_result.json"
+        )
+        return paths
+
+    def _cover_inspection_criteria(self, settings, db_type, library_id, search):
+        target = self.engine(settings).get_target(db_type)
+        selected_library_id = ""
+        if str(library_id or "").strip():
+            try:
+                numeric_library_id = int(str(library_id).strip())
+            except (TypeError, ValueError) as error:
+                raise ValueError("보관함 ID가 올바르지 않습니다.") from error
+            if numeric_library_id < 1:
+                raise ValueError("보관함 ID가 올바르지 않습니다.")
+            selected_library_id = str(numeric_library_id)
+        db_path = Path(str(target.path or "")).expanduser()
+
+        def file_signature(path):
+            try:
+                stat = path.stat()
+                return [int(stat.st_size), int(stat.st_mtime_ns)]
+            except OSError:
+                return [0, 0]
+
+        criteria = {
+            "db_type": target.db_type,
+            "library_id": selected_library_id,
+            "search": str(search or "").strip(),
+            "db_path": str(db_path.resolve()),
+            "db_signature": file_signature(db_path),
+            "wal_signature": file_signature(Path(f"{db_path}-wal")),
+            "cover_root_path": str(settings.get("cover_root_path") or ""),
+            "cover_min_width": int(settings["cover_min_width"]),
+            "cover_min_height": int(settings["cover_min_height"]),
+            "cover_min_file_size_kb": int(settings["cover_min_file_size_kb"]),
+            "cover_min_aspect_percent": int(settings["cover_min_aspect_percent"]),
+        }
+        encoded = json.dumps(
+            criteria,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return criteria, hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _cover_result_page(result, mode, page, page_size):
+        mode = {"file": "resolution"}.get(mode, mode)
+        mode = mode if mode in {"resolution", "file_size", "aspect"} else "resolution"
+        target_issue = {
+            "resolution": "low_resolution",
+            "file_size": "small_file",
+            "aspect": "abnormal_aspect_ratio",
+        }[mode]
+        matches = []
+        for source in result.get("items") or []:
+            inspection = source.get("inspection") or {}
+            if target_issue not in (inspection.get("issues") or []):
+                continue
+            item = copy.deepcopy(source)
+            item["inspection"]["status"] = target_issue
+            item["inspection"]["issues"] = [target_issue]
+            matches.append(item)
+        total = len(matches)
+        pages = (total + page_size - 1) // page_size
+        page = min(page, max(1, pages))
+        offset = (page - 1) * page_size
+        return {
+            "items": matches[offset:offset + page_size],
+            "total": total,
+            "source_total": int(result.get("source_total") or 0),
+            "inspected_count": int(result.get("inspected_count") or 0),
+            "issue_count": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": pages,
+            "mode": mode,
+            "duration_ms": int(result.get("duration_ms") or 0),
+            "cache_hit": True,
+            "complete": bool(result.get("complete", True)),
+        }
+
+    def cover_inspection_status(self, mode="resolution", page=1, page_size=None):
+        settings = self.settings()
+        page = _as_int(page, 1, 1, 100000)
+        page_size = _as_int(page_size or min(settings["page_size"], 25), 25, 1, 200)
+        with self._lock:
+            paths = self._cover_inspection_paths(settings)
+            if paths is not None:
+                external = self._external_job_status(
+                    self._cover_inspection_status_path or paths["status"],
+                    "cover_inspection",
+                    self._cover_inspection_process,
+                    "표지 정밀 검사 프로세스가 종료되었습니다.",
+                )
+                if external:
+                    self._cover_inspection_status = copy.deepcopy(external)
+            status = copy.deepcopy(self._cover_inspection_status)
+
+        data = None
+        if paths is not None and status.get("result_ready"):
+            result = self._read_database_migration_json(paths["result"])
+            if (
+                isinstance(result, dict)
+                and result.get("fingerprint")
+                and result.get("fingerprint") == status.get("fingerprint")
+            ):
+                data = self._cover_result_page(result, mode, page, page_size)
+        return {"status": status, "data": data}
+
+    def start_cover_inspection(
+        self,
+        db_type="general",
+        library_id=None,
+        mode="resolution",
+        search="",
+    ):
+        mode = {"file": "resolution"}.get(mode, mode)
+        if mode not in {"resolution", "file_size", "aspect"}:
+            raise ValueError("파일 정밀 검사 유형이 올바르지 않습니다.")
+        settings = self.settings()
+        root = str(settings.get("cover_root_path") or "").strip()
+        if not root or not Path(root).is_dir():
+            raise FileNotFoundError("설정된 표지 디렉터리를 찾을 수 없습니다.")
+        criteria, fingerprint = self._cover_inspection_criteria(
+            settings,
+            db_type,
+            library_id,
+            search,
+        )
+        current = self.cover_inspection_status(mode=mode)["status"]
+        if current.get("is_working") == "run":
+            return {
+                "started": False,
+                "message": "표지 정밀 검사가 이미 실행 중입니다.",
+                "status": current,
+            }
+
+        paths = self._cover_inspection_paths(settings)
+        if paths is None:
+            raise ValueError("표지 정밀 검사 상태를 저장할 DB 경로가 설정되지 않았습니다.")
+        try:
+            paths["result"].unlink()
+        except FileNotFoundError:
+            pass
+        started_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        initial_status = self._empty_cover_inspection_status()
+        initial_status.update(
+            {
+                "is_working": "run",
+                "db_type": criteria["db_type"],
+                "library_id": criteria["library_id"],
+                "search": criteria["search"],
+                "mode": mode,
+                "fingerprint": fingerprint,
+                "started_at": started_at,
+                "message": "표지 정밀 검사를 준비하고 있습니다.",
+            }
+        )
+        safe_setting_keys = (
+            "general_db_path",
+            "adult_db_path",
+            "adult_enabled",
+            "bookoasis_url",
+            "cover_root_path",
+            "cover_min_width",
+            "cover_min_height",
+            "cover_min_file_size_kb",
+            "cover_min_aspect_percent",
+        )
+        worker_config = {
+            "job_type": "cover_inspection",
+            "delete_config_after_read": True,
+            "settings": {key: settings.get(key) for key in safe_setting_keys},
+            "db_type": criteria["db_type"],
+            "library_id": criteria["library_id"],
+            "search": criteria["search"],
+            "fingerprint": fingerprint,
+            "result_path": str(paths["result"]),
+        }
+        process = self._launch_maintenance_worker(
+            paths,
+            worker_config,
+            initial_status,
+        )
+        with self._lock:
+            self._cover_inspection_process = process
+            self._cover_inspection_status_path = paths["status"]
+            self._cover_inspection_stop_path = paths["stop"]
+            self._cover_inspection_status = copy.deepcopy(initial_status)
+        self._debug(
+            "표지 정밀 검사 별도 프로세스 시작",
+            pid=process.pid,
+            db_type=criteria["db_type"],
+            library_id=criteria["library_id"] or "all",
+            search=str(bool(criteria["search"])).lower(),
+        )
+        return {
+            "started": True,
+            "message": "표지 정밀 검사를 시작했습니다.",
+            "status": copy.deepcopy(initial_status),
+        }
+
+    def stop_cover_inspection(self):
+        current = self.cover_inspection_status()["status"]
+        if current.get("is_working") != "run":
+            return {
+                "requested": False,
+                "message": "실행 중인 표지 정밀 검사가 없습니다.",
+                "status": current,
+            }
+        stop_path = self._cover_inspection_stop_path
+        if stop_path is None:
+            paths = self._cover_inspection_paths()
+            stop_path = paths["stop"] if paths is not None else None
+        if stop_path is not None:
+            stop_path.parent.mkdir(parents=True, exist_ok=True)
+            stop_path.touch()
+        with self._lock:
+            self._cover_inspection_status["message"] = "현재 표지 묶음 처리 후 중지합니다."
+        self._debug("표지 정밀 검사 중지 요청")
+        return {
+            "requested": True,
+            "message": "표지 정밀 검사 중지를 요청했습니다.",
+            "status": copy.deepcopy(self._cover_inspection_status),
+        }
+
     def cover_issue_book_ids(self, db_type="general", library_id=None, mode="missing", search=""):
         settings = self.settings()
         mode, unused_issue, unused_file_mode, search, cache_key = self._cover_query_context(
@@ -1098,6 +1360,28 @@ class BookOasisMateService:
             search,
         )
         del unused_issue, unused_file_mode
+        if mode != "missing":
+            paths = self._cover_inspection_paths(settings)
+            result = (
+                self._read_database_migration_json(paths["result"])
+                if paths is not None
+                else None
+            )
+            unused_criteria, fingerprint = self._cover_inspection_criteria(
+                settings,
+                db_type,
+                library_id,
+                search,
+            )
+            del unused_criteria
+            if not isinstance(result, dict) or result.get("fingerprint") != fingerprint:
+                raise ValueError("현재 조건의 표지 정밀 검사 결과가 없습니다. 먼저 검사 버튼을 눌러 주세요.")
+            data = self._cover_result_page(result, mode, 1, max(1, len(result.get("items") or [])))
+            return sorted({
+                int(item.get("id"))
+                for item in data.get("items", [])
+                if str(item.get("id") or "").isdigit() and int(item.get("id")) > 0
+            })
         with self._lock:
             cached = self._cover_issue_cache if self._cover_issue_cache_key == cache_key else None
             if cached is None:

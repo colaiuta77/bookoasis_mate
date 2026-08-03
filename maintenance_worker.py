@@ -1,10 +1,11 @@
-# 고아 표지 정리와 카테고리 이관을 FlaskFarm 웹 프로세스 밖에서 실행합니다.
+# 장시간 걸리는 BookOasis 유지보수 작업을 FlaskFarm 웹 프로세스 밖에서 실행합니다.
 import json
 import os
 import sqlite3
 import sys
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
@@ -12,12 +13,12 @@ from pathlib import Path
 try:
     from .bookoasis_client import BookOasisClient
     from .category_migration import CategoryMigrationEngine, MigrationStopped
-    from .cover_inspector import cleanup_orphan_files
+    from .cover_inspector import cleanup_orphan_files, inspect_cover_file
     from .mate_engine import BookOasisMateEngine
 except ImportError:
     from bookoasis_client import BookOasisClient
     from category_migration import CategoryMigrationEngine, MigrationStopped
-    from cover_inspector import cleanup_orphan_files
+    from cover_inspector import cleanup_orphan_files, inspect_cover_file
     from mate_engine import BookOasisMateEngine
 
 
@@ -234,6 +235,48 @@ class StatusWriter:
         self._append_log(message)
         self._save(force=True)
 
+    def cover_inspection_progress(self, current, total, issue_counts):
+        current = int(current or 0)
+        total = int(total or 0)
+        self.status.update(
+            {
+                "stage": "cover_files",
+                "current": current,
+                "total": total,
+                "progress_percent": min(100, round(current * 100 / total)) if total else 0,
+                "issue_counts": dict(issue_counts or {}),
+                "message": f"표지 파일 {current:,}/{total:,}개를 검사했습니다.",
+            }
+        )
+        if current in {0, 1, total} or (current and current % 1000 == 0):
+            self._append_log(self.status["message"])
+        self._save(force=current == total)
+
+    def complete_cover_inspection(self, result, stopped=False):
+        current = int(result.get("inspected_count") or 0)
+        total = int(result.get("source_total") or 0)
+        message = (
+            f"사용자 요청으로 표지 정밀 검사를 중지했습니다. ({current:,}/{total:,})"
+            if stopped
+            else f"표지 정밀 검사를 완료했습니다. ({current:,}/{total:,})"
+        )
+        self.status.update(
+            {
+                "is_working": "stop" if stopped else "wait",
+                "stopped": bool(stopped),
+                "current": current,
+                "total": total,
+                "progress_percent": min(100, round(current * 100 / total)) if total else 100,
+                "issue_counts": dict(result.get("issue_counts") or {}),
+                "result_ready": True,
+                "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "message": message,
+                "error": "",
+            }
+        )
+        self._append_log(message)
+        self._save(force=True)
+
     def stopped(self, message):
         self.status.update(
             {
@@ -435,6 +478,95 @@ def _run_batch_book_rescan(config, writer, stop_file):
     writer.complete_batch_rescan(stopped=False)
 
 
+def _run_cover_inspection(config, writer, stop_file):
+    settings = dict(config.get("settings") or {})
+    root = settings.get("cover_root_path")
+    if not root or not Path(root).is_dir():
+        raise FileNotFoundError("설정된 표지 디렉터리를 찾을 수 없습니다.")
+    db_type = str(config.get("db_type") or "general")
+    library_id = config.get("library_id")
+    search = str(config.get("search") or "").strip()
+    raw_result_path = str(config.get("result_path") or "").strip()
+    if not raw_result_path:
+        raise ValueError("표지 정밀 검사 결과 경로가 없습니다.")
+    result_path = Path(raw_result_path)
+
+    target_issues = {"low_resolution", "small_file", "abnormal_aspect_ratio"}
+    issue_counts = {key: 0 for key in sorted(target_issues)}
+    issue_items = []
+    inspected_count = 0
+    source_total = 0
+    source_page = 1
+    stopped = False
+    engine = BookOasisMateEngine(settings)
+    started = time.monotonic()
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        while True:
+            if stop_file.exists():
+                stopped = True
+                break
+            batch = engine.cover_items(
+                db_type=db_type,
+                library_id=library_id,
+                search=search,
+                page=source_page,
+                page_size=1000,
+            )
+            if source_page == 1:
+                source_total = int(batch.get("total") or 0)
+                writer.cover_inspection_progress(0, source_total, issue_counts)
+            items = list(batch.get("items") or [])
+            if not items:
+                break
+            inspections = list(executor.map(
+                lambda item: inspect_cover_file(
+                    root,
+                    item.get("cover_path"),
+                    min_width=int(settings.get("cover_min_width") or 200),
+                    min_height=int(settings.get("cover_min_height") or 280),
+                    min_file_size=int(settings.get("cover_min_file_size_kb") or 0) * 1024,
+                    min_aspect_ratio=int(settings.get("cover_min_aspect_percent") or 0) / 100,
+                ),
+                items,
+            ))
+            for item, inspection in zip(items, inspections):
+                issues = [
+                    code for code in inspection.get("issues") or []
+                    if code in target_issues
+                ]
+                if not issues:
+                    continue
+                for code in issues:
+                    issue_counts[code] += 1
+                stored = dict(item)
+                stored["inspection"] = dict(inspection)
+                issue_items.append(stored)
+            inspected_count += len(items)
+            writer.cover_inspection_progress(inspected_count, source_total, issue_counts)
+            if stop_file.exists():
+                stopped = True
+                break
+            if source_page >= int(batch.get("pages") or 0):
+                break
+            source_page += 1
+
+    result = {
+        "fingerprint": str(config.get("fingerprint") or ""),
+        "db_type": db_type,
+        "library_id": str(library_id or ""),
+        "search": search,
+        "source_total": source_total,
+        "inspected_count": inspected_count,
+        "issue_counts": issue_counts,
+        "duration_ms": int((time.monotonic() - started) * 1000),
+        "complete": not stopped,
+        "items": issue_items,
+    }
+    _write_json(result_path, result)
+    writer.complete_cover_inspection(result, stopped=stopped)
+
+
 def run_worker(config_path, status_path, stop_path):
     config = _read_json(config_path)
     if not isinstance(config, dict):
@@ -450,7 +582,7 @@ def run_worker(config_path, status_path, stop_path):
         except OSError:
             pass
     job_type = str(config.get("job_type") or "").strip()
-    if job_type not in {"orphan_cleanup", "category_migration", "batch_book_rescan"}:
+    if job_type not in {"orphan_cleanup", "category_migration", "batch_book_rescan", "cover_inspection"}:
         raise ValueError("지원하지 않는 유지보수 작업입니다.")
     writer = StatusWriter(status_path, job_type)
     stop_file = Path(stop_path)
@@ -461,6 +593,8 @@ def run_worker(config_path, status_path, stop_path):
             _run_category_migration(config, writer, stop_file)
         elif job_type == "batch_book_rescan":
             _run_batch_book_rescan(config, writer, stop_file)
+        elif job_type == "cover_inspection":
+            _run_cover_inspection(config, writer, stop_file)
         else:
             raise ValueError(f"지원하지 않는 유지보수 작업입니다. {job_type}")
         return 0
@@ -472,6 +606,7 @@ def run_worker(config_path, status_path, stop_path):
             "orphan_cleanup": "고아 표지파일 정리에 실패했습니다.",
             "category_migration": "카테고리 이관에 실패했습니다.",
             "batch_book_rescan": "검색 결과 일괄 재스캔에 실패했습니다.",
+            "cover_inspection": "표지 정밀 검사에 실패했습니다.",
         }
         message = messages[job_type]
         writer.failed(message, error)
