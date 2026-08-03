@@ -22,6 +22,7 @@ from .category_migration import (
 )
 from .kavita_migration import KavitaMigrationEngine, parse_name_list
 from .mate_engine import BookOasisMateEngine, _as_bool, _as_int
+from .font_manager import CustomFontManager
 
 
 GAP_CACHE_SECONDS = 300
@@ -103,6 +104,7 @@ def derive_bookoasis_paths(root_path):
     return {
         "general_db_path": child("db/media_general.db"),
         "adult_db_path": child("db/media_adult.db"),
+        "audiobook_db_path": child("db/media_audiobook.db"),
         "bookoasis_log_dir": child("logs"),
         "cover_root_path": child("covers"),
     }
@@ -267,6 +269,7 @@ class BookOasisMateService:
             "general_db_path": model.get("general_db_path"),
             "adult_enabled": model.get_bool("adult_enabled"),
             "adult_db_path": model.get("adult_db_path"),
+            "audiobook_db_path": model.get("audiobook_db_path"),
             "bookoasis_url": model.get("bookoasis_url"),
             "bookoasis_username": model.get("bookoasis_username"),
             "bookoasis_password": model.get("bookoasis_password"),
@@ -274,6 +277,7 @@ class BookOasisMateService:
             "bookoasis_log_dir": model.get("bookoasis_log_dir"),
             "cover_root_path": model.get("cover_root_path"),
             "cover_root_custom": model.get_bool("cover_root_custom"),
+            "custom_font_dir": model.get("custom_font_dir"),
             "cover_min_width": _as_int(model.get("cover_min_width"), 200, 1, 10000),
             "cover_min_height": _as_int(model.get("cover_min_height"), 280, 1, 10000),
             "cover_min_file_size_kb": _as_int(model.get("cover_min_file_size_kb"), 5, 0, 102400),
@@ -301,6 +305,7 @@ class BookOasisMateService:
             "general_db_path": values.get("general_db_path"),
             "adult_enabled": _as_bool(values.get("adult_enabled"), False),
             "adult_db_path": values.get("adult_db_path"),
+            "audiobook_db_path": values.get("audiobook_db_path"),
             "bookoasis_url": values.get("bookoasis_url"),
             "bookoasis_username": values.get("bookoasis_username"),
             "bookoasis_password": values.get("bookoasis_password"),
@@ -311,6 +316,7 @@ class BookOasisMateService:
                 values.get("cover_root_custom"),
                 False,
             ),
+            "custom_font_dir": values.get("custom_font_dir"),
             "cover_min_width": _as_int(values.get("cover_min_width"), 200, 1, 10000),
             "cover_min_height": _as_int(values.get("cover_min_height"), 280, 1, 10000),
             "cover_min_file_size_kb": _as_int(values.get("cover_min_file_size_kb"), 5, 0, 102400),
@@ -2582,6 +2588,20 @@ class BookOasisMateService:
         )
         return data
 
+    def custom_fonts(self, settings=None):
+        settings = settings or self.settings()
+        return CustomFontManager(settings.get("custom_font_dir")).list_fonts()
+
+    def upload_custom_fonts(self, files, settings=None):
+        settings = settings or self.settings()
+        result = CustomFontManager(settings.get("custom_font_dir")).upload(files)
+        self._debug(
+            "커스텀 폰트 업로드 완료",
+            uploaded=len(result.get("uploaded", [])),
+            rejected=len(result.get("rejected", [])),
+        )
+        return result
+
     def connection_test(self, settings=None):
         started = time.monotonic()
         settings = settings or self.settings()
@@ -2591,6 +2611,15 @@ class BookOasisMateService:
         admin_api = self.admin_client(settings).login_admin()
         cover_root = str(settings.get("cover_root_path") or "").strip()
         cover_root_status = {"configured": bool(cover_root), "readable": bool(cover_root and Path(cover_root).is_dir())}
+        font_root = str(settings.get("custom_font_dir") or "").strip()
+        font_root_status = {
+            "configured": bool(font_root),
+            "writable": bool(
+                font_root
+                and Path(font_root).is_dir()
+                and os.access(font_root, os.W_OK)
+            ),
+        }
         log_dir = str(settings.get("bookoasis_log_dir") or "").strip()
         log_root_status = {"configured": bool(log_dir), "readable": False, "files": [], "error": ""}
         if log_dir:
@@ -2605,6 +2634,7 @@ class BookOasisMateService:
             "api": api,
             "admin_api": admin_api,
             "cover_root": cover_root_status,
+            "font_root": font_root_status,
             "log_root": log_root_status,
         }
         self._debug(

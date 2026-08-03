@@ -38,7 +38,7 @@ function doctorMetricGroup(title, stats) {
   return group;
 }
 
-function doctorSummaryOverview(totals, scanner, staleDays) {
+function doctorSummaryOverview(totals, scanner, audiobook, staleDays) {
   var totalBooks = Number(totals.total_books || 0);
   var problemBooks = Number(totals.problem_books || 0);
   var healthyBooks = Number(totals.healthy_books || 0);
@@ -95,6 +95,15 @@ function doctorSummaryOverview(totals, scanner, staleDays) {
     {label:'실행 작업', value:doctorFormatCount(scanner.running_tasks, '건')},
     {label:'장기 미스캔', value:doctorFormatCount(scanner.stale_libraries, '개')}
   ]));
+  if (Number(audiobook.total_audiobooks || 0)) {
+    groups.appendChild(doctorMetricGroup('오디오북', [
+      {label:'전체 오디오북', value:doctorFormatCount(audiobook.total_audiobooks, '개')},
+      {label:'점검 필요', value:doctorFormatCount(audiobook.problem_audiobooks, '개'), tone:Number(audiobook.problem_audiobooks || 0) ? 'warning' : 'healthy'},
+      {label:'전체 트랙', value:doctorFormatCount(audiobook.total_tracks, '개')},
+      {label:'트랙 수 미기록', value:doctorFormatCount(audiobook.tracks, '개')},
+      {label:'트랙 크기 미기록', value:doctorFormatCount(audiobook.track_file_size_missing, '개')}
+    ]));
+  }
   card.appendChild(groups);
   card.appendChild(bookoasisMateText(
     'div',
@@ -107,10 +116,11 @@ function doctorSummaryOverview(totals, scanner, staleDays) {
 function renderReport(report) {
   var totals = report.totals || {};
   var scanner = report.scanner || {};
+  var audiobook = report.audiobook || {};
   $('#generated_at').text('마지막 조회 ' + (report.generated_at || '-'));
   var summary = document.getElementById('summary_grid');
   bookoasisMateClear(summary);
-  summary.appendChild(doctorSummaryOverview(totals, scanner, report.stale_days || 14));
+  summary.appendChild(doctorSummaryOverview(totals, scanner, audiobook, report.stale_days || 14));
 
   var list = document.getElementById('database_list');
   bookoasisMateClear(list);
@@ -144,9 +154,10 @@ function renderReport(report) {
       card.appendChild(reasonBox);
 
       var facts = bookoasisMateText('div', 'doctor-db-facts', '');
+      var isAudiobook = db.media_kind === 'audiobook';
       [
-        {label:'전체 도서', value:doctorFormatCount((db.summary || {}).total_books, '권')},
-        {label:'문제 도서', value:doctorFormatCount((db.summary || {}).problem_books, '권')},
+        {label:isAudiobook ? '전체 오디오북' : '전체 도서', value:doctorFormatCount((db.summary || {})[isAudiobook ? 'total_audiobooks' : 'total_books'], isAudiobook ? '개' : '권')},
+        {label:isAudiobook ? '점검 필요' : '문제 도서', value:doctorFormatCount((db.summary || {})[isAudiobook ? 'problem_audiobooks' : 'problem_books'], isAudiobook ? '개' : '권')},
         {label:'실패·중단 보관함', value:doctorFormatCount((db.scanner || {}).failed_libraries, '개')},
         {label:'장기 미스캔', value:doctorFormatCount((db.scanner || {}).stale_libraries, '개')}
       ].forEach(function(fact) {

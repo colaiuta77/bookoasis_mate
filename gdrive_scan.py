@@ -27,6 +27,15 @@ DEFAULT_EXTENSIONS = (
     ".yaml",
     ".xml",
     ".json",
+    ".mp3",
+    ".m4b",
+    ".m4a",
+    ".flac",
+    ".aac",
+    ".wav",
+    ".ogg",
+    ".opus",
+    ".wma",
 )
 
 
@@ -351,6 +360,11 @@ class GDriveScanProcessor:
                     "adult", self.settings.get("adult_db_path")
                 )
             )
+        libraries.extend(
+            read_bookoasis_libraries(
+                "audiobook", self.settings.get("audiobook_db_path")
+            )
+        )
         return sorted(libraries, key=lambda item: len(item["root"]), reverse=True)
 
     def _log(self, level, message):

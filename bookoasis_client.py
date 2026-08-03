@@ -118,7 +118,11 @@ class BookOasisClient:
             )
 
     @staticmethod
-    def _valid_db_type(db_type):
+    def _valid_library_db_type(db_type):
+        return db_type if db_type in {"general", "adult", "audiobook"} else None
+
+    @staticmethod
+    def _valid_book_db_type(db_type):
         return db_type if db_type in {"general", "adult"} else None
 
     def _valid_positive_id(self, value, label):
@@ -134,7 +138,7 @@ class BookOasisClient:
         book_id, error = self._valid_positive_id(book_id, "도서 ID")
         if error:
             return error
-        db_type = self._valid_db_type(db_type)
+        db_type = self._valid_book_db_type(db_type)
         if not db_type:
             return self._admin_error("DB 유형이 올바르지 않습니다.")
         return self._admin_request(
@@ -153,7 +157,7 @@ class BookOasisClient:
         return self._admin_request("api/admin/permissions")
 
     def library_schedules(self, db_type="general"):
-        db_type = self._valid_db_type(db_type)
+        db_type = self._valid_library_db_type(db_type)
         if not db_type:
             return self._admin_error("DB 유형이 올바르지 않습니다.")
         return self._admin_request(
@@ -165,7 +169,7 @@ class BookOasisClient:
         library_id, error = self._valid_positive_id(library_id, "보관함 ID")
         if error:
             return error
-        db_type = self._valid_db_type(db_type)
+        db_type = self._valid_library_db_type(db_type)
         if not db_type:
             return self._admin_error("DB 유형이 올바르지 않습니다.")
         return self._admin_request(
@@ -178,7 +182,7 @@ class BookOasisClient:
         )
 
     def scan_all_libraries(self, db_type="general", force=False):
-        db_type = self._valid_db_type(db_type)
+        db_type = self._valid_library_db_type(db_type)
         if not db_type:
             return self._admin_error("DB 유형이 올바르지 않습니다.")
         return self._admin_request(
@@ -194,7 +198,7 @@ class BookOasisClient:
         library_id, error = self._valid_positive_id(library_id, "보관함 ID")
         if error:
             return error
-        db_type = self._valid_db_type(db_type)
+        db_type = self._valid_library_db_type(db_type)
         if not db_type:
             return self._admin_error("DB 유형이 올바르지 않습니다.")
         return self._admin_request(
@@ -207,9 +211,9 @@ class BookOasisClient:
         library_id, error = self._valid_positive_id(library_id, "보관함 ID")
         if error:
             return error
-        db_type = self._valid_db_type(db_type)
+        db_type = self._valid_book_db_type(db_type)
         if not db_type:
-            return self._admin_error("DB 유형이 올바르지 않습니다.")
+            return self._admin_error("표지 전용 스캔은 일반·성인 도서 DB에서만 지원합니다.")
         return self._admin_request(
             f"api/media/libraries/{library_id}/scan-covers",
             method="POST",
@@ -239,7 +243,7 @@ class BookOasisClient:
         )
 
     def search_metadata(self, query, source=None, db_type="general"):
-        db_type = self._valid_db_type(db_type)
+        db_type = self._valid_book_db_type(db_type)
         query = str(query or "").strip()
         source = str(source or "").strip()
         if not db_type:
@@ -255,7 +259,7 @@ class BookOasisClient:
         book_id, error = self._valid_positive_id(book_id, "도서 ID")
         if error:
             return error
-        db_type = self._valid_db_type(db_type)
+        db_type = self._valid_book_db_type(db_type)
         if not db_type:
             return self._admin_error("DB 유형이 올바르지 않습니다.")
         if not isinstance(item_data, dict) or not item_data:
@@ -302,7 +306,7 @@ class BookOasisClient:
             library_id = int(library_id)
         except (TypeError, ValueError):
             return {"success": False, "message": "보관함 ID가 올바르지 않습니다."}
-        if db_type not in {"general", "adult"}:
+        if db_type not in {"general", "adult", "audiobook"}:
             return {"success": False, "message": "DB 유형이 올바르지 않습니다."}
 
         url = urljoin(f"{self.base_url}/", "api/webhook/scan")

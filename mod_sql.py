@@ -18,6 +18,7 @@ class ModuleSql(PluginModuleBase):
         paths = {"general": settings.get("general_db_path")}
         if settings.get("adult_enabled"):
             paths["adult"] = settings.get("adult_db_path")
+        paths["audiobook"] = settings.get("audiobook_db_path")
         return ReadOnlySqlTool(paths)
 
     def process_menu(self, page, req):
@@ -26,6 +27,9 @@ class ModuleSql(PluginModuleBase):
         arg = P.ModelSetting.to_dict()
         arg["adult_enabled"] = P.bookoasis_mate_service.settings().get(
             "adult_enabled", False
+        )
+        arg["audiobook_enabled"] = bool(
+            P.bookoasis_mate_service.settings().get("audiobook_db_path")
         )
         return render_template(f"{P.package_name}_{self.name}.html", arg=arg)
 

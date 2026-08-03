@@ -9,6 +9,7 @@
       <select id="sql_db_type" class="form-control form-control-sm">
         <option value="general">일반 DB</option>
         {% if arg.get('adult_enabled') %}<option value="adult">성인 DB</option>{% endif %}
+        {% if arg.get('audiobook_enabled') %}<option value="audiobook">오디오북 DB</option>{% endif %}
       </select>
     </label>
     <label>진단 프리셋
@@ -106,6 +107,19 @@ function sqlApplyPreset() {
   description.textContent = preset.description || '';
 }
 
+function sqlUpdateDatabaseMode() {
+  var audiobook = document.getElementById('sql_db_type').value === 'audiobook';
+  var preset = document.getElementById('sql_preset');
+  preset.disabled = audiobook;
+  if (audiobook) {
+    preset.value = '';
+    document.getElementById('sql_preset_description').textContent =
+      '오디오북 DB는 audiobooks·audiobook_tracks·audiobook_progress 테이블을 직접 조회하세요.';
+  } else {
+    sqlApplyPreset();
+  }
+}
+
 function sqlRenderResult(data) {
   sqlLastResult = data;
   var columns = data.columns || [];
@@ -132,7 +146,7 @@ function sqlRenderResult(data) {
 
   var suffix = data.truncated ? ' · 최대 ' + data.max_rows + '행에서 잘림' : '';
   document.getElementById('sql_result_summary').textContent =
-    (data.db_type === 'adult' ? '성인 DB' : '일반 DB') + ' · ' +
+    ({general:'일반 DB', adult:'성인 DB', audiobook:'오디오북 DB'}[data.db_type] || data.db_type) + ' · ' +
     Number(data.row_count || 0).toLocaleString('ko-KR') + '행 · ' +
     Number(data.elapsed_ms || 0).toLocaleString('ko-KR') + 'ms' + suffix;
   document.getElementById('sql_result_wrap').style.display = rows.length ? 'block' : 'none';
@@ -176,6 +190,7 @@ function sqlCloseJson() {
 $(function() {
   sqlLoadPresets();
   $('#sql_preset').on('change', sqlApplyPreset);
+  $('#sql_db_type').on('change', sqlUpdateDatabaseMode);
   $('#sql_run_btn').on('click', sqlRun);
   $('#sql_clear_btn').on('click', function() {
     document.getElementById('sql_preset').value = '';

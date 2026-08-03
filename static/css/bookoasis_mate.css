@@ -181,6 +181,12 @@
 .doctor-sql-table th { position:sticky; top:0; z-index:1; min-width:90px; background:#343a40; color:#fff; white-space:nowrap; }
 .doctor-sql-table td { max-width:520px; white-space:pre-wrap; overflow-wrap:anywhere; }
 .doctor-sql-null { color:#6c757d; font-style:italic; }
+.doctor-font-upload { margin:4px 0 18px; padding:14px; border:1px solid #dee2e6; border-radius:8px; }
+.doctor-font-dropzone { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:112px; margin-bottom:12px; padding:18px; border:2px dashed #adb5bd; border-radius:8px; color:#495057; text-align:center; cursor:pointer; transition:border-color .15s, background .15s; }
+.doctor-font-dropzone small { margin-top:5px; color:#6c757d; }
+.doctor-font-dropzone:hover, .doctor-font-dropzone:focus, .doctor-font-dropzone.is-dragover { border-color:#6f42c1; background:rgba(111,66,193,.07); outline:none; }
+.doctor-font-list { margin:12px 0; border-top:1px solid #e9ecef; }
+.doctor-font-row { display:flex; justify-content:space-between; gap:16px; padding:8px 2px; border-bottom:1px solid #e9ecef; }
 @media (prefers-color-scheme: dark) {
   .doctor-card { border-color:#495057; }
   .doctor-overview-center { background:#212529; }
@@ -201,6 +207,8 @@
   .doctor-sql-toolbar label { color:#ced4da; }
   .doctor-sql-warning { color:#f7d774; }
   .doctor-sql-results { border-color:#495057; }
+  .doctor-font-upload, .doctor-font-list, .doctor-font-row { border-color:#495057; }
+  .doctor-font-dropzone { border-color:#6c757d; color:#ced4da; }
 }
 
 @media (max-width: 720px) {
