@@ -241,17 +241,15 @@ function bookoasisMateBookDetailUrl(item) {
     return baseUrl + '/#detail?v=' + token;
   } catch (error) {
     return baseUrl + '/#detail?series=' + encodeURIComponent(seriesName) +
-      '&libraryId=' + encodeURIComponent(libraryId);
+      '&libraryId=' + encodeURIComponent(libraryId) +
+      '&repBookId=' + encodeURIComponent(item && item.id ? item.id : '') +
+      '&displayTitle=' + encodeURIComponent(item && item.title ? String(item.title) : '');
   }
 }
 
 function bookoasisMateOpenSelectedBookDetail() {
   var item = bookoasisMateBookActionItem;
   if (!item) return;
-  if (bookoasisMateSelectedDbType() === 'adult') {
-    notify('현재 BookOasis 새 창 라우팅은 성인 DB 유형 복원을 지원하지 않습니다.', 'warning');
-    return;
-  }
   var url = bookoasisMateBookDetailUrl(item);
   if (!url) {
     notify('BookOasis URL 또는 도서 상세 식별정보를 확인해 주세요.', 'warning');
