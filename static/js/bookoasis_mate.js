@@ -455,6 +455,7 @@ function bookoasisMateBatchRescanController(options) {
   var pollTimer = null;
   var availableCount = 0;
   var running = false;
+  var belongsToPage = true;
   var lastRenderKey = '';
 
   function statusLabel(value) {
@@ -466,7 +467,7 @@ function bookoasisMateBatchRescanController(options) {
 
   function updateButtons() {
     $('#batch_rescan_start').prop('disabled', running || availableCount <= 0);
-    $('#batch_rescan_stop').prop('disabled', !running);
+    $('#batch_rescan_stop').prop('disabled', !running || !belongsToPage);
     if (options.onRunningChange) options.onRunningChange(running);
   }
 
@@ -510,6 +511,25 @@ function bookoasisMateBatchRescanController(options) {
   function render(data) {
     data = data || {};
     running = data.is_working === 'run';
+    belongsToPage = !(options.source && data.source && data.source !== options.source);
+    if (!belongsToPage) {
+      $('#batch_rescan_bar').css('width', '0%');
+      $('#batch_rescan_progress_text').text('0 / 0권 · 0%');
+      $('#batch_rescan_error').text('').hide();
+      $('#batch_rescan_status_text').text(
+        running
+          ? (data.source_label || '다른 화면') + ' 메뉴에서 일괄 재스캔이 실행 중입니다.'
+          : '대기중'
+      );
+      var foreignKey = ['foreign', data.source, data.is_working].join(':');
+      if (foreignKey !== lastRenderKey) {
+        lastRenderKey = foreignKey;
+        renderItems({is_working:'wait', items:[]});
+      }
+      updateButtons();
+      if (running) startPolling(); else stopPolling();
+      return;
+    }
     var current = Number(data.current || 0);
     var total = Number(data.total || 0);
     var percent = total ? Math.min(100, Math.round(current * 100 / total)) : Number(data.progress_percent || 0);

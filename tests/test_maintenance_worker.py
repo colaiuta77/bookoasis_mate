@@ -195,6 +195,124 @@ class MaintenanceWorkerTest(unittest.TestCase):
             password="secret",
         )
 
+    def test_batch_book_rescan_retries_transient_failure_without_stopping_job(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            db_path = root / "media_general.db"
+            connection = sqlite3.connect(db_path)
+            connection.executescript(
+                """
+                CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT);
+                INSERT INTO books VALUES (1, '재시도 도서');
+                INSERT INTO books VALUES (2, '다음 도서');
+                """
+            )
+            connection.commit()
+            connection.close()
+            config_path = root / "config.json"
+            status_path = root / "status.json"
+            stop_path = root / "stop"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "job_type": "batch_book_rescan",
+                        "db_type": "general",
+                        "db_path": str(db_path),
+                        "book_ids": [1, 2],
+                        "source": "issues",
+                        "source_label": "문제 도서",
+                        "bookoasis_url": "http://bookoasis:5930",
+                        "bookoasis_username": "admin",
+                        "bookoasis_password": "secret",
+                        "api_timeout": 30,
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("maintenance_worker.BookOasisClient") as client_class:
+                client = client_class.return_value
+                client.login_admin.return_value = {"success": True}
+                client.scan_book.side_effect = [
+                    {
+                        "success": False,
+                        "message": "IncompleteRead(0 bytes read)",
+                        "retryable": True,
+                    },
+                    {"success": True, "message": "재시도 완료"},
+                    {"success": True, "message": "다음 완료"},
+                ]
+                with patch("maintenance_worker.time.sleep") as mocked_sleep:
+                    return_code = run_worker(config_path, status_path, stop_path)
+            status = self._read_status(status_path)
+
+        self.assertEqual(0, return_code)
+        self.assertEqual("wait", status["is_working"])
+        self.assertEqual(2, status["success_count"])
+        self.assertEqual(0, status["failed_count"])
+        self.assertEqual(3, client.scan_book.call_count)
+        mocked_sleep.assert_called_once()
+
+    def test_batch_book_rescan_records_exhausted_transient_item_and_continues(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            db_path = root / "media_general.db"
+            connection = sqlite3.connect(db_path)
+            connection.executescript(
+                """
+                CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT);
+                INSERT INTO books VALUES (1, '응답 단절 도서');
+                INSERT INTO books VALUES (2, '정상 도서');
+                """
+            )
+            connection.commit()
+            connection.close()
+            config_path = root / "config.json"
+            status_path = root / "status.json"
+            stop_path = root / "stop"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "job_type": "batch_book_rescan",
+                        "db_type": "general",
+                        "db_path": str(db_path),
+                        "book_ids": [1, 2],
+                        "source": "issues",
+                        "source_label": "문제 도서",
+                        "bookoasis_url": "http://bookoasis:5930",
+                        "bookoasis_username": "admin",
+                        "bookoasis_password": "secret",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            transient = {
+                "success": False,
+                "message": "IncompleteRead(0 bytes read)",
+                "retryable": True,
+            }
+
+            with patch("maintenance_worker.BookOasisClient") as client_class:
+                client = client_class.return_value
+                client.login_admin.return_value = {"success": True}
+                client.scan_book.side_effect = [
+                    transient,
+                    transient,
+                    transient,
+                    {"success": True, "message": "완료"},
+                ]
+                with patch("maintenance_worker.time.sleep"):
+                    return_code = run_worker(config_path, status_path, stop_path)
+            status = self._read_status(status_path)
+
+        self.assertEqual(0, return_code)
+        self.assertEqual(2, status["current"])
+        self.assertEqual(1, status["success_count"])
+        self.assertEqual(1, status["failed_count"])
+        self.assertIn("3회", status["items"][0]["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

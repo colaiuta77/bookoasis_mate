@@ -148,6 +148,7 @@ $('#cover_search').on('input', function() { resetCoverResults('검색 조건을 
 $('#cover_prev').click(function() { if (coverPage > 1) loadCovers(coverPage - 1, false); }); $('#cover_next').click(function() { if (coverPage < coverPages) loadCovers(coverPage + 1, false); });
 $(document).ready(function() {
   coverBatchRescan = bookoasisMateBatchRescanController({
+    source:'covers',
     getPayload:function() {
       return {
         source:'covers', db_type:$('#db_type').val(), library_id:$('#cover_library_id').val(),

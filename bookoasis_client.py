@@ -2,6 +2,7 @@
 import json
 import time
 from http.cookiejar import CookieJar
+from http.client import HTTPException, IncompleteRead, RemoteDisconnected
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
@@ -34,10 +35,12 @@ class BookOasisClient:
     def _response_payload(response):
         return json.loads(response.read().decode("utf-8"))
 
-    def _admin_error(self, message, http_status=None):
+    def _admin_error(self, message, http_status=None, retryable=False):
         data = {"success": False, "message": str(message or "BookOasis 관리자 API 요청에 실패했습니다.")}
         if http_status is not None:
             data["http_status"] = int(http_status)
+        if retryable:
+            data["retryable"] = True
         return data
 
     def login_admin(self, force=False):
@@ -98,9 +101,21 @@ class BookOasisClient:
                 login = self.login_admin(force=True)
                 if login.get("success"):
                     return self._admin_request(path, method=method, form=form, payload=payload, query=query, retry=False)
-            return self._admin_error(self._http_error_message(error), error.code)
+            return self._admin_error(
+                self._http_error_message(error),
+                error.code,
+                retryable=error.code in {408, 429, 500, 502, 503, 504},
+            )
+        except (IncompleteRead, RemoteDisconnected, HTTPException) as error:
+            return self._admin_error(
+                f"BookOasis 관리자 API 응답 수신 실패: {error}",
+                retryable=True,
+            )
         except (URLError, ValueError, OSError) as error:
-            return self._admin_error(f"BookOasis 관리자 API 요청 실패: {getattr(error, 'reason', error)}")
+            return self._admin_error(
+                f"BookOasis 관리자 API 요청 실패: {getattr(error, 'reason', error)}",
+                retryable=True,
+            )
 
     @staticmethod
     def _valid_db_type(db_type):

@@ -159,6 +159,7 @@ $('#issue_json_modal').click(function(event) { if (event.target === this) closeI
 $(document).keydown(function(event) { if (event.key === 'Escape') closeIssueJson(); });
 $(document).ready(function() {
   issueBatchRescan = bookoasisMateBatchRescanController({
+    source:'issues',
     getPayload:function() {
       return {
         source:'issues', db_type:$('#db_type').val(), library_id:$('#issue_library_id').val(),

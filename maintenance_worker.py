@@ -339,6 +339,40 @@ def _open_book_database(db_path):
     return connection
 
 
+def _scan_book_with_retry(client, book_id, db_type, stop_file, max_attempts=3):
+    last_result = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            result = client.scan_book(book_id, db_type)
+        except Exception as error:
+            result = {
+                "success": False,
+                "message": f"BookOasis 관리자 API 요청 중 예외가 발생했습니다: {error}",
+                "retryable": True,
+            }
+        last_result = dict(result or {})
+        if last_result.get("success"):
+            if attempt > 1:
+                message = last_result.get("message") or "재스캔 완료"
+                last_result["message"] = f"{message} ({attempt}회 시도)"
+            return last_result
+        if not last_result.get("retryable") or attempt >= max_attempts:
+            break
+        if stop_file.exists():
+            break
+        time.sleep(0.5 * attempt)
+
+    last_result = last_result or {
+        "success": False,
+        "message": "BookOasis 관리자 API 응답이 없습니다.",
+        "retryable": True,
+    }
+    if last_result.get("retryable") and max_attempts > 1:
+        message = last_result.get("message") or "재스캔 실패"
+        last_result["message"] = f"{message} ({max_attempts}회 시도)"
+    return last_result
+
+
 def _run_batch_book_rescan(config, writer, stop_file):
     db_type = str(config.get("db_type") or "general")
     book_ids = [
@@ -366,6 +400,7 @@ def _run_batch_book_rescan(config, writer, stop_file):
     if not login.get("success"):
         raise RuntimeError(login.get("message") or "BookOasis 관리자 로그인에 실패했습니다.")
 
+    consecutive_transport_failures = 0
     with closing(_open_book_database(config.get("db_path"))) as connection:
         for book_id in book_ids:
             if stop_file.exists():
@@ -376,12 +411,27 @@ def _run_batch_book_rescan(config, writer, stop_file):
                 (book_id,),
             ).fetchone()
             title = str(row[0] or "") if row else ""
-            result = client.scan_book(book_id, db_type)
+            result = _scan_book_with_retry(
+                client,
+                book_id,
+                db_type,
+                stop_file,
+                max_attempts=3,
+            )
             success = bool(result.get("success"))
             message = result.get("message") or result.get("error") or (
                 "재스캔 완료" if success else "재스캔 실패"
             )
             writer.batch_rescan_progress(book_id, title, success, message)
+            if success or not result.get("retryable"):
+                consecutive_transport_failures = 0
+            else:
+                consecutive_transport_failures += 1
+                if consecutive_transport_failures >= 10:
+                    raise RuntimeError(
+                        "BookOasis API 응답이 10권 연속 실패하여 일괄 재스캔을 중단했습니다. "
+                        "BookOasis 상태와 네트워크를 확인한 뒤 다시 실행해 주세요."
+                    )
     writer.complete_batch_rescan(stopped=False)
 
 

@@ -548,6 +548,9 @@ class PluginStructureTest(unittest.TestCase):
         self.assertIn("batch_rescan_start", script)
         self.assertIn("batch_rescan_status", script)
         self.assertIn("batch_rescan_stop", script)
+        self.assertIn("data.source !== options.source", script)
+        self.assertIn("source:'issues'", issues)
+        self.assertIn("source:'covers'", covers)
         self.assertIn(".doctor-action-menu", style)
         self.assertIn("bookoasisMateBindBookActions", covers)
         self.assertIn("bookoasisMateBindBookActions", gaps)
@@ -567,6 +570,11 @@ class PluginStructureTest(unittest.TestCase):
         self.assertLess(database_migration, log)
 
         diagnosis_menu = setup[diagnosis:migration]
+        dashboard = diagnosis_menu.index('{"uri": "dashboard", "name": "상태 요약"}')
+        scanner = diagnosis_menu.index('{"uri": "scanner", "name": "스캔 상태"}')
+        issues = diagnosis_menu.index('{"uri": "issues", "name": "문제 도서"}')
+        self.assertLess(dashboard, scanner)
+        self.assertLess(scanner, issues)
         bookoasis_log = diagnosis_menu.index('{"uri": "logs", "name": "BookOasis 로그"}')
         diagnosis_manual = diagnosis_menu.index('{"uri": "manual", "name": "매뉴얼"}')
         self.assertLess(bookoasis_log, diagnosis_manual)

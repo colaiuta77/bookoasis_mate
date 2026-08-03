@@ -2,6 +2,7 @@
 import io
 import json
 import unittest
+from http.client import IncompleteRead
 from unittest.mock import Mock, patch
 
 from bookoasis_client import BookOasisClient
@@ -90,6 +91,25 @@ class BookOasisClientTest(unittest.TestCase):
         self.assertIn(b'"username": "admin"', login_request.data)
         self.assertEqual("http://bookoasis:5930/api/media/books/12/scan", scan_request.full_url)
         self.assertIn(b"type=adult", scan_request.data)
+
+    def test_admin_request_converts_incomplete_response_to_retryable_failure(self):
+        opener = Mock()
+        opener.open.side_effect = [
+            _Response({"success": True, "role": "admin"}),
+            IncompleteRead(b"", 128),
+        ]
+        client = BookOasisClient(
+            "http://bookoasis:5930",
+            username="admin",
+            password="secret-password",
+            opener=opener,
+        )
+
+        result = client.scan_book(12, "general")
+
+        self.assertFalse(result["success"])
+        self.assertTrue(result["retryable"])
+        self.assertIn("응답", result["message"])
 
     def test_admin_session_rejects_default_password_account(self):
         opener = Mock()
