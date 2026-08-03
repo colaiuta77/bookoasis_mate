@@ -7,6 +7,7 @@
   <select id="db_type" class="form-control form-control-sm">
     <option value="general">일반 DB</option>
     {% if arg.get('adult_enabled') == 'True' %}<option value="adult">성인 DB</option>{% endif %}
+    <option value="audiobook">오디오북 DB</option>
   </select>
   <button id="refresh_btn" class="btn btn-sm btn-primary">새로고침</button>
   <button id="rescan_all_btn" class="btn btn-sm btn-warning">전체 재스캔 요청</button>
@@ -169,7 +170,7 @@ function renderScanner(data) {
     coverButton.type = 'button';
     coverButton.addEventListener('click', function() { requestCoverScan(item.id, item.name || item.id); });
     actionCell.appendChild(scanButton);
-    actionCell.appendChild(coverButton);
+    if ($('#db_type').val() !== 'audiobook') actionCell.appendChild(coverButton);
     if (['scanning', 'running', 'cancelling'].indexOf(String(item.scan_status || '').toLowerCase()) >= 0) {
       var cancelButton = bookoasisMateText(
         'button',

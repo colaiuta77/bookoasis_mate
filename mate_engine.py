@@ -120,6 +120,14 @@ class BookOasisMateEngine:
         ]
         if _as_bool(self.settings.get("adult_enabled"), False):
             targets.append(DatabaseTarget("adult", "성인", self.settings.get("adult_db_path")))
+        if str(self.settings.get("audiobook_db_path") or "").strip():
+            targets.append(
+                DatabaseTarget(
+                    "audiobook",
+                    "오디오북",
+                    self.settings.get("audiobook_db_path"),
+                )
+            )
         return targets
 
     def get_target(self, db_type):
@@ -292,6 +300,66 @@ class BookOasisMateEngine:
         row = connection.execute(query).fetchone()
         return {key: int(row[key] or 0) for key in row.keys()}
 
+    def _audiobook_summary(self, connection):
+        tables = self._tables(connection)
+        if "audiobooks" not in tables:
+            raise RuntimeError("audiobooks 테이블이 없습니다.")
+        columns = self._columns(connection, "audiobooks")
+        active = "COALESCE(a.is_deleted, 0) = 0" if "is_deleted" in columns else "1 = 1"
+
+        def missing(column):
+            return f"TRIM(COALESCE(a.{column}, '')) = ''" if column in columns else "0"
+
+        cover = missing("poster")
+        author = missing("author")
+        publisher = missing("publisher")
+        summary = missing("description")
+        tracks = "COALESCE(a.total_tracks, 0) <= 0" if "total_tracks" in columns else "0"
+        problem = " OR ".join((cover, author, publisher, summary, tracks))
+        row = connection.execute(
+            f"""
+            SELECT
+                COUNT(*) AS total_audiobooks,
+                SUM(CASE WHEN {cover} THEN 1 ELSE 0 END) AS cover,
+                SUM(CASE WHEN {author} THEN 1 ELSE 0 END) AS author,
+                SUM(CASE WHEN {publisher} THEN 1 ELSE 0 END) AS publisher,
+                SUM(CASE WHEN {summary} THEN 1 ELSE 0 END) AS summary,
+                SUM(CASE WHEN {tracks} THEN 1 ELSE 0 END) AS tracks,
+                SUM(CASE WHEN {problem} THEN 1 ELSE 0 END) AS problem_audiobooks
+            FROM audiobooks a
+            WHERE {active}
+            """
+        ).fetchone()
+        result = {key: int(row[key] or 0) for key in row.keys()}
+        result["total_tracks"] = 0
+        result["track_file_size_missing"] = 0
+        if "audiobook_tracks" in tables:
+            track_columns = self._columns(connection, "audiobook_tracks")
+            result["total_tracks"] = int(
+                connection.execute(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM audiobook_tracks t
+                    JOIN audiobooks a ON a.id = t.audiobook_id
+                    WHERE {active}
+                    """
+                ).fetchone()[0]
+                or 0
+            )
+            if "file_size" in track_columns:
+                result["track_file_size_missing"] = int(
+                    connection.execute(
+                        f"""
+                        SELECT COUNT(*)
+                        FROM audiobook_tracks t
+                        JOIN audiobooks a ON a.id = t.audiobook_id
+                        WHERE {active} AND COALESCE(t.file_size, 0) <= 0
+                        """
+                    ).fetchone()[0]
+                    or 0
+                )
+        return result
+
     @staticmethod
     def _issue_diagnostics(item, issue_keys):
         reasons = []
@@ -406,19 +474,30 @@ class BookOasisMateEngine:
         try:
             with closing(self._connect(target)) as connection:
                 tables = self._tables(connection)
-                summary = self._book_summary(connection)
+                media_kind = "audiobook" if target.db_type == "audiobook" else "book"
+                summary = (
+                    self._audiobook_summary(connection)
+                    if media_kind == "audiobook"
+                    else self._book_summary(connection)
+                )
                 scanner = self._scanner_summary(connection)
                 journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
                 user_version = connection.execute("PRAGMA user_version").fetchone()[0]
-            problem_count = summary["problem_books"]
+            problem_count = summary[
+                "problem_audiobooks" if media_kind == "audiobook" else "problem_books"
+            ]
             status = "healthy" if problem_count == 0 and scanner["failed_libraries"] == 0 and scanner["recent_failed_tasks"] == 0 else "warning"
             status_reasons = []
             if problem_count:
                 status_reasons.append({
-                    "code": "problem_books",
-                    "label": "점검이 필요한 도서",
+                    "code": "problem_audiobooks" if media_kind == "audiobook" else "problem_books",
+                    "label": (
+                        "점검이 필요한 오디오북"
+                        if media_kind == "audiobook"
+                        else "점검이 필요한 도서"
+                    ),
                     "count": problem_count,
-                    "unit": "권",
+                    "unit": "개" if media_kind == "audiobook" else "권",
                 })
             if scanner["failed_libraries"]:
                 status_reasons.append({
@@ -436,6 +515,7 @@ class BookOasisMateEngine:
                 })
             return {
                 "db_type": target.db_type,
+                "media_kind": media_kind,
                 "label": target.label,
                 "path": target.path,
                 "connected": True,
@@ -453,6 +533,7 @@ class BookOasisMateEngine:
         except (OSError, sqlite3.Error, RuntimeError, ValueError) as error:
             return {
                 "db_type": target.db_type,
+                "media_kind": "audiobook" if target.db_type == "audiobook" else "book",
                 "label": target.label,
                 "path": target.path,
                 "connected": False,
@@ -493,16 +574,38 @@ class BookOasisMateEngine:
                 "running_tasks",
             )
         }
+        audiobook_totals = {
+            "total_audiobooks": 0,
+            "problem_audiobooks": 0,
+            "cover": 0,
+            "author": 0,
+            "publisher": 0,
+            "summary": 0,
+            "tracks": 0,
+            "total_tracks": 0,
+            "track_file_size_missing": 0,
+        }
         for database in databases:
-            for key in totals:
-                totals[key] += int(database.get("summary", {}).get(key, 0) or 0)
+            if database.get("media_kind") == "audiobook":
+                for key in audiobook_totals:
+                    audiobook_totals[key] += int(
+                        database.get("summary", {}).get(key, 0) or 0
+                    )
+            else:
+                for key in totals:
+                    totals[key] += int(database.get("summary", {}).get(key, 0) or 0)
             for key in scanner_totals:
                 scanner_totals[key] += int(database.get("scanner", {}).get(key, 0) or 0)
 
         errors = sum(1 for database in databases if not database["connected"])
         if errors:
             status = "error"
-        elif totals["problem_books"] or scanner_totals["failed_libraries"] or scanner_totals["recent_failed_tasks"]:
+        elif (
+            totals["problem_books"]
+            or audiobook_totals["problem_audiobooks"]
+            or scanner_totals["failed_libraries"]
+            or scanner_totals["recent_failed_tasks"]
+        ):
             status = "warning"
         else:
             status = "healthy"
@@ -515,6 +618,7 @@ class BookOasisMateEngine:
             "databases": databases,
             "totals": totals,
             "scanner": scanner_totals,
+            "audiobook": audiobook_totals,
             "stale_days": self.stale_days,
             "check_missing_isbn": self.check_missing_isbn,
         }
@@ -959,6 +1063,7 @@ class BookOasisMateEngine:
             return {
                 "success": True,
                 "db_type": target.db_type,
+                "media_kind": "audiobook" if target.db_type == "audiobook" else "book",
                 "label": target.label,
                 "path": target.path,
                 "file_size": os.path.getsize(target.path),
@@ -971,6 +1076,7 @@ class BookOasisMateEngine:
             return {
                 "success": False,
                 "db_type": target.db_type,
+                "media_kind": "audiobook" if target.db_type == "audiobook" else "book",
                 "label": target.label,
                 "path": target.path,
                 "file_size": 0,

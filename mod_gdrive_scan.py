@@ -19,7 +19,7 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_buffer_seconds": "60",
             "gdrive_scan_worker_interval": "2",
             "gdrive_scan_max_attempts": "3",
-            "gdrive_scan_extensions": ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json",
+            "gdrive_scan_extensions": ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json,.mp3,.m4b,.m4a,.flac,.aac,.wav,.ogg,.opus,.wma",
             "gdrive_scan_path_mappings": "/GDRIVE => /mnt/gds/GDRIVE",
             "gdrive_scan_vfs_rules": "/mnt/gds/GDRIVE|/GDRIVE|http://127.0.0.1:5572",
             "gdrive_scan_rc_timeout": "30",
@@ -53,10 +53,15 @@ class ModuleGDriveScan(PluginModuleBase):
 
     def _settings(self):
         model = P.ModelSetting
+        extensions = str(model.get("gdrive_scan_extensions") or "").strip()
+        legacy_extensions = ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json"
+        if extensions == legacy_extensions:
+            extensions = self.db_default["gdrive_scan_extensions"]
         return {
             "general_db_path": model.get("general_db_path"),
             "adult_enabled": model.get_bool("adult_enabled"),
             "adult_db_path": model.get("adult_db_path"),
+            "audiobook_db_path": model.get("audiobook_db_path"),
             "bookoasis_url": model.get("bookoasis_url"),
             "webhook_token": model.get("webhook_token"),
             "api_timeout": self._as_int(model.get("api_timeout"), 30, 1, 30),
@@ -70,7 +75,7 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_max_attempts": self._as_int(
                 model.get("gdrive_scan_max_attempts"), 3, 1, 20
             ),
-            "gdrive_scan_extensions": model.get("gdrive_scan_extensions"),
+            "gdrive_scan_extensions": extensions,
             "gdrive_scan_path_mappings": model.get("gdrive_scan_path_mappings"),
             "gdrive_scan_vfs_rules": model.get("gdrive_scan_vfs_rules"),
             "gdrive_scan_rc_timeout": self._as_int(
@@ -89,6 +94,7 @@ class ModuleGDriveScan(PluginModuleBase):
         page = page if page in {"setting", "list", "manual"} else "setting"
         P.logger.debug(f"[BookOasisMate] Google Drive 연동 메뉴 열기 page={page}")
         arg = P.ModelSetting.to_dict()
+        arg["gdrive_scan_extensions"] = self._settings()["gdrive_scan_extensions"]
         arg["page"] = page
         return render_template(
             f"{P.package_name}_{self.name}_{page}.html",

@@ -72,6 +72,48 @@ def create_database(path, empty=False):
     connection.close()
 
 
+def create_audiobook_database(path):
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE libraries (
+            id INTEGER PRIMARY KEY,
+            name TEXT,
+            physical_path TEXT,
+            last_scanned_at TEXT,
+            scan_status TEXT
+        );
+        CREATE TABLE audiobooks (
+            id INTEGER PRIMARY KEY,
+            library_id INTEGER,
+            title TEXT,
+            author TEXT,
+            publisher TEXT,
+            poster TEXT,
+            description TEXT,
+            total_tracks INTEGER,
+            is_deleted INTEGER DEFAULT 0
+        );
+        CREATE TABLE audiobook_tracks (
+            id INTEGER PRIMARY KEY,
+            audiobook_id INTEGER,
+            file_size INTEGER
+        );
+        INSERT INTO libraries VALUES
+          (1, '오디오북', '/audio', CURRENT_TIMESTAMP, 'ready');
+        INSERT INTO audiobooks VALUES
+          (1, 1, '정상 오디오북', '저자', '출판사', '1/poster.webp', '소개', 2, 0),
+          (2, 1, '점검 오디오북', '', '', '', '', 0, 0),
+          (3, 1, '삭제 오디오북', '', '', '', '', 0, 1);
+        INSERT INTO audiobook_tracks VALUES
+          (1, 1, 1000),
+          (2, 1, 0);
+        """
+    )
+    connection.commit()
+    connection.close()
+
+
 class BookOasisMateEngineTest(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -103,6 +145,24 @@ class BookOasisMateEngineTest(unittest.TestCase):
             {"problem_books", "failed_libraries", "recent_failed_tasks"},
             {reason["code"] for reason in report["databases"][0]["status_reasons"]},
         )
+
+    def test_audiobook_database_is_summarized_without_book_issue_sql(self):
+        audiobook_path = Path(self.tempdir.name) / "media_audiobook.db"
+        create_audiobook_database(audiobook_path)
+        settings = dict(self.settings, audiobook_db_path=str(audiobook_path))
+
+        report = BookOasisMateEngine(settings).build_report()
+
+        self.assertEqual(4, report["totals"]["total_books"])
+        self.assertEqual(2, report["audiobook"]["total_audiobooks"])
+        self.assertEqual(1, report["audiobook"]["problem_audiobooks"])
+        self.assertEqual(2, report["audiobook"]["total_tracks"])
+        self.assertEqual(1, report["audiobook"]["track_file_size_missing"])
+        audio_database = next(
+            item for item in report["databases"] if item["db_type"] == "audiobook"
+        )
+        self.assertTrue(audio_database["connected"])
+        self.assertEqual("audiobook", audio_database["media_kind"])
         self.assertEqual(
             report["databases"][0]["summary"]["problem_books"],
             next(

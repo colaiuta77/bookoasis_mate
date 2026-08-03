@@ -25,6 +25,24 @@ class _Response:
 
 
 class BookOasisClientTest(unittest.TestCase):
+    def test_audiobook_is_allowed_for_library_operations_only(self):
+        client = BookOasisClient("http://bookoasis:5930")
+        client._admin_request = lambda path, **kwargs: {
+            "path": path,
+            "query": kwargs.get("query"),
+            "form": kwargs.get("form"),
+        }
+
+        schedules = client.library_schedules("audiobook")
+        scan = client.scan_library(7, "audiobook")
+        cover_scan = client.scan_library_covers(7, "audiobook")
+        book_scan = client.scan_book(7, "audiobook")
+
+        self.assertEqual({"type": "audiobook"}, schedules["query"])
+        self.assertEqual("audiobook", scan["form"]["type"])
+        self.assertFalse(cover_scan["success"])
+        self.assertFalse(book_scan["success"])
+
     def test_defaults_api_timeout_to_thirty_seconds(self):
         client = BookOasisClient("http://bookoasis:5930")
 

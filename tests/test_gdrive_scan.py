@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from gdrive_scan import (
+    DEFAULT_EXTENSIONS,
     GDriveScanProcessor,
     event_vfs_operations,
     map_path,
@@ -28,6 +29,10 @@ class _FakeRcClient:
 
 
 class GDriveScanTest(unittest.TestCase):
+    def test_default_extensions_include_bookoasis_audiobook_formats(self):
+        for extension in (".mp3", ".m4b", ".m4a", ".flac", ".aac", ".wav", ".ogg", ".opus", ".wma"):
+            self.assertIn(extension, DEFAULT_EXTENSIONS)
+
     def test_invalid_vfs_rule_does_not_expose_credentials(self):
         with self.assertRaises(ValueError) as context:
             parse_vfs_rules(
@@ -67,6 +72,36 @@ class GDriveScanTest(unittest.TestCase):
             "/special/comics/A.cbz",
             map_path("/GDRIVE/READING/만화/A.cbz", mappings),
         )
+
+    def test_audiobook_library_is_selected_for_audio_event(self):
+        with tempfile.TemporaryDirectory() as root:
+            audio_db = self._database(
+                root,
+                physical_path="/mnt/gds/GDRIVE/READING/오디오북",
+            )
+            scans = []
+            processor = GDriveScanProcessor(
+                {
+                    "general_db_path": "",
+                    "adult_enabled": False,
+                    "audiobook_db_path": str(audio_db),
+                    "gdrive_scan_path_mappings": "",
+                    "gdrive_scan_vfs_rules": "",
+                },
+                lambda db_type, library_id, library_name: scans.append(
+                    (db_type, library_id, library_name)
+                ),
+            )
+
+            prepared = processor.prepare_event(
+                validate_event(
+                    "create",
+                    "file",
+                    "/mnt/gds/GDRIVE/READING/오디오북/샘플/01.m4b",
+                )
+            )
+
+            self.assertEqual("audiobook", prepared["libraries"][0]["db_type"])
 
     def test_unsupported_file_is_ignored_but_directory_is_relevant(self):
         file_event = validate_event(

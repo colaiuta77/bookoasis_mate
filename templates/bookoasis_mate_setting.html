@@ -17,7 +17,25 @@
   <div id="adult_enabled_div" class="collapse">
     {{ macros.setting_input_text_and_buttons('adult_db_path', '성인 DB 파일', [['adult_db_size_btn', '크기 확인'], ['adult_db_libraries_btn', '섹션 확인']], value=arg['adult_db_path'], desc=['<기본 경로>/db/media_adult.db로 자동 설정됩니다.']) }}
   </div>
+  {{ macros.setting_input_text_and_buttons('audiobook_db_path', '오디오북 DB 파일', [['audiobook_db_size_btn', '크기 확인'], ['audiobook_db_libraries_btn', '섹션 확인']], value=arg.get('audiobook_db_path', ''), desc=['<기본 경로>/db/media_audiobook.db로 자동 설정됩니다.']) }}
   {{ macros.setting_input_text('bookoasis_log_dir', 'BookOasis 로그 디렉터리', value=arg['bookoasis_log_dir'], desc=['<기본 경로>/logs로 자동 설정됩니다.']) }}
+  {{ macros.m_hr() }}
+  <h4>커스텀 폰트</h4>
+  {{ macros.setting_input_text_and_buttons('custom_font_dir', '폰트 업로드 디렉터리', [['select_custom_font_dir_btn', '경로 선택']], value=arg.get('custom_font_dir', ''), desc=['FlaskFarm 컨테이너에서 쓰기 가능한 마운트 경로를 지정합니다.', '같은 호스트 경로를 BookOasis 컨테이너의 /app/static/fonts/custom에 매핑해야 합니다.']) }}
+  <div class="doctor-font-upload">
+    <input id="custom_font_files" type="file" accept=".ttf,.otf,.woff,.woff2" multiple hidden>
+    <div id="custom_font_dropzone" class="doctor-font-dropzone" tabindex="0" role="button">
+      TTF·OTF·WOFF·WOFF2 파일을 여기에 놓거나 클릭해 선택하세요.
+      <small>파일당 최대 30MB · 같은 이름은 덮어쓰지 않음</small>
+    </div>
+    <div class="doctor-toolbar mb-0">
+      <button id="custom_font_upload_btn" type="button" class="btn btn-sm btn-primary">선택한 폰트 업로드</button>
+      <button id="custom_font_refresh_btn" type="button" class="btn btn-sm btn-outline-secondary">목록 새로고침</button>
+      <span id="custom_font_selection" class="doctor-muted">선택한 파일 없음</span>
+    </div>
+    <div id="custom_font_list" class="doctor-font-list doctor-muted">설정한 경로의 폰트를 확인하세요.</div>
+    <p class="doctor-muted mb-0">마운트 추가·변경 후 BookOasis Docker 컨테이너 재시작은 사용자가 직접 해야 합니다. 기존 마운트에 파일만 추가한 경우 BookOasis가 목록을 다시 조회합니다.</p>
+  </div>
   {{ macros.m_hr() }}
   <h4>표지 검사</h4>
   {{ macros.setting_checkbox('cover_root_custom', '커스텀 표지 경로', value=arg.get('cover_root_custom', 'False'), desc=['기본 경로가 아닌 커스텀 경로 사용 시 체크합니다.']) }}
@@ -42,7 +60,7 @@
 <script>
 $(function() {
   use_collapse('adult_enabled');
-  $('#general_db_path,#adult_db_path,#bookoasis_log_dir').prop('readonly', true);
+  $('#general_db_path,#adult_db_path,#audiobook_db_path,#bookoasis_log_dir').prop('readonly', true);
   updateCoverRootMode();
   updateBookOasisDerivedPaths();
 });
@@ -66,6 +84,7 @@ function updateBookOasisDerivedPaths() {
   if (!String(root || '').trim()) return;
   $('#general_db_path').val(bookoasisRootJoin(root, 'db/media_general.db'));
   $('#adult_db_path').val(bookoasisRootJoin(root, 'db/media_adult.db'));
+  $('#audiobook_db_path').val(bookoasisRootJoin(root, 'db/media_audiobook.db'));
   $('#bookoasis_log_dir').val(bookoasisRootJoin(root, 'logs'));
   if (!$('#cover_root_custom').is(':checked')) {
     $('#cover_root_path').val(bookoasisRootJoin(root, 'covers'));
@@ -101,12 +120,23 @@ $("body").on('click', '#select_cover_root_path_btn', function(e) {
   });
 });
 
+$("body").on('click', '#select_custom_font_dir_btn', function(e) {
+  e.preventDefault();
+  var input = $('#custom_font_dir');
+  globalSelectLocalFolder('커스텀 폰트 폴더 선택', input.val().trim() || '/', function(result) {
+    if (typeof result !== 'string' || !result.trim()) return;
+    input.val(result.trim());
+    loadCustomFonts();
+  });
+});
+
 function showDatabaseDetails(dbType, view) {
   var data = currentSettings() + '&db_type=' + encodeURIComponent(dbType);
   bookoasisMateAjax('setting', 'database_details', data, function(ret) {
     if (!ret.data || !ret.data.success) return;
     var db = ret.data;
-    var label = dbType === 'adult' ? '성인 DB' : '일반 DB';
+    var labels = {general:'일반 DB', adult:'성인 DB', audiobook:'오디오북 DB'};
+    var label = labels[dbType] || dbType;
     if (view === 'size') {
       var sizeHtml =
         '<p><strong>' + bookoasisMateEscape(label) + '</strong></p>' +
@@ -126,15 +156,107 @@ function showDatabaseDetails(dbType, view) {
   });
 }
 
-$("body").on('click', '#general_db_size_btn,#adult_db_size_btn', function(e) {
+$("body").on('click', '#general_db_size_btn,#adult_db_size_btn,#audiobook_db_size_btn', function(e) {
   e.preventDefault();
-  showDatabaseDetails(this.id.indexOf('adult_') === 0 ? 'adult' : 'general', 'size');
+  showDatabaseDetails(this.id.indexOf('audiobook_') === 0 ? 'audiobook' : (this.id.indexOf('adult_') === 0 ? 'adult' : 'general'), 'size');
 });
 
-$("body").on('click', '#general_db_libraries_btn,#adult_db_libraries_btn', function(e) {
+$("body").on('click', '#general_db_libraries_btn,#adult_db_libraries_btn,#audiobook_db_libraries_btn', function(e) {
   e.preventDefault();
-  showDatabaseDetails(this.id.indexOf('adult_') === 0 ? 'adult' : 'general', 'libraries');
+  showDatabaseDetails(this.id.indexOf('audiobook_') === 0 ? 'audiobook' : (this.id.indexOf('adult_') === 0 ? 'adult' : 'general'), 'libraries');
 });
+
+function setCustomFontFiles(files) {
+  var input = document.getElementById('custom_font_files');
+  if (typeof DataTransfer !== 'undefined') {
+    var transfer = new DataTransfer();
+    Array.prototype.forEach.call(files || [], function(file) { transfer.items.add(file); });
+    input.files = transfer.files;
+  }
+  document.getElementById('custom_font_selection').textContent =
+    input.files.length ? input.files.length + '개 파일 선택' : '선택한 파일 없음';
+}
+
+function renderCustomFonts(data) {
+  var items = (data && data.items) || [];
+  var root = document.getElementById('custom_font_list');
+  bookoasisMateClear(root);
+  if (!items.length) {
+    root.textContent = '등록된 커스텀 폰트가 없습니다.';
+    return;
+  }
+  items.forEach(function(item) {
+    var row = bookoasisMateText('div', 'doctor-font-row', '');
+    row.appendChild(bookoasisMateText('strong', '', item.name));
+    row.appendChild(bookoasisMateText('span', 'doctor-muted', bookoasisMateBytes(item.size) + ' · ' + item.modified_at));
+    root.appendChild(row);
+  });
+}
+
+function loadCustomFonts() {
+  if (!$('#custom_font_dir').val().trim()) {
+    renderCustomFonts({items:[]});
+    return;
+  }
+  bookoasisMateAjax('setting', 'font_list', currentSettings(), function(ret) {
+    if (ret.data) renderCustomFonts(ret.data);
+  }, null, {global:false, silent:true});
+}
+
+function uploadCustomFonts() {
+  var input = document.getElementById('custom_font_files');
+  if (!input.files.length) {
+    notify('업로드할 폰트 파일을 선택해 주세요.', 'warning');
+    return;
+  }
+  var formData = new FormData();
+  new URLSearchParams(currentSettings()).forEach(function(value, key) {
+    formData.append(key, value);
+  });
+  Array.prototype.forEach.call(input.files, function(file) { formData.append('files', file); });
+  $.ajax({
+    url:'/' + PACKAGE_NAME + '/ajax/setting/font_upload',
+    type:'POST',
+    data:formData,
+    processData:false,
+    contentType:false,
+    dataType:'json',
+    success:function(ret) {
+      notify(ret.msg || '폰트 업로드 요청을 처리했습니다.', ret.ret || 'success');
+      if (ret.data) {
+        if ((ret.data.rejected || []).length) {
+          var rejected = ret.data.rejected.map(function(item) {
+            return bookoasisMateEscape(item.name || '이름 없음') + ' · ' + bookoasisMateEscape(item.reason || '거부됨');
+          }).join('<br>');
+          showModal(rejected, '업로드하지 못한 폰트', false);
+        }
+        input.value = '';
+        setCustomFontFiles([]);
+        loadCustomFonts();
+      }
+    },
+    error:function(xhr) {
+      var message = xhr.responseJSON && xhr.responseJSON.msg ? xhr.responseJSON.msg : '폰트 업로드에 실패했습니다.';
+      notify(message, 'danger');
+    }
+  });
+}
+
+$('#custom_font_dropzone').on('click keydown', function(event) {
+  if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  document.getElementById('custom_font_files').click();
+}).on('dragover', function(event) {
+  event.preventDefault();
+  this.classList.add('is-dragover');
+}).on('dragleave drop', function(event) {
+  event.preventDefault();
+  this.classList.remove('is-dragover');
+  if (event.type === 'drop') setCustomFontFiles(event.originalEvent.dataTransfer.files);
+});
+$('#custom_font_files').on('change', function() { setCustomFontFiles(this.files); });
+$('#custom_font_upload_btn').on('click', uploadCustomFonts);
+$('#custom_font_refresh_btn').on('click', loadCustomFonts);
 
 $('#setting_save_btn').click(function(e) {
   e.preventDefault();
@@ -153,8 +275,10 @@ $('#connection_test_btn').click(function(e) {
     lines.push(bookoasisMateEscape('관리자 API: ' + (ret.data.admin_api.success ? '로그인 성공' : ret.data.admin_api.message)));
     lines.push(bookoasisMateEscape('로그 디렉터리: ' + (!ret.data.log_root.configured ? '미설정' : (ret.data.log_root.readable ? '읽기 가능 · ' + ret.data.log_root.files.length + '개 파일' : ret.data.log_root.error))));
     lines.push(bookoasisMateEscape('표지 디렉터리: ' + (!ret.data.cover_root.configured ? '미설정' : (ret.data.cover_root.readable ? '읽기 가능' : '찾을 수 없음'))));
+    lines.push(bookoasisMateEscape('커스텀 폰트 디렉터리: ' + (!ret.data.font_root.configured ? '미설정' : (ret.data.font_root.writable ? '쓰기 가능' : '찾을 수 없거나 쓰기 불가'))));
     showModal(lines.join('<br>'), 'BookOasis 연결 테스트', false);
   });
 });
+$(document).ready(loadCustomFonts);
 </script>
 {% endblock %}
