@@ -101,7 +101,46 @@ class ModuleMain(PluginModuleBase):
                 )
                 return jsonify({
                     "ret": "success" if data["success"] else "warning",
-                    "msg": f"재스캔 요청 {data['requested']}건 중 {data['queued']}건을 대기열에 등록했습니다.",
+                    "msg": data.get("message") or (
+                        f"재스캔 요청 {data['requested']}건 중 "
+                        f"{data['queued']}건을 처리했습니다."
+                    ),
+                    "data": data,
+                })
+            if command == "cancel_library_scan":
+                data = self.service.cancel_library_scan(
+                    req.form.get("library_id"),
+                    req.form.get("db_type", "general"),
+                )
+                return jsonify({
+                    "ret": "success" if data.get("success") else "danger",
+                    "msg": data.get("message") or data.get("error") or "보관함 스캔 취소 요청을 처리했습니다.",
+                    "data": data,
+                })
+            if command == "scan_library_covers":
+                data = self.service.scan_library_covers(
+                    req.form.get("library_id"),
+                    req.form.get("db_type", "general"),
+                )
+                return jsonify({
+                    "ret": "success" if data.get("success") else "danger",
+                    "msg": data.get("message") or data.get("error") or "보관함 표지 스캔 요청을 처리했습니다.",
+                    "data": data,
+                })
+            if command == "clear_scan_queue":
+                data = self.service.clear_scan_queue()
+                return jsonify({
+                    "ret": "success" if data.get("success") else "danger",
+                    "msg": data.get("message") or data.get("error") or "스캔 대기열 정리를 처리했습니다.",
+                    "data": data,
+                })
+            if command == "cancel_scan_queue_task":
+                data = self.service.cancel_scan_queue_task(
+                    req.form.get("task_key"),
+                )
+                return jsonify({
+                    "ret": "success" if data.get("success") else "danger",
+                    "msg": data.get("message") or data.get("error") or "대기 작업 취소를 처리했습니다.",
                     "data": data,
                 })
             if command == "book_scan":
@@ -112,6 +151,32 @@ class ModuleMain(PluginModuleBase):
                 return jsonify({
                     "ret": "success" if data.get("success") else "danger",
                     "msg": data.get("message") or data.get("error") or "개별 도서 재스캔 요청을 처리했습니다.",
+                    "data": data,
+                })
+            if command == "batch_rescan_start":
+                data = self.service.start_batch_rescan(
+                    source=req.form.get("source"),
+                    db_type=req.form.get("db_type", "general"),
+                    library_id=req.form.get("library_id"),
+                    issue_type=req.form.get("issue_type", "all"),
+                    mode=req.form.get("mode", "missing"),
+                    search=req.form.get("search", ""),
+                )
+                return jsonify({
+                    "ret": "success" if data.get("started") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
+            if command == "batch_rescan_status":
+                return jsonify({
+                    "ret": "success",
+                    "data": self.service.batch_rescan_status(),
+                })
+            if command == "batch_rescan_stop":
+                data = self.service.stop_batch_rescan()
+                return jsonify({
+                    "ret": "success" if data.get("requested") else "warning",
+                    "msg": data.get("message"),
                     "data": data,
                 })
             if command == "metadata_plugins":
@@ -196,6 +261,32 @@ class ModuleMain(PluginModuleBase):
                     force=req.form.get("force"),
                 )
                 return jsonify({"ret": "success", "data": data})
+            if command == "cover_inspection_start":
+                data = self.service.start_cover_inspection(
+                    db_type=req.form.get("db_type", "general"),
+                    library_id=req.form.get("library_id"),
+                    mode=req.form.get("mode", "resolution"),
+                    search=req.form.get("search", ""),
+                )
+                return jsonify({
+                    "ret": "success" if data.get("started") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
+            if command == "cover_inspection_status":
+                data = self.service.cover_inspection_status(
+                    mode=req.form.get("mode", "resolution"),
+                    page=req.form.get("page", 1),
+                    page_size=req.form.get("page_size") or None,
+                )
+                return jsonify({"ret": "success", "data": data})
+            if command == "cover_inspection_stop":
+                data = self.service.stop_cover_inspection()
+                return jsonify({
+                    "ret": "success" if data.get("requested") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
             if command == "orphan_cleanup_start":
                 data = self.service.start_orphan_cleanup(
                     db_type=req.form.get("db_type", "general"),

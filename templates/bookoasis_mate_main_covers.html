@@ -21,10 +21,26 @@
   </select>
   <input id="cover_search" class="form-control form-control-sm" placeholder="제목·시리즈 검색">
   <button id="cover_check_btn" class="btn btn-sm btn-primary">검사</button>
+  <button id="cover_stop_btn" class="btn btn-sm btn-outline-secondary" style="display:none" disabled>중지</button>
   <span id="cover_progress" class="doctor-progress" role="status" aria-live="polite"></span>
   <span id="cover_count" class="doctor-muted"></span>
 </div>
-<p class="doctor-muted">선택한 검사 유형에 해당하는 표지만 결과에 표시합니다. 저해상도·파일 크기·비율 검사는 마운트된 실제 표지 파일을 읽기 전용으로 확인합니다. 도서 행을 클릭하면 BookOasis 상세 보기, 개별 재스캔과 플러그인 메타데이터 검색 메뉴가 열립니다.</p>
+<p class="doctor-muted">선택한 검사 유형에 해당하는 표지만 결과에 표시합니다. 저해상도·파일 크기·비율 검사는 마운트된 실제 표지 파일을 읽기 전용으로 확인합니다. 도서 행에서는 상세 보기, 개별 도서 재스캔과 메타데이터 검색을 제공하며, 검사 결과 전체 재스캔은 아래 별도 작업으로 실행합니다.</p>
+<div class="doctor-card doctor-batch-card">
+  <div class="doctor-batch-header">
+    <div><strong>검사 결과 일괄 재스캔</strong><div id="batch_rescan_status_text" class="doctor-muted">대기중</div></div>
+    <div class="doctor-cleanup-actions">
+      <button id="batch_rescan_start" class="btn btn-sm btn-outline-primary" disabled>전체 결과 재스캔</button>
+      <button id="batch_rescan_stop" class="btn btn-sm btn-outline-secondary" disabled>중지</button>
+    </div>
+  </div>
+  <div class="doctor-live-progress">
+    <div class="doctor-live-progress-track"><div id="batch_rescan_bar" class="doctor-live-progress-bar"></div></div>
+    <div class="doctor-live-progress-text"><span id="batch_rescan_progress_text">0 / 0권 · 0%</span></div>
+  </div>
+  <div id="batch_rescan_error" class="doctor-live-error" style="display:none"></div>
+  <div id="batch_rescan_log" class="doctor-batch-log"><div class="doctor-empty">검사 후 일괄 재스캔을 시작할 수 있습니다.</div></div>
+</div>
 <div class="doctor-table-wrap" style="display:none"><table class="table table-sm doctor-table">
   <thead><tr><th>표지</th><th>도서</th><th>보관함</th><th>경로</th><th>검사 결과</th><th>정보</th></tr></thead>
   <tbody id="cover_rows"></tbody>
@@ -34,11 +50,15 @@
 
 <script>
 var coverPage = 1, coverPages = 1, coverLoading = false, coverLibrariesReady = false, coverTimer = null, coverStartedAt = 0;
+var coverBatchRescan = null, coverInspectionPoll = null, coverInspectionStatus = null;
 var coverLabels = {ok:'정상', missing_reference:'DB 표지 없음', low_resolution:'저해상도', small_file:'파일 크기 작음', abnormal_aspect_ratio:'비정상 비율'};
+function coverIsFileMode() { return $('#cover_mode').val() !== 'missing'; }
 function renderCovers(data) {
+  setCoverLoading(false);
   var body = document.getElementById('cover_rows'); bookoasisMateClear(body);
   var seconds = (Number(data.duration_ms || 0) / 1000).toFixed(1);
-  $('#cover_count').text('전체 대상 ' + data.source_total + '권 · 문제 ' + data.issue_count + '권 · ' + seconds + '초');
+  $('#cover_count').text('전체 대상 ' + Number(data.source_total || 0).toLocaleString() + '권 · 문제 ' + Number(data.issue_count || 0).toLocaleString() + '권 · ' + seconds + '초');
+  if (coverBatchRescan) coverBatchRescan.setAvailableCount(data.issue_count);
   var modeLabels = {missing:'표지 없음', resolution:'저해상도', file_size:'파일 크기 이상', aspect:'비율 이상'};
   var emptyMessage = '선택 범위에서 ' + (modeLabels[data.mode] || '표지 문제') + ' 대상을 찾지 못했습니다.';
   $('#cover_empty').text(emptyMessage).toggle(data.items.length === 0); $('.doctor-table-wrap').toggle(data.items.length > 0);
@@ -60,7 +80,7 @@ function renderCovers(data) {
     if (inspection.http_status) details.push('HTTP ' + inspection.http_status);
     if (inspection.format || inspection.content_type) details.push(inspection.format || inspection.content_type);
     row.appendChild(bookoasisMateText('td', 'doctor-muted', details.join(' · ') || '-'));
-    bookoasisMateBindBookActions(row, item, function() { loadCovers(coverPage, true); });
+    bookoasisMateBindBookActions(row, item, refreshCoverResults);
     body.appendChild(row);
   });
   coverPage = data.page; coverPages = Math.max(1, data.pages || 1); $('#cover_page').text(coverPage + ' / ' + coverPages); $('#cover_prev').prop('disabled', coverPage <= 1); $('#cover_next').prop('disabled', coverPage >= coverPages);
@@ -76,58 +96,119 @@ function setCoverLoading(loading) {
   coverStartedAt = Date.now();
   function updateCoverProgress() {
     var seconds = Math.floor((Date.now() - coverStartedAt) / 1000);
-    $('#cover_progress').css('display', 'inline-flex').text('검사 중 · ' + seconds + '초');
+    $('#cover_progress').css('display', 'inline-flex').text('DB 검사 중 · ' + seconds + '초');
   }
-  updateCoverProgress();
-  coverTimer = setInterval(updateCoverProgress, 1000);
+  updateCoverProgress(); coverTimer = setInterval(updateCoverProgress, 1000);
 }
 function resetCoverResults(message) {
-  bookoasisMateClear(document.getElementById('cover_rows'));
-  $('.doctor-table-wrap').hide();
-  $('#cover_empty').text(message || 'DB와 보관함을 선택한 후 검사 버튼을 눌러 주세요.').show();
-  $('#cover_count').text('');
-  coverPage = 1; coverPages = 1;
-  $('#cover_page').text('-'); $('#cover_prev, #cover_next').prop('disabled', true);
+  bookoasisMateClear(document.getElementById('cover_rows')); $('.doctor-table-wrap').hide();
+  $('#cover_empty').text(message || 'DB와 보관함을 선택한 후 검사 버튼을 눌러 주세요.').show(); $('#cover_count').text('');
+  if (coverBatchRescan) coverBatchRescan.setAvailableCount(0);
+  coverPage = 1; coverPages = 1; $('#cover_page').text('-'); $('#cover_prev, #cover_next').prop('disabled', true);
 }
-function loadCovers(page, force) {
+function loadMissingCovers(page, force) {
   if (coverLoading) return;
   setCoverLoading(true);
   bookoasisMateAjax('main', 'covers', {
-    db_type:$('#db_type').val(), library_id:$('#cover_library_id').val(), mode:$('#cover_mode').val(),
+    db_type:$('#db_type').val(), library_id:$('#cover_library_id').val(), mode:'missing',
     search:$('#cover_search').val(), page:page || 1, force:force ? 'true' : 'false'
-  }, function(ret) {
-    if (ret.data) renderCovers(ret.data);
-  }, function(xhr, status) {
-    setCoverLoading(false);
-    if (status !== 'success') $('#cover_count').text('표지 검사 요청에 실패했습니다.');
-  });
+  }, function(ret) { if (ret.data) renderCovers(ret.data); }, function(xhr, status) {
+    setCoverLoading(false); if (status !== 'success') $('#cover_count').text('표지 없음 검사 요청에 실패했습니다.');
+  }, {global:false});
 }
-function loadCoverLibraries() {
-  var dbType = $('#db_type').val();
-  var select = $('#cover_library_id');
-  coverLibrariesReady = false;
+function coverStatusMatches(status) {
+  return status && String(status.db_type || 'general') === String($('#db_type').val() || 'general') &&
+    String(status.library_id || '') === String($('#cover_library_id').val() || '') &&
+    String(status.search || '') === String($('#cover_search').val() || '').trim();
+}
+function stopCoverInspectionPolling() { if (coverInspectionPoll) { clearInterval(coverInspectionPoll); coverInspectionPoll = null; } }
+function startCoverInspectionPolling() {
+  if (coverInspectionPoll) return;
+  coverInspectionPoll = setInterval(function() { requestCoverInspectionStatus(coverPage, false); }, 1000);
+}
+function renderCoverInspection(payload) {
+  payload = payload || {}; var status = payload.status || {};
+  coverInspectionStatus = status;
+  var running = status.is_working === 'run';
+  $('#db_type, #cover_mode, #cover_search, #cover_check_btn').prop('disabled', running);
+  $('#cover_library_id').prop('disabled', running || !coverLibrariesReady);
+  $('#cover_stop_btn').toggle(running).prop('disabled', !running);
+  if (running) {
+    var current = Number(status.current || 0), total = Number(status.total || 0), percent = Number(status.progress_percent || 0);
+    $('#cover_progress').css('display', 'inline-flex').text(
+      '검사 중 · ' + current.toLocaleString() + '/' + total.toLocaleString() + '권 · ' + percent + '% · ' + Number(status.elapsed_seconds || 0).toFixed(1) + '초'
+    );
+    $('#cover_count').text(status.message || '표지 정밀 검사를 실행하고 있습니다.');
+    startCoverInspectionPolling();
+  } else {
+    $('#cover_progress').hide().text(''); stopCoverInspectionPolling();
+    if (status.error) $('#cover_count').text(status.error);
+  }
+  if (payload.data) renderCovers(payload.data);
+}
+function requestCoverInspectionStatus(page, notifyMismatch) {
+  bookoasisMateAjax('main', 'cover_inspection_status', {mode:$('#cover_mode').val(), page:page || 1}, function(ret) {
+    var payload = ret.data || {}, status = payload.status || {};
+    if (!coverStatusMatches(status)) {
+      if (notifyMismatch) resetCoverResults('현재 조건의 정밀 검사 결과가 없습니다. 검사 버튼을 눌러 주세요.');
+      return;
+    }
+    renderCoverInspection(payload);
+  }, null, {global:false, silent:true});
+}
+function startCoverInspection() {
+  if (coverInspectionStatus && coverInspectionStatus.is_working === 'run') return;
+  resetCoverResults('표지 정밀 검사를 시작하고 있습니다.');
+  bookoasisMateAjax('main', 'cover_inspection_start', {
+    db_type:$('#db_type').val(), library_id:$('#cover_library_id').val(), mode:$('#cover_mode').val(), search:$('#cover_search').val()
+  }, function(ret) {
+    if (!ret.data || !ret.data.status) return;
+    if (!coverStatusMatches(ret.data.status)) {
+      resetCoverResults('다른 검색 조건의 정밀 검사가 실행 중입니다. 해당 작업이 끝난 뒤 다시 시도해 주세요.');
+      return;
+    }
+    renderCoverInspection({status:ret.data.status, data:null});
+  }, null, {global:false});
+}
+function refreshCoverResults() { if (coverIsFileMode()) startCoverInspection(); else loadMissingCovers(coverPage, true); }
+function loadCoverLibraries(selectedValue, complete) {
+  var dbType = $('#db_type').val(), select = $('#cover_library_id'); coverLibrariesReady = false;
   select.prop('disabled', true).empty().append($('<option>', {value:'', text:'보관함 불러오는 중'}));
   bookoasisMateAjax('main', 'scanner', {db_type:dbType, limit:10}, function(ret) {
     if ($('#db_type').val() !== dbType || !ret.data) return;
     select.empty().append($('<option>', {value:'', text:'전체 보관함'}));
-    ret.data.libraries.forEach(function(item) {
-      select.append($('<option>', {value:item.id, text:item.name || ('보관함 ' + item.id)}));
-    });
-    coverLibrariesReady = true;
-    select.prop('disabled', false);
+    ret.data.libraries.forEach(function(item) { select.append($('<option>', {value:item.id, text:item.name || ('보관함 ' + item.id)})); });
+    coverLibrariesReady = true; select.val(String(selectedValue || '')).prop('disabled', false);
+    if (complete) complete();
   }, function(xhr, status) {
     if ($('#db_type').val() === dbType && status !== 'success') {
-      coverLibrariesReady = true;
-      select.empty().append($('<option>', {value:'', text:'전체 보관함'})).prop('disabled', false);
+      coverLibrariesReady = true; select.empty().append($('<option>', {value:'', text:'전체 보관함'})).prop('disabled', false);
+      if (complete) complete();
     }
-  });
+  }, {global:false});
 }
-$('#cover_check_btn').click(function(e) { e.preventDefault(); loadCovers(1, true); });
-$('#db_type').change(function() { resetCoverResults(); loadCoverLibraries(); });
-$('#cover_library_id').change(function() { resetCoverResults('선택한 보관함을 검사하려면 검사 버튼을 눌러 주세요.'); });
-$('#cover_mode').change(function() { resetCoverResults('선택한 검사 방식으로 실행하려면 검사 버튼을 눌러 주세요.'); });
-$('#cover_search').on('input', function() { resetCoverResults('검색 조건을 적용하려면 검사 버튼을 눌러 주세요.'); });
-$('#cover_prev').click(function() { if (coverPage > 1) loadCovers(coverPage - 1, false); }); $('#cover_next').click(function() { if (coverPage < coverPages) loadCovers(coverPage + 1, false); });
-$(document).ready(function() { resetCoverResults(); loadCoverLibraries(); });
+function restoreCoverInspection() {
+  bookoasisMateAjax('main', 'cover_inspection_status', {mode:'resolution', page:1}, function(ret) {
+    var payload = ret.data || {}, status = payload.status || {};
+    if (!status.started_at) { loadCoverLibraries(); return; }
+    if ($('#db_type option[value="' + String(status.db_type || 'general') + '"]').length) $('#db_type').val(status.db_type || 'general');
+    if (status.mode && status.mode !== 'missing') $('#cover_mode').val(status.mode);
+    $('#cover_search').val(status.search || '');
+    loadCoverLibraries(status.library_id, function() { requestCoverInspectionStatus(1, true); });
+  }, null, {global:false, silent:true});
+}
+$('#cover_check_btn').click(function(e) { e.preventDefault(); if (coverIsFileMode()) startCoverInspection(); else loadMissingCovers(1, true); });
+$('#cover_stop_btn').click(function(e) { e.preventDefault(); bookoasisMateAjax('main', 'cover_inspection_stop', {}, function(ret) { if (ret.data && ret.data.status) renderCoverInspection({status:ret.data.status}); }, null, {global:false}); });
+$('#db_type').change(function() { coverInspectionStatus = null; resetCoverResults(); loadCoverLibraries(); });
+$('#cover_library_id').change(function() { coverInspectionStatus = null; resetCoverResults('선택한 보관함을 검사하려면 검사 버튼을 눌러 주세요.'); });
+$('#cover_mode').change(function() { if (coverIsFileMode()) requestCoverInspectionStatus(1, true); else resetCoverResults('표지 없음 검사를 실행하려면 검사 버튼을 눌러 주세요.'); });
+$('#cover_search').on('input', function() { coverInspectionStatus = null; resetCoverResults('검색 조건을 적용하려면 검사 버튼을 눌러 주세요.'); });
+$('#cover_prev').click(function() { if (coverPage > 1) { if (coverIsFileMode()) requestCoverInspectionStatus(coverPage - 1, false); else loadMissingCovers(coverPage - 1, false); } });
+$('#cover_next').click(function() { if (coverPage < coverPages) { if (coverIsFileMode()) requestCoverInspectionStatus(coverPage + 1, false); else loadMissingCovers(coverPage + 1, false); } });
+$(document).ready(function() {
+  coverBatchRescan = bookoasisMateBatchRescanController({source:'covers', getPayload:function() { return {source:'covers', db_type:$('#db_type').val(), library_id:$('#cover_library_id').val(), mode:$('#cover_mode').val(), search:$('#cover_search').val()}; }});
+  coverBatchRescan.refresh(); resetCoverResults(); restoreCoverInspection();
+});
+$(window).on('beforeunload', function() { stopCoverInspectionPolling(); if (coverTimer) clearInterval(coverTimer); if (coverBatchRescan) coverBatchRescan.destroy(); });
 </script>
 {% endblock %}

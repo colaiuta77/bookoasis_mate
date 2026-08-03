@@ -16,8 +16,8 @@ setting = {
                 "name": "라이브러리 진단",
                 "list": [
                     {"uri": "dashboard", "name": "상태 요약"},
-                    {"uri": "issues", "name": "문제 도서"},
                     {"uri": "scanner", "name": "스캔 상태"},
+                    {"uri": "issues", "name": "문제 도서"},
                     {"uri": "gaps", "name": "시리즈 누락"},
                     {"uri": "covers", "name": "표지 검사"},
                     {"uri": "orphan_covers", "name": "고아 표지파일 정리"},
@@ -53,6 +53,7 @@ setting = {
                     {"uri": "manual", "name": "연동 매뉴얼"},
                 ],
             },
+            {"uri": "sql", "name": "SQL 도구"},
             {"uri": "log", "name": "로그"},
         ],
     },
@@ -86,6 +87,7 @@ from .mod_main import ModuleMain
 from .mod_database_migration import ModuleDatabaseMigration
 from .mod_gdrive_scan import ModuleGDriveScan
 from .mod_migration import ModuleMigration
+from .mod_sql import ModuleSql
 from .mod_setting import ModuleSetting
 
 P.set_module_list(
@@ -94,6 +96,7 @@ P.set_module_list(
         ModuleMigration,
         ModuleDatabaseMigration,
         ModuleGDriveScan,
+        ModuleSql,
         ModuleSetting,
     ]
 )

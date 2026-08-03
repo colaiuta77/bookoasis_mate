@@ -2,6 +2,7 @@
 import io
 import json
 import unittest
+from http.client import IncompleteRead
 from unittest.mock import Mock, patch
 
 from bookoasis_client import BookOasisClient
@@ -91,6 +92,25 @@ class BookOasisClientTest(unittest.TestCase):
         self.assertEqual("http://bookoasis:5930/api/media/books/12/scan", scan_request.full_url)
         self.assertIn(b"type=adult", scan_request.data)
 
+    def test_admin_request_converts_incomplete_response_to_retryable_failure(self):
+        opener = Mock()
+        opener.open.side_effect = [
+            _Response({"success": True, "role": "admin"}),
+            IncompleteRead(b"", 128),
+        ]
+        client = BookOasisClient(
+            "http://bookoasis:5930",
+            username="admin",
+            password="secret-password",
+            opener=opener,
+        )
+
+        result = client.scan_book(12, "general")
+
+        self.assertFalse(result["success"])
+        self.assertTrue(result["retryable"])
+        self.assertIn("응답", result["message"])
+
     def test_admin_session_rejects_default_password_account(self):
         opener = Mock()
         opener.open.return_value = _Response({"success": True, "role": "admin", "is_default_password": 1})
@@ -161,6 +181,101 @@ class BookOasisClientTest(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual("lazy_scan", result["queue"]["running"]["type"])
         self.assertIn("http://bookoasis:5930/api/media/system/queue?_ts=", queue_request.full_url)
+
+    def test_admin_session_controls_library_scans_and_pending_queue(self):
+        opener = Mock()
+        opener.open.side_effect = [
+            _Response({"success": True, "role": "admin"}),
+            _Response({"success": True, "libraries": [{"id": 3, "name": "만화"}]}),
+            _Response({"success": True, "message": "스캔 등록"}),
+            _Response({"success": True, "message": "전체 등록"}),
+            _Response({"success": True, "message": "취소 요청"}),
+            _Response({"success": True, "message": "표지 등록"}),
+            _Response({"success": True, "message": "2건 삭제"}),
+            _Response({"success": True, "message": "작업 취소"}),
+        ]
+        client = BookOasisClient(
+            "http://bookoasis:5930",
+            username="admin",
+            password="secret-password",
+            opener=opener,
+        )
+
+        libraries = client.library_schedules("adult")
+        scanned = client.scan_library(3, "adult", force=True)
+        scanned_all = client.scan_all_libraries("adult")
+        cancelled = client.cancel_library_scan(3, "adult")
+        covers = client.scan_library_covers(3, "adult")
+        cleared = client.clear_queue()
+        pending_cancelled = client.cancel_queue_task("library_scan_adult_3")
+
+        requests = [call.args[0] for call in opener.open.call_args_list[1:]]
+        self.assertEqual(3, libraries["libraries"][0]["id"])
+        self.assertTrue(scanned["success"])
+        self.assertTrue(scanned_all["success"])
+        self.assertTrue(cancelled["success"])
+        self.assertTrue(covers["success"])
+        self.assertTrue(cleared["success"])
+        self.assertTrue(pending_cancelled["success"])
+        self.assertIn("type=adult", requests[0].full_url)
+        self.assertEqual(
+            "http://bookoasis:5930/api/media/libraries/3/scan",
+            requests[1].full_url,
+        )
+        self.assertIn(b"force=true", requests[1].data)
+        self.assertEqual(
+            "http://bookoasis:5930/api/media/libraries/scan-all",
+            requests[2].full_url,
+        )
+        self.assertEqual(
+            "http://bookoasis:5930/api/media/libraries/3/cancel-scan",
+            requests[3].full_url,
+        )
+        self.assertEqual(
+            "http://bookoasis:5930/api/media/libraries/3/scan-covers",
+            requests[4].full_url,
+        )
+        self.assertEqual(
+            "http://bookoasis:5930/api/media/system/queue/clear",
+            requests[5].full_url,
+        )
+        self.assertIn(b"task_id=library_scan_adult_3", requests[6].data)
+
+    def test_admin_session_reads_permissions_and_metadata_diagnostics(self):
+        opener = Mock()
+        opener.open.side_effect = [
+            _Response({"success": True, "role": "admin"}),
+            _Response({"success": True, "users": [{"id": 1, "username": "reader"}]}),
+            _Response({
+                "success": True,
+                "plugins": [{
+                    "id": "aladin",
+                    "enabled": True,
+                    "is_searchable": True,
+                    "config": {"ALADIN": "secret"},
+                }],
+            }),
+        ]
+        client = BookOasisClient(
+            "http://bookoasis:5930",
+            username="admin",
+            password="secret-password",
+            opener=opener,
+        )
+
+        permissions = client.permissions()
+        plugins = client.metadata_plugins_manage()
+
+        self.assertEqual("reader", permissions["users"][0]["username"])
+        self.assertEqual("aladin", plugins["plugins"][0]["id"])
+        self.assertEqual(
+            "http://bookoasis:5930/api/admin/permissions",
+            opener.open.call_args_list[1].args[0].full_url,
+        )
+        self.assertEqual(
+            "http://bookoasis:5930/api/media/metadata/plugins/manage",
+            opener.open.call_args_list[2].args[0].full_url,
+        )
 
 
 if __name__ == "__main__":

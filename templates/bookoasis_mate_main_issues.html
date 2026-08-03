@@ -23,7 +23,22 @@
   <button id="search_btn" class="btn btn-sm btn-primary">조회</button>
   <span id="issue_count" class="doctor-muted"></span>
 </div>
-<p class="doctor-muted">도서 행을 클릭하면 BookOasis 상세 보기, 개별 재스캔과 플러그인 메타데이터 검색 메뉴가 열립니다.</p>
+<p class="doctor-muted">도서 행을 클릭하면 BookOasis 상세 보기, 개별 도서 재스캔과 플러그인 메타데이터 검색 메뉴가 열립니다. 일괄 재스캔은 현재 필터의 전체 검색 결과를 별도 프로세스에서 순차 처리합니다.</p>
+<div class="doctor-card doctor-batch-card">
+  <div class="doctor-batch-header">
+    <div><strong>검색 결과 일괄 재스캔</strong><div id="batch_rescan_status_text" class="doctor-muted">대기중</div></div>
+    <div class="doctor-cleanup-actions">
+      <button id="batch_rescan_start" class="btn btn-sm btn-outline-primary" disabled>전체 결과 재스캔</button>
+      <button id="batch_rescan_stop" class="btn btn-sm btn-outline-secondary" disabled>중지</button>
+    </div>
+  </div>
+  <div class="doctor-live-progress">
+    <div class="doctor-live-progress-track"><div id="batch_rescan_bar" class="doctor-live-progress-bar"></div></div>
+    <div class="doctor-live-progress-text"><span id="batch_rescan_progress_text">0 / 0권 · 0%</span></div>
+  </div>
+  <div id="batch_rescan_error" class="doctor-live-error" style="display:none"></div>
+  <div id="batch_rescan_log" class="doctor-batch-log"><div class="doctor-empty">처리 결과가 없습니다.</div></div>
+</div>
 <div class="doctor-table-wrap">
   <table class="table table-sm doctor-table">
     <thead><tr><th>표지</th><th>도서</th><th>보관함</th><th>상태</th><th>등록일</th><th>근거</th></tr></thead>
@@ -51,6 +66,7 @@
 var issuePage = 1;
 var issuePages = 1;
 var issueLibrariesReady = false;
+var issueBatchRescan = null;
 function openIssueJson(event, item) {
   event.preventDefault();
   event.stopPropagation();
@@ -68,6 +84,7 @@ function renderIssues(data) {
   var body = document.getElementById('issue_rows');
   bookoasisMateClear(body);
   $('#issue_count').text('총 ' + data.total + '권');
+  if (issueBatchRescan) issueBatchRescan.setAvailableCount(data.total);
   $('#issue_empty').toggle(data.items.length === 0);
   $('.doctor-table-wrap').toggle(data.items.length > 0);
   data.items.forEach(function(item) {
@@ -140,6 +157,19 @@ $('#next_btn').click(function() { if (issuePage < issuePages) loadIssues(issuePa
 $('#issue_json_close').click(closeIssueJson);
 $('#issue_json_modal').click(function(event) { if (event.target === this) closeIssueJson(); });
 $(document).keydown(function(event) { if (event.key === 'Escape') closeIssueJson(); });
-$(document).ready(function() { loadIssueLibraries(); });
+$(document).ready(function() {
+  issueBatchRescan = bookoasisMateBatchRescanController({
+    source:'issues',
+    getPayload:function() {
+      return {
+        source:'issues', db_type:$('#db_type').val(), library_id:$('#issue_library_id').val(),
+        issue_type:$('#issue_type').val(), search:$('#search').val()
+      };
+    }
+  });
+  issueBatchRescan.refresh();
+  loadIssueLibraries();
+});
+$(window).on('beforeunload', function() { if (issueBatchRescan) issueBatchRescan.destroy(); });
 </script>
 {% endblock %}

@@ -8,7 +8,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 class _DummyColumn:
@@ -124,18 +124,19 @@ class FlaskFarmLoaderTest(unittest.TestCase):
             else:
                 sys.modules["flask"] = old_flask
 
-    def test_setup_registers_main_migration_database_gdrive_and_setting_modules(self):
+    def test_setup_registers_main_migration_database_gdrive_sql_and_setting_modules(self):
         package = self._load_package(_DummyDb())
 
         self.assertEqual("bookoasis_mate", package.P.package_name)
         self.assertEqual(
-            ["main", "migration", "database_migration", "gdrive_scan", "setting"],
+            ["main", "migration", "database_migration", "gdrive_scan", "sql", "setting"],
             [module.name for module in package.P.module_list],
         )
         self.assertEqual("dashboard", package.P.module_list[0].first_menu)
         self.assertEqual("setting", package.P.module_list[1].first_menu)
         self.assertEqual("setting", package.P.module_list[2].first_menu)
         self.assertEqual("setting", package.P.module_list[3].first_menu)
+        self.assertIsNone(package.P.module_list[4].first_menu)
         self.assertIsNotNone(package.P.history_model)
         self.assertIsNotNone(package.P.gdrive_scan_model)
         self.assertEqual(
@@ -205,6 +206,48 @@ class FlaskFarmLoaderTest(unittest.TestCase):
             {"general_db_path": "/legacy/media_general.db"}
         )
         self.assertEqual("/legacy/media_general.db", legacy["general_db_path"])
+
+    def test_sql_module_serves_presets_and_executes_read_only_query(self):
+        package = self._load_package(_DummyDb())
+        module = package.P.module_list[4]
+        tool = Mock()
+        tool.presets.return_value = [{"id": "users", "name": "사용자 ID 목록"}]
+        tool.execute.return_value = {
+            "db_type": "general",
+            "columns": ["id"],
+            "rows": [[3]],
+            "row_count": 1,
+            "truncated": False,
+            "max_rows": 200,
+            "elapsed_ms": 1,
+        }
+
+        with patch.object(module, "_tool", return_value=tool):
+            presets = module.process_ajax(
+                "presets", types.SimpleNamespace(form=_DummyForm())
+            )
+            executed = module.process_ajax(
+                "execute",
+                types.SimpleNamespace(
+                    form=_DummyForm(
+                        db_type="general",
+                        query="SELECT id FROM users",
+                        max_rows="200",
+                        timeout_seconds="3",
+                    )
+                ),
+            )
+
+        self.assertEqual("success", presets["ret"])
+        self.assertEqual("users", presets["data"][0]["id"])
+        self.assertEqual("success", executed["ret"])
+        self.assertEqual([[3]], executed["data"]["rows"])
+        tool.execute.assert_called_once_with(
+            "general",
+            "SELECT id FROM users",
+            max_rows="200",
+            timeout_seconds="3",
+        )
 
     def test_gdrive_event_list_filters_and_cleanup_route_to_model(self):
         package = self._load_package(_DummyDb())
@@ -358,7 +401,7 @@ class FlaskFarmLoaderTest(unittest.TestCase):
     def test_database_diagnostics_ajax_routes_to_owning_pages(self):
         package = self._load_package(_DummyDb())
         main_module = package.P.module_list[0]
-        setting_module = package.P.module_list[4]
+        setting_module = package.P.module_list[5]
         request = types.SimpleNamespace(form=_DummyForm(db_type="general"))
 
         with patch.object(
@@ -395,7 +438,7 @@ class FlaskFarmLoaderTest(unittest.TestCase):
             package = self._load_package(_FailingHistoryDb())
 
         self.assertEqual(
-            ["main", "migration", "database_migration", "gdrive_scan", "setting"],
+            ["main", "migration", "database_migration", "gdrive_scan", "sql", "setting"],
             [module.name for module in package.P.module_list],
         )
         self.assertIsNone(package.P.history_model)
@@ -822,6 +865,27 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         self.assertIsNone(service._cached_report)
         self.assertIsNone(service._cover_issue_cache)
 
+    def test_service_blocks_single_book_scan_while_batch_rescan_is_running(self):
+        _DummySetting.values = {
+            "bookoasis_url": "http://bookoasis:5930",
+            "bookoasis_username": "admin",
+            "bookoasis_password": "secret-password",
+        }
+        package = self._load_package(_DummyDb())
+        service = package.P.bookoasis_mate_service
+
+        with patch.object(
+            service,
+            "batch_rescan_status",
+            return_value={"is_working": "run", "source_label": "문제 도서"},
+        ):
+            with patch.object(service, "admin_client") as mocked_client:
+                result = service.scan_book(3, "general")
+
+        self.assertFalse(result["success"])
+        self.assertIn("일괄 재스캔", result["message"])
+        mocked_client.assert_not_called()
+
     def test_service_searches_and_applies_metadata_without_logging_credentials(self):
         _DummySetting.values = {
             "bookoasis_url": "http://bookoasis:5930",
@@ -839,7 +903,22 @@ class FlaskFarmLoaderTest(unittest.TestCase):
                     "plugins": [{"id": "aladin", "name": "알라딘", "config": {"API_KEY": "plugin-secret"}}],
                 },
             ):
-                plugins = service.metadata_plugins()
+                with patch(
+                    "bookoasis_mate.mate_service.BookOasisClient.metadata_plugins_manage",
+                    return_value={
+                        "success": True,
+                        "plugins": [{
+                            "id": "aladin",
+                            "name": "알라딘",
+                            "enabled": True,
+                            "is_searchable": True,
+                            "config_schema": [{"key": "API_KEY", "required": True}],
+                            "config": {"API_KEY": "plugin-secret"},
+                            "update_manifest": {"enabled": True},
+                        }],
+                    },
+                ):
+                    plugins = service.metadata_plugins()
             with patch(
                 "bookoasis_mate.mate_service.BookOasisClient.search_metadata",
                 return_value={"success": True, "results": [{"title": "검색 결과"}]},
@@ -851,7 +930,17 @@ class FlaskFarmLoaderTest(unittest.TestCase):
             ):
                 applied = service.apply_metadata(9, {"title": "검색 결과"}, "aladin", "general")
 
-        self.assertEqual([{"id": "aladin", "name": "알라딘"}], plugins["plugins"])
+        self.assertEqual(
+            [{
+                "id": "aladin",
+                "name": "알라딘",
+                "enabled": True,
+                "configured": True,
+                "active": True,
+                "update_supported": True,
+            }],
+            plugins["plugins"],
+        )
         self.assertNotIn("plugin-secret", str(plugins))
         self.assertTrue(searched["success"])
         self.assertTrue(applied["success"])
@@ -859,7 +948,7 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         self.assertNotIn("secret-password", log_text)
         self.assertNotIn("검색어", log_text)
 
-    def test_cover_service_paginates_cached_issue_results(self):
+    def test_cover_service_paginates_cached_missing_cover_results(self):
         with tempfile.TemporaryDirectory() as cover_root:
             _DummySetting.values = {
                 "bookoasis_url": "http://bookoasis:5930",
@@ -879,9 +968,9 @@ class FlaskFarmLoaderTest(unittest.TestCase):
                 },
                 {
                     "items": [
-                        {"id": 3, "cover_path": "1/small.webp", "title": "저해상도"},
-                        {"id": 4, "cover_path": "1/missing.webp", "title": "파일 없음"},
-                        {"id": 5, "cover_path": "1/tiny.webp", "title": "작은 파일"},
+                        {"id": 3, "cover_path": "", "title": "표지 없음 2"},
+                        {"id": 4, "cover_path": "1/cover.webp", "title": "정상 2"},
+                        {"id": 5, "cover_path": "1/cover2.webp", "title": "정상 3"},
                     ],
                     "total": 5,
                     "page": 2,
@@ -889,36 +978,24 @@ class FlaskFarmLoaderTest(unittest.TestCase):
                     "pages": 2,
                 },
             ]
-            statuses = {
-                "": {"status": "missing_reference"},
-                "1/normal.webp": {"status": "ok"},
-                "1/small.webp": {"status": "low_resolution", "issues": ["low_resolution"], "width": 100, "height": 140},
-                "1/missing.webp": {"status": "missing_file"},
-                "1/tiny.webp": {"status": "low_resolution", "issues": ["low_resolution", "small_file"]},
-            }
-
             with patch(
                 "bookoasis_mate.mate_service.BookOasisMateEngine.cover_items",
                 side_effect=sources,
             ) as mocked_items:
-                with patch(
-                    "bookoasis_mate.mate_service.inspect_cover_file",
-                    side_effect=lambda root, path, **kwargs: statuses[path],
-                ) as mocked_inspect:
-                    first = package.P.bookoasis_mate_service.covers(
-                        mode="resolution",
-                        page=1,
-                        page_size=1,
-                        force=True,
-                    )
-                    second = package.P.bookoasis_mate_service.covers(
-                        mode="resolution",
-                        page=2,
-                        page_size=1,
-                    )
+                first = package.P.bookoasis_mate_service.covers(
+                    mode="missing",
+                    page=1,
+                    page_size=1,
+                    force=True,
+                )
+                second = package.P.bookoasis_mate_service.covers(
+                    mode="missing",
+                    page=2,
+                    page_size=1,
+                )
 
-        self.assertEqual([3], [item["id"] for item in first["items"]])
-        self.assertEqual([5], [item["id"] for item in second["items"]])
+        self.assertEqual([1], [item["id"] for item in first["items"]])
+        self.assertEqual([3], [item["id"] for item in second["items"]])
         self.assertEqual(2, first["total"])
         self.assertEqual(5, first["source_total"])
         self.assertEqual(2, first["pages"])
@@ -927,10 +1004,9 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         self.assertFalse(first["cache_hit"])
         self.assertTrue(second["cache_hit"])
         self.assertEqual(2, mocked_items.call_count)
-        self.assertEqual(5, mocked_inspect.call_count)
         self.assertGreaterEqual(first["duration_ms"], 0)
 
-    def test_cover_service_separates_inspection_modes_and_legacy_aliases(self):
+    def test_cover_service_keeps_missing_alias_and_requires_background_file_result(self):
         with tempfile.TemporaryDirectory() as cover_root:
             _DummySetting.values = {
                 "bookoasis_url": "http://bookoasis:5930",
@@ -949,29 +1025,139 @@ class FlaskFarmLoaderTest(unittest.TestCase):
                 "page_size": 1000,
                 "pages": 1,
             }
-            statuses = {
-                "": {"status": "missing_reference"},
-                "1/low.webp": {"status": "low_resolution", "issues": ["low_resolution"]},
-                "1/small.webp": {"status": "small_file", "issues": ["small_file"]},
-                "1/wide.webp": {"status": "abnormal_aspect_ratio", "issues": ["abnormal_aspect_ratio"]},
-            }
-
             with patch("bookoasis_mate.mate_service.BookOasisMateEngine.cover_items", return_value=source):
-                with patch(
-                    "bookoasis_mate.mate_service.inspect_cover_file",
-                    side_effect=lambda root, path, **kwargs: statuses[path],
-                ):
-                    missing = package.P.bookoasis_mate_service.covers(mode="http", force=True)
-                    resolution = package.P.bookoasis_mate_service.covers(mode="file", force=True)
-                    file_size = package.P.bookoasis_mate_service.covers(mode="file_size", force=True)
-                    aspect = package.P.bookoasis_mate_service.covers(mode="aspect", force=True)
+                missing = package.P.bookoasis_mate_service.covers(mode="http", force=True)
+                with self.assertRaisesRegex(ValueError, "백그라운드 검사를 시작"):
+                    package.P.bookoasis_mate_service.covers(mode="file", force=True)
 
         self.assertEqual("missing", missing["mode"])
         self.assertEqual([1], [item["id"] for item in missing["items"]])
-        self.assertEqual("resolution", resolution["mode"])
-        self.assertEqual([2], [item["id"] for item in resolution["items"]])
-        self.assertEqual([3], [item["id"] for item in file_size["items"]])
-        self.assertEqual([4], [item["id"] for item in aspect["items"]])
+
+    def test_cover_inspection_rejects_invalid_library_id(self):
+        _DummySetting.values = {
+            "general_db_path": "media_general.db",
+            "bookoasis_url": "http://bookoasis:5930",
+        }
+        package = self._load_package(_DummyDb())
+        service = package.P.bookoasis_mate_service
+
+        with self.assertRaisesRegex(ValueError, "보관함 ID"):
+            service._cover_inspection_criteria(
+                service.settings(),
+                "general",
+                "not-a-number",
+                "",
+            )
+
+    def test_service_starts_persistent_cover_inspection_without_credentials(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            db_path = root / "media_general.db"
+            cover_root = root / "covers"
+            db_path.write_bytes(b"database")
+            cover_root.mkdir()
+            _DummySetting.values = {
+                "general_db_path": str(db_path),
+                "adult_db_path": "",
+                "bookoasis_url": "http://bookoasis:5930",
+                "bookoasis_username": "admin",
+                "bookoasis_password": "secret-password",
+                "cover_root_path": str(cover_root),
+                "cover_min_width": "200",
+                "cover_min_height": "280",
+                "cover_min_file_size_kb": "15",
+                "cover_min_aspect_percent": "45",
+            }
+            package = self._load_package(_DummyDb())
+            service = package.P.bookoasis_mate_service
+            process = Mock(pid=4321)
+
+            with patch.object(service, "_launch_maintenance_worker", return_value=process) as mocked_launch:
+                started = service.start_cover_inspection(
+                    db_type="general",
+                    library_id="7",
+                    mode="resolution",
+                    search="대상",
+                )
+
+            args, kwargs = mocked_launch.call_args
+            config = args[1]
+
+        self.assertTrue(started["started"])
+        self.assertEqual("cover_inspection", config["job_type"])
+        self.assertEqual("7", config["library_id"])
+        self.assertNotIn("bookoasis_username", config["settings"])
+        self.assertNotIn("bookoasis_password", config["settings"])
+        self.assertFalse(kwargs.get("sensitive_config", False))
+
+    def test_service_restores_and_filters_persistent_cover_inspection_result(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            db_path = root / "media_general.db"
+            db_path.write_bytes(b"database")
+            _DummySetting.values = {
+                "general_db_path": str(db_path),
+                "bookoasis_url": "http://bookoasis:5930",
+                "page_size": "25",
+            }
+            package = self._load_package(_DummyDb())
+            service = package.P.bookoasis_mate_service
+            paths = service._cover_inspection_paths()
+            unused_criteria, fingerprint = service._cover_inspection_criteria(
+                service.settings(),
+                "general",
+                "7",
+                "대상",
+            )
+            del unused_criteria
+            paths["status"].parent.mkdir(parents=True, exist_ok=True)
+            paths["status"].write_text(
+                json.dumps(
+                    {
+                        "job_type": "cover_inspection",
+                        "is_working": "wait",
+                        "db_type": "general",
+                        "library_id": "7",
+                        "search": "대상",
+                        "mode": "resolution",
+                        "result_ready": True,
+                        "fingerprint": fingerprint,
+                        "current": 3,
+                        "total": 3,
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            paths["result"].write_text(
+                json.dumps(
+                    {
+                        "fingerprint": fingerprint,
+                        "source_total": 3,
+                        "inspected_count": 3,
+                        "duration_ms": 1200,
+                        "items": [
+                            {"id": 1, "inspection": {"issues": ["low_resolution"]}},
+                            {"id": 2, "inspection": {"issues": ["small_file"]}},
+                            {"id": 3, "inspection": {"issues": ["low_resolution", "abnormal_aspect_ratio"]}},
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            restored = service.cover_inspection_status(mode="aspect", page=1, page_size=25)
+            ids = service.cover_issue_book_ids(
+                db_type="general",
+                library_id="7",
+                mode="file_size",
+                search="대상",
+            )
+
+        self.assertEqual([3], [item["id"] for item in restored["data"]["items"]])
+        self.assertEqual("aspect", restored["data"]["mode"])
+        self.assertEqual([2], ids)
 
     def test_main_ajax_logs_start_and_finish(self):
         package = self._load_package(_DummyDb())
@@ -993,7 +1179,13 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         package = self._load_package(_DummyDb())
         service = package.P.bookoasis_mate_service
         db_snapshot = {
-            "libraries": [],
+            "libraries": [{
+                "id": 3,
+                "name": "DB 보관함",
+                "checkpoint_folders": 7,
+                "vfs_refresh_before_scan": 0,
+                "rclone_rc_configured": False,
+            }],
             "tasks": [{
                 "id": 10,
                 "task_type": "lazy_scan",
@@ -1017,6 +1209,16 @@ class FlaskFarmLoaderTest(unittest.TestCase):
 
         with patch("bookoasis_mate.mate_service.BookOasisMateEngine.scanner_status", return_value=db_snapshot):
             with patch.object(service, "admin_client") as mocked_admin:
+                mocked_admin.return_value.library_schedules.return_value = {
+                    "success": True,
+                    "libraries": [{
+                        "id": 3,
+                        "name": "API 보관함",
+                        "scan_status": "scanning",
+                        "vfs_refresh_before_scan": 1,
+                        "rclone_rc_url": "http://user:password@127.0.0.1:5572",
+                    }],
+                }
                 mocked_admin.return_value.queue_status.return_value = queue_response
                 with patch(
                     "bookoasis_mate.mate_service.read_lazy_progress",
@@ -1026,8 +1228,129 @@ class FlaskFarmLoaderTest(unittest.TestCase):
 
         self.assertEqual("running", result["tasks"][0]["display_status"])
         self.assertTrue(result["tasks"][0]["is_active"])
+        self.assertEqual("api", result["library_source"])
+        self.assertEqual("API 보관함", result["libraries"][0]["name"])
+        self.assertEqual(7, result["libraries"][0]["checkpoint_folders"])
+        self.assertTrue(result["libraries"][0]["rclone_rc_configured"])
+        self.assertNotIn("rclone_rc_url", result["libraries"][0])
         self.assertEqual("lazy_scan", result["live_queue"]["running"]["type"])
         self.assertEqual(12, result["lazy_progress"]["done"])
+
+    def test_service_prefers_admin_scan_api_when_credentials_exist(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            db_path = Path(tempdir) / "media_general.db"
+            connection = sqlite3.connect(db_path)
+            connection.execute("CREATE TABLE libraries (id INTEGER PRIMARY KEY, name TEXT)")
+            connection.execute("INSERT INTO libraries VALUES (1, '첫째')")
+            connection.commit()
+            connection.close()
+            _DummySetting.values = {
+                "general_db_path": str(db_path),
+                "bookoasis_url": "http://bookoasis:5930",
+                "bookoasis_username": "admin",
+                "bookoasis_password": "secret-password",
+                "webhook_token": "secret",
+            }
+            package = self._load_package(_DummyDb())
+            service = package.P.bookoasis_mate_service
+
+            with patch.object(service, "admin_client") as mocked_admin:
+                mocked_admin.return_value.scan_library.return_value = {
+                    "success": True,
+                    "message": "관리자 API 등록",
+                }
+                result = service.request_rescan(
+                    library_id=1,
+                    all_libraries=False,
+                )
+
+        self.assertTrue(result["success"])
+        self.assertEqual("admin_api", result["source"])
+        mocked_admin.return_value.scan_library.assert_called_once_with(
+            1,
+            "general",
+            False,
+        )
+        mocked_admin.return_value.request_scan.assert_not_called()
+
+    def test_service_falls_back_to_webhook_when_scan_api_is_unsupported(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            db_path = Path(tempdir) / "media_general.db"
+            connection = sqlite3.connect(db_path)
+            connection.execute("CREATE TABLE libraries (id INTEGER PRIMARY KEY, name TEXT)")
+            connection.execute("INSERT INTO libraries VALUES (1, '첫째')")
+            connection.commit()
+            connection.close()
+            _DummySetting.values = {
+                "general_db_path": str(db_path),
+                "bookoasis_url": "http://bookoasis:5930",
+                "bookoasis_username": "admin",
+                "bookoasis_password": "secret-password",
+                "webhook_token": "secret",
+            }
+            package = self._load_package(_DummyDb())
+            service = package.P.bookoasis_mate_service
+
+            with patch.object(service, "admin_client") as mocked_admin:
+                mocked_admin.return_value.library_schedules.return_value = {
+                    "success": False,
+                    "http_status": 404,
+                }
+                mocked_admin.return_value.scan_library.return_value = {
+                    "success": False,
+                    "http_status": 404,
+                }
+                mocked_admin.return_value.request_scan.return_value = {
+                    "success": True,
+                    "already_queued": False,
+                    "message": "웹훅 등록",
+                }
+                result = service.request_rescan(library_id=1)
+
+        self.assertTrue(result["success"])
+        self.assertEqual("webhook_fallback", result["source"])
+        mocked_admin.return_value.request_scan.assert_called_once_with(
+            "secret",
+            1,
+            "general",
+            False,
+        )
+
+    def test_kavita_preview_prefers_permissions_api_users(self):
+        _DummySetting.values = {
+            "database_migration_source": "kavita",
+            "bookoasis_url": "http://bookoasis:5930",
+            "bookoasis_username": "admin",
+            "bookoasis_password": "secret-password",
+        }
+        package = self._load_package(_DummyDb())
+        service = package.P.bookoasis_mate_service
+        engine = Mock()
+        engine.inspect.return_value = {
+            "books_count": 1,
+            "matched_books_count": 0,
+            "source_users": ["Reader"],
+            "target_users": ["db-user"],
+            "suggested_user_mappings": [],
+        }
+
+        with patch.object(service, "_database_migration_engine", return_value=engine):
+            with patch.object(service, "admin_client") as mocked_admin:
+                mocked_admin.return_value.permissions.return_value = {
+                    "success": True,
+                    "users": [
+                        {"id": 1, "username": "reader"},
+                        {"id": 2, "username": "admin"},
+                    ],
+                }
+                result = service.inspect_database_migration()
+
+        self.assertEqual("permissions_api", result["target_users_source"])
+        self.assertEqual(["admin", "reader"], result["target_users"])
+        self.assertEqual(
+            ["Reader => reader"],
+            result["suggested_user_mappings"],
+        )
 
     def test_main_ajax_routes_bookoasis_log_commands(self):
         package = self._load_package(_DummyDb())
@@ -1095,6 +1418,199 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         mocked_scan.assert_called_once_with("8", "adult")
         self.assertEqual("success", apply_response["ret"])
         mocked_apply.assert_called_once_with("8", {"title": "검색 결과"}, "aladin", "adult")
+
+    def test_main_ajax_routes_batch_rescan_commands(self):
+        package = self._load_package(_DummyDb())
+        module = package.P.module_list[0]
+
+        with patch.object(
+            module.service,
+            "start_batch_rescan",
+            return_value={"started": True, "message": "시작", "status": {"is_working": "run"}},
+        ) as mocked_start:
+            start_response = module.process_ajax(
+                "batch_rescan_start",
+                types.SimpleNamespace(form={
+                    "source": "issues",
+                    "db_type": "adult",
+                    "library_id": "7",
+                    "issue_type": "pages",
+                    "mode": "missing",
+                    "search": "검색어",
+                }),
+            )
+        with patch.object(
+            module.service,
+            "batch_rescan_status",
+            return_value={"is_working": "run"},
+        ):
+            status_response = module.process_ajax(
+                "batch_rescan_status",
+                types.SimpleNamespace(form={}),
+            )
+        with patch.object(
+            module.service,
+            "stop_batch_rescan",
+            return_value={"requested": True, "message": "중지", "status": {"is_working": "run"}},
+        ):
+            stop_response = module.process_ajax(
+                "batch_rescan_stop",
+                types.SimpleNamespace(form={}),
+            )
+
+        self.assertEqual("success", start_response["ret"])
+        mocked_start.assert_called_once_with(
+            source="issues",
+            db_type="adult",
+            library_id="7",
+            issue_type="pages",
+            mode="missing",
+            search="검색어",
+        )
+        self.assertEqual("run", status_response["data"]["is_working"])
+        self.assertEqual("success", stop_response["ret"])
+
+    def test_main_ajax_routes_cover_inspection_commands(self):
+        package = self._load_package(_DummyDb())
+        module = package.P.module_list[0]
+
+        with patch.object(
+            module.service,
+            "start_cover_inspection",
+            return_value={"started": True, "message": "시작", "status": {"is_working": "run"}},
+        ) as mocked_start:
+            start_response = module.process_ajax(
+                "cover_inspection_start",
+                types.SimpleNamespace(form={
+                    "db_type": "adult",
+                    "library_id": "7",
+                    "mode": "aspect",
+                    "search": "검색어",
+                }),
+            )
+        with patch.object(
+            module.service,
+            "cover_inspection_status",
+            return_value={"status": {"is_working": "run"}, "data": None},
+        ) as mocked_status:
+            status_response = module.process_ajax(
+                "cover_inspection_status",
+                types.SimpleNamespace(form={"mode": "file_size", "page": "2"}),
+            )
+        with patch.object(
+            module.service,
+            "stop_cover_inspection",
+            return_value={"requested": True, "message": "중지", "status": {"is_working": "run"}},
+        ):
+            stop_response = module.process_ajax(
+                "cover_inspection_stop",
+                types.SimpleNamespace(form={}),
+            )
+
+        self.assertEqual("success", start_response["ret"])
+        mocked_start.assert_called_once_with(
+            db_type="adult",
+            library_id="7",
+            mode="aspect",
+            search="검색어",
+        )
+        mocked_status.assert_called_once_with(mode="file_size", page="2", page_size=None)
+        self.assertEqual("run", status_response["data"]["status"]["is_working"])
+        self.assertEqual("success", stop_response["ret"])
+
+    def test_service_starts_filtered_batch_rescan_with_sensitive_external_config(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            db_path = Path(tempdir) / "media_general.db"
+            db_path.write_bytes(b"database")
+            _DummySetting.values = {
+                "general_db_path": str(db_path),
+                "bookoasis_url": "http://bookoasis:5930",
+                "bookoasis_username": "admin",
+                "bookoasis_password": "secret",
+                "api_timeout": "30",
+            }
+            package = self._load_package(_DummyDb())
+            service = package.P.bookoasis_mate_service
+            engine = Mock()
+            engine.get_target.return_value = types.SimpleNamespace(path=str(db_path))
+            engine.issue_book_ids.return_value = [9, 3, 9]
+            client = Mock()
+            client.login_admin.return_value = {"success": True}
+            process = Mock(pid=321)
+
+            with patch.object(service, "engine", return_value=engine):
+                with patch.object(service, "admin_client", return_value=client):
+                    with patch.object(
+                        service,
+                        "_launch_maintenance_worker",
+                        return_value=process,
+                    ) as mocked_launch:
+                        result = service.start_batch_rescan(
+                            "issues",
+                            db_type="general",
+                            library_id="2",
+                            issue_type="pages",
+                            search="대상",
+                        )
+
+        self.assertTrue(result["started"])
+        self.assertEqual(2, result["status"]["total"])
+        engine.issue_book_ids.assert_called_once_with(
+            db_type="general",
+            library_id="2",
+            issue_type="pages",
+            search="대상",
+        )
+        args, kwargs = mocked_launch.call_args
+        worker_config = args[1]
+        self.assertEqual([3, 9], worker_config["book_ids"])
+        self.assertEqual("secret", worker_config["bookoasis_password"])
+        self.assertTrue(worker_config["delete_config_after_read"])
+        self.assertTrue(kwargs["sensitive_config"])
+
+    def test_main_ajax_routes_scanner_control_commands(self):
+        package = self._load_package(_DummyDb())
+        module = package.P.module_list[0]
+        cases = [
+            (
+                "cancel_library_scan",
+                "cancel_library_scan",
+                {"library_id": "7", "db_type": "adult"},
+                ("7", "adult"),
+            ),
+            (
+                "scan_library_covers",
+                "scan_library_covers",
+                {"library_id": "7", "db_type": "adult"},
+                ("7", "adult"),
+            ),
+            (
+                "clear_scan_queue",
+                "clear_scan_queue",
+                {},
+                (),
+            ),
+            (
+                "cancel_scan_queue_task",
+                "cancel_scan_queue_task",
+                {"task_key": "library_scan_adult_7"},
+                ("library_scan_adult_7",),
+            ),
+        ]
+
+        for command, method_name, form, expected_args in cases:
+            with self.subTest(command=command):
+                with patch.object(
+                    module.service,
+                    method_name,
+                    return_value={"success": True, "message": "완료"},
+                ) as mocked_method:
+                    response = module.process_ajax(
+                        command,
+                        types.SimpleNamespace(form=form),
+                    )
+                self.assertEqual("success", response["ret"])
+                mocked_method.assert_called_once_with(*expected_args)
 
     def test_service_runs_orphan_cover_dry_run_in_background(self):
         with tempfile.TemporaryDirectory() as tempdir:

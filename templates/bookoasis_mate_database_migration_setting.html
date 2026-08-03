@@ -333,7 +333,9 @@ function databaseMigrationRenderKavitaUsers(data) {
     editor.append(row);
   });
   editor.append($('<small>').addClass('doctor-muted').text(
-    '대상 계정은 선택한 BookOasis DB의 users 테이블에서 조회했습니다.'
+    data.target_users_source === 'permissions_api'
+      ? '대상 계정은 BookOasis 관리자 권한 API에서 조회했습니다.'
+      : '대상 계정은 선택한 BookOasis DB의 users 테이블에서 조회했습니다.'
   ));
   editor.find('.database-kavita-user-select').change(
     databaseMigrationSyncKavitaUsers

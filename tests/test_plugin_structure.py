@@ -17,9 +17,11 @@ class PluginStructureTest(unittest.TestCase):
             "mod_migration.py",
             "mod_database_migration.py",
             "mod_gdrive_scan.py",
+            "mod_sql.py",
             "mod_setting.py",
             "model_gdrive_scan.py",
             "gdrive_scan.py",
+            "sql_query.py",
             "mate_engine.py",
             "category_migration.py",
             "kavita_migration.py",
@@ -47,6 +49,7 @@ class PluginStructureTest(unittest.TestCase):
             "templates/bookoasis_mate_gdrive_scan_setting.html",
             "templates/bookoasis_mate_gdrive_scan_list.html",
             "templates/bookoasis_mate_gdrive_scan_manual.html",
+            "templates/bookoasis_mate_sql.html",
             "scripts/gd_poller_ff_bridge.py",
         ]
         self.assertEqual([], [path for path in required if not (self.root / path).is_file()])
@@ -56,12 +59,12 @@ class PluginStructureTest(unittest.TestCase):
 
         self.assertEqual("bookoasis_mate", self.root.name)
         self.assertIn('package_name: "bookoasis_mate"', text)
-        self.assertIn('version: "1.0.2"', text)
+        self.assertIn('version: "1.1.0"', text)
         self.assertIn("colaiuta77/bookoasis_mate", text)
         readme = (self.root / "README.md").read_text(encoding="utf-8")
         self.assertIn("**FF용 플러그인이며", readme)
         self.assertNotIn("FlaskFarm(FF)", readme)
-        self.assertIn("v1.0.2 (2026-07-29)", readme)
+        self.assertIn("v1.1.0 (2026-08-03)", readme)
 
     def test_public_repository_excludes_local_development_and_runtime_files(self):
         ignore = (self.root / ".gitignore").read_text(encoding="utf-8")
@@ -84,7 +87,7 @@ class PluginStructureTest(unittest.TestCase):
         setup = (self.root / "setup.py").read_text(encoding="utf-8")
         engine = (self.root / "mate_engine.py").read_text(encoding="utf-8")
 
-        for label in ("상태 요약", "문제 도서", "스캔 상태", "BookOasis 로그", "시리즈 누락", "표지 검사", "고아 표지파일 정리", "검사 이력", "카테고리 이관", "복사 설정", "복사 상태", "매뉴얼", "Google Drive 연동", "변경 이벤트", "설정", "로그"):
+        for label in ("상태 요약", "문제 도서", "스캔 상태", "BookOasis 로그", "시리즈 누락", "표지 검사", "고아 표지파일 정리", "검사 이력", "카테고리 이관", "복사 설정", "복사 상태", "매뉴얼", "Google Drive 연동", "변경 이벤트", "SQL 도구", "설정", "로그"):
             self.assertIn(label, setup)
         self.assertIn("?mode=ro", engine)
         self.assertIn("PRAGMA query_only = ON", engine)
@@ -92,6 +95,29 @@ class PluginStructureTest(unittest.TestCase):
         self.assertNotIn("julianday(\\'now\\')", engine)
         self.assertIn("P.history_model = None", setup)
         self.assertIn("P.gdrive_scan_model = None", setup)
+
+    def test_sql_tool_is_read_only_bounded_and_has_diagnostic_presets(self):
+        setup = (self.root / "setup.py").read_text(encoding="utf-8")
+        module = (self.root / "mod_sql.py").read_text(encoding="utf-8")
+        engine = (self.root / "sql_query.py").read_text(encoding="utf-8")
+        template = (self.root / "templates/bookoasis_mate_sql.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertLess(setup.index('"uri": "gdrive_scan"'), setup.index('"uri": "sql"'))
+        self.assertLess(setup.index('"uri": "sql"'), setup.index('"uri": "log"'))
+        self.assertIn('name="sql"', module)
+        self.assertIn("?mode=ro", engine)
+        self.assertIn("PRAGMA query_only = ON", engine)
+        self.assertIn("set_progress_handler", engine)
+        self.assertIn("SQLITE_DENY", engine)
+        self.assertIn("recent_progress_diagnosis", engine)
+        self.assertIn("orphan_progress_users", engine)
+        self.assertIn("library_book_counts", engine)
+        self.assertIn('id="sql_preset"', template)
+        self.assertIn('id="sql_query"', template)
+        self.assertIn('id="sql_run_btn"', template)
+        self.assertIn("textContent", template)
 
     def test_library_diagnosis_manual_explains_storage_rules(self):
         setup = (self.root / "setup.py").read_text(encoding="utf-8")
@@ -383,6 +409,11 @@ class PluginStructureTest(unittest.TestCase):
         self.assertIn("setTimeout(function() { loadScanner(false); }, 2000)", scanner)
         self.assertIn("lazy_progress", scanner)
         self.assertIn("global:showLoading === true", scanner)
+        self.assertIn('id="clear_queue_btn"', scanner)
+        self.assertIn("cancel_library_scan", scanner)
+        self.assertIn("scan_library_covers", scanner)
+        self.assertIn("cancel_scan_queue_task", scanner)
+        self.assertIn("실행 중 작업은 유지하고", scanner)
         self.assertIn('id="log_output"', logs)
         self.assertIn("log_catalog", logs)
         self.assertIn("log_tail", logs)
@@ -443,8 +474,11 @@ class PluginStructureTest(unittest.TestCase):
         self.assertIn("loadCoverLibraries", template)
         self.assertIn("setCoverLoading", template)
         self.assertIn("force:force ? 'true' : 'false'", template)
-        self.assertIn("loadCovers(1, true)", template)
-        self.assertIn("$(document).ready(function() { resetCoverResults(); loadCoverLibraries(); });", template)
+        self.assertIn("loadMissingCovers(1, true)", template)
+        self.assertIn("startCoverInspection()", template)
+        self.assertIn("coverBatchRescan = bookoasisMateBatchRescanController", template)
+        self.assertIn("resetCoverResults();", template)
+        self.assertIn("loadCoverLibraries();", template)
 
         for value in ("missing", "resolution", "file_size", "aspect"):
             self.assertIn(f'value="{value}"', template)
@@ -500,7 +534,9 @@ class PluginStructureTest(unittest.TestCase):
         self.assertIn("bookoasisMateOpenSelectedBookDetail", script)
         self.assertIn("BookOasis에서 상세 보기", script)
         self.assertIn("/#detail?", script)
-        self.assertIn("repBookId=", script)
+        self.assertIn("/#detail?v=", script)
+        self.assertIn("new TextEncoder()", script)
+        self.assertIn("replace(/\\+/g, '-')", script)
         self.assertIn('doctor_bookoasis_url', covers)
         self.assertIn('doctor_bookoasis_url', issues)
         self.assertIn('doctor_bookoasis_url', gaps)
@@ -509,7 +545,23 @@ class PluginStructureTest(unittest.TestCase):
         self.assertIn("metadata_search", script)
         self.assertIn("metadata_apply", script)
         self.assertIn("book_scan", script)
+        self.assertIn("bookoasisMateBatchRescanController", script)
+        self.assertIn("batch_rescan_start", script)
+        self.assertIn("batch_rescan_status", script)
+        self.assertIn("batch_rescan_stop", script)
+        self.assertIn("data.source !== options.source", script)
+        self.assertIn("bookoasisMateBatchRescanRunning", script)
+        self.assertIn("source:'issues'", issues)
+        self.assertIn("source:'covers'", covers)
+        self.assertIn("cover_inspection_start", covers)
+        self.assertIn("cover_inspection_status", covers)
+        self.assertIn("cover_inspection_stop", covers)
+        self.assertIn("global:false", covers)
+        self.assertIn('id="cover_stop_btn"', covers)
+        self.assertNotIn("showScan:false", issues)
+        self.assertNotIn("showScan:false", covers)
         self.assertIn(".doctor-action-menu", style)
+        self.assertIn(".doctor-action-menu-item:disabled", style)
         self.assertIn("bookoasisMateBindBookActions", covers)
         self.assertIn("bookoasisMateBindBookActions", gaps)
         self.assertIn("item.cover_url", gaps)
@@ -528,6 +580,11 @@ class PluginStructureTest(unittest.TestCase):
         self.assertLess(database_migration, log)
 
         diagnosis_menu = setup[diagnosis:migration]
+        dashboard = diagnosis_menu.index('{"uri": "dashboard", "name": "상태 요약"}')
+        scanner = diagnosis_menu.index('{"uri": "scanner", "name": "스캔 상태"}')
+        issues = diagnosis_menu.index('{"uri": "issues", "name": "문제 도서"}')
+        self.assertLess(dashboard, scanner)
+        self.assertLess(scanner, issues)
         bookoasis_log = diagnosis_menu.index('{"uri": "logs", "name": "BookOasis 로그"}')
         diagnosis_manual = diagnosis_menu.index('{"uri": "manual", "name": "매뉴얼"}')
         self.assertLess(bookoasis_log, diagnosis_manual)
