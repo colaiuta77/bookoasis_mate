@@ -124,18 +124,19 @@ class FlaskFarmLoaderTest(unittest.TestCase):
             else:
                 sys.modules["flask"] = old_flask
 
-    def test_setup_registers_main_migration_database_gdrive_and_setting_modules(self):
+    def test_setup_registers_main_migration_database_gdrive_sql_and_setting_modules(self):
         package = self._load_package(_DummyDb())
 
         self.assertEqual("bookoasis_mate", package.P.package_name)
         self.assertEqual(
-            ["main", "migration", "database_migration", "gdrive_scan", "setting"],
+            ["main", "migration", "database_migration", "gdrive_scan", "sql", "setting"],
             [module.name for module in package.P.module_list],
         )
         self.assertEqual("dashboard", package.P.module_list[0].first_menu)
         self.assertEqual("setting", package.P.module_list[1].first_menu)
         self.assertEqual("setting", package.P.module_list[2].first_menu)
         self.assertEqual("setting", package.P.module_list[3].first_menu)
+        self.assertIsNone(package.P.module_list[4].first_menu)
         self.assertIsNotNone(package.P.history_model)
         self.assertIsNotNone(package.P.gdrive_scan_model)
         self.assertEqual(
@@ -205,6 +206,48 @@ class FlaskFarmLoaderTest(unittest.TestCase):
             {"general_db_path": "/legacy/media_general.db"}
         )
         self.assertEqual("/legacy/media_general.db", legacy["general_db_path"])
+
+    def test_sql_module_serves_presets_and_executes_read_only_query(self):
+        package = self._load_package(_DummyDb())
+        module = package.P.module_list[4]
+        tool = Mock()
+        tool.presets.return_value = [{"id": "users", "name": "사용자 ID 목록"}]
+        tool.execute.return_value = {
+            "db_type": "general",
+            "columns": ["id"],
+            "rows": [[3]],
+            "row_count": 1,
+            "truncated": False,
+            "max_rows": 200,
+            "elapsed_ms": 1,
+        }
+
+        with patch.object(module, "_tool", return_value=tool):
+            presets = module.process_ajax(
+                "presets", types.SimpleNamespace(form=_DummyForm())
+            )
+            executed = module.process_ajax(
+                "execute",
+                types.SimpleNamespace(
+                    form=_DummyForm(
+                        db_type="general",
+                        query="SELECT id FROM users",
+                        max_rows="200",
+                        timeout_seconds="3",
+                    )
+                ),
+            )
+
+        self.assertEqual("success", presets["ret"])
+        self.assertEqual("users", presets["data"][0]["id"])
+        self.assertEqual("success", executed["ret"])
+        self.assertEqual([[3]], executed["data"]["rows"])
+        tool.execute.assert_called_once_with(
+            "general",
+            "SELECT id FROM users",
+            max_rows="200",
+            timeout_seconds="3",
+        )
 
     def test_gdrive_event_list_filters_and_cleanup_route_to_model(self):
         package = self._load_package(_DummyDb())
@@ -358,7 +401,7 @@ class FlaskFarmLoaderTest(unittest.TestCase):
     def test_database_diagnostics_ajax_routes_to_owning_pages(self):
         package = self._load_package(_DummyDb())
         main_module = package.P.module_list[0]
-        setting_module = package.P.module_list[4]
+        setting_module = package.P.module_list[5]
         request = types.SimpleNamespace(form=_DummyForm(db_type="general"))
 
         with patch.object(
@@ -395,7 +438,7 @@ class FlaskFarmLoaderTest(unittest.TestCase):
             package = self._load_package(_FailingHistoryDb())
 
         self.assertEqual(
-            ["main", "migration", "database_migration", "gdrive_scan", "setting"],
+            ["main", "migration", "database_migration", "gdrive_scan", "sql", "setting"],
             [module.name for module in package.P.module_list],
         )
         self.assertIsNone(package.P.history_model)

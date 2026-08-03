@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+<div class="doctor-card doctor-sql-card">
+  <div class="doctor-sql-toolbar">
+    <label>대상 DB
+      <select id="sql_db_type" class="form-control form-control-sm">
+        <option value="general">일반 DB</option>
+        {% if arg.get('adult_enabled') %}<option value="adult">성인 DB</option>{% endif %}
+      </select>
+    </label>
+    <label>진단 프리셋
+      <select id="sql_preset" class="form-control form-control-sm">
+        <option value="">직접 입력</option>
+      </select>
+    </label>
+    <label>최대 결과
+      <select id="sql_max_rows" class="form-control form-control-sm">
+        <option value="50">50행</option>
+        <option value="100">100행</option>
+        <option value="200" selected>200행</option>
+        <option value="500">500행</option>
+      </select>
+    </label>
+    <label>제한 시간
+      <select id="sql_timeout" class="form-control form-control-sm">
+        <option value="1">1초</option>
+        <option value="3" selected>3초</option>
+        <option value="5">5초</option>
+        <option value="10">10초</option>
+      </select>
+    </label>
+    <label class="doctor-check doctor-sql-wide">
+      <input id="sql_wide" type="checkbox"> 넓게 보기
+    </label>
+  </div>
+  <div id="sql_preset_description" class="doctor-muted">프리셋을 선택하거나 읽기 전용 SQL을 직접 입력하세요.</div>
+  <textarea id="sql_query" class="form-control doctor-sql-query" rows="11" spellcheck="false" placeholder="SELECT ..."></textarea>
+  <div class="doctor-toolbar doctor-sql-actions">
+    <button id="sql_run_btn" type="button" class="btn btn-sm btn-primary">실행</button>
+    <button id="sql_clear_btn" type="button" class="btn btn-sm btn-outline-secondary">초기화</button>
+    <button id="sql_json_btn" type="button" class="btn btn-sm btn-outline-info" disabled>JSON 보기</button>
+    <span id="sql_running" class="doctor-progress">SQL 실행 중</span>
+  </div>
+</div>
+
+<div class="doctor-card doctor-sql-warning">
+  <strong>안전 제한</strong>
+  <span>SELECT·WITH·EXPLAIN QUERY PLAN 한 문장만 허용합니다. DB는 읽기 전용으로 열며 비밀번호 해시와 설정값은 조회할 수 없습니다.</span>
+</div>
+
+<div id="sql_result_summary" class="doctor-sql-summary doctor-muted">아직 실행한 SQL이 없습니다.</div>
+<div id="sql_result_wrap" class="doctor-table-wrap doctor-sql-results" style="display:none;">
+  <table class="table table-sm doctor-table doctor-sql-table">
+    <thead id="sql_result_head"></thead>
+    <tbody id="sql_result_body"></tbody>
+  </table>
+</div>
+<div id="sql_empty" class="doctor-empty" style="display:none;">조회 결과가 없습니다.</div>
+
+<div id="sql_json_modal" class="doctor-action-modal" aria-hidden="true">
+  <div class="doctor-action-dialog" role="dialog" aria-modal="true" aria-labelledby="sql_json_title">
+    <div class="doctor-action-dialog-header">
+      <h4 id="sql_json_title">SQL 결과 JSON</h4>
+      <button id="sql_json_close" type="button" class="doctor-action-close" aria-label="닫기">&times;</button>
+    </div>
+    <pre id="sql_json_content" class="doctor-gdrive-json"></pre>
+  </div>
+</div>
+
+<script>
+var sqlPresets = [];
+var sqlLastResult = null;
+
+function sqlSetRunning(running) {
+  document.getElementById('sql_run_btn').disabled = running;
+  document.getElementById('sql_running').style.display = running ? 'inline-flex' : 'none';
+}
+
+function sqlLoadPresets() {
+  bookoasisMateAjax('sql', 'presets', {}, function(ret) {
+    if (ret.ret !== 'success') return;
+    sqlPresets = ret.data || [];
+    var select = document.getElementById('sql_preset');
+    sqlPresets.forEach(function(item, index) {
+      var option = document.createElement('option');
+      option.value = String(index);
+      option.textContent = item.name;
+      select.appendChild(option);
+    });
+  }, null, {global:false});
+}
+
+function sqlApplyPreset() {
+  var value = document.getElementById('sql_preset').value;
+  var description = document.getElementById('sql_preset_description');
+  if (value === '') {
+    description.textContent = '프리셋을 선택하거나 읽기 전용 SQL을 직접 입력하세요.';
+    return;
+  }
+  var preset = sqlPresets[Number(value)];
+  if (!preset) return;
+  document.getElementById('sql_query').value = preset.sql || '';
+  description.textContent = preset.description || '';
+}
+
+function sqlRenderResult(data) {
+  sqlLastResult = data;
+  var columns = data.columns || [];
+  var rows = data.rows || [];
+  var head = document.getElementById('sql_result_head');
+  var body = document.getElementById('sql_result_body');
+  bookoasisMateClear(head);
+  bookoasisMateClear(body);
+
+  var headerRow = document.createElement('tr');
+  columns.forEach(function(column) {
+    headerRow.appendChild(bookoasisMateText('th', '', column));
+  });
+  head.appendChild(headerRow);
+  rows.forEach(function(values) {
+    var row = document.createElement('tr');
+    values.forEach(function(value) {
+      var cell = bookoasisMateText('td', '', value == null ? 'NULL' : value);
+      if (value == null) cell.classList.add('doctor-sql-null');
+      row.appendChild(cell);
+    });
+    body.appendChild(row);
+  });
+
+  var suffix = data.truncated ? ' · 최대 ' + data.max_rows + '행에서 잘림' : '';
+  document.getElementById('sql_result_summary').textContent =
+    (data.db_type === 'adult' ? '성인 DB' : '일반 DB') + ' · ' +
+    Number(data.row_count || 0).toLocaleString('ko-KR') + '행 · ' +
+    Number(data.elapsed_ms || 0).toLocaleString('ko-KR') + 'ms' + suffix;
+  document.getElementById('sql_result_wrap').style.display = rows.length ? 'block' : 'none';
+  document.getElementById('sql_empty').style.display = rows.length ? 'none' : 'block';
+  document.getElementById('sql_json_btn').disabled = false;
+}
+
+function sqlRun() {
+  var query = document.getElementById('sql_query').value.trim();
+  if (!query) {
+    notify('실행할 SQL을 입력해 주세요.', 'warning');
+    return;
+  }
+  sqlSetRunning(true);
+  bookoasisMateAjax('sql', 'execute', {
+    db_type:document.getElementById('sql_db_type').value,
+    query:query,
+    max_rows:document.getElementById('sql_max_rows').value,
+    timeout_seconds:document.getElementById('sql_timeout').value
+  }, function(ret) {
+    if (ret.ret === 'success') sqlRenderResult(ret.data || {});
+  }, function() {
+    sqlSetRunning(false);
+  }, {global:false});
+}
+
+function sqlShowJson() {
+  if (!sqlLastResult) return;
+  document.getElementById('sql_json_content').textContent = JSON.stringify(sqlLastResult, null, 2);
+  var modal = document.getElementById('sql_json_modal');
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function sqlCloseJson() {
+  var modal = document.getElementById('sql_json_modal');
+  modal.style.display = 'none';
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+$(function() {
+  sqlLoadPresets();
+  $('#sql_preset').on('change', sqlApplyPreset);
+  $('#sql_run_btn').on('click', sqlRun);
+  $('#sql_clear_btn').on('click', function() {
+    document.getElementById('sql_preset').value = '';
+    document.getElementById('sql_query').value = '';
+    document.getElementById('sql_preset_description').textContent = '프리셋을 선택하거나 읽기 전용 SQL을 직접 입력하세요.';
+  });
+  $('#sql_json_btn').on('click', sqlShowJson);
+  $('#sql_json_close').on('click', sqlCloseJson);
+  $('#sql_json_modal').on('click', function(event) {
+    if (event.target === this) sqlCloseJson();
+  });
+  $('#sql_wide').on('change', function() {
+    document.getElementById('main_container').className = this.checked ? 'container-fluid' : 'container';
+  });
+  $('#sql_query').on('keydown', function(event) {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      sqlRun();
+    }
+  });
+});
+</script>
+{% endblock %}

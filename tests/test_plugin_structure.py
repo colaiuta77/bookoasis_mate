@@ -17,9 +17,11 @@ class PluginStructureTest(unittest.TestCase):
             "mod_migration.py",
             "mod_database_migration.py",
             "mod_gdrive_scan.py",
+            "mod_sql.py",
             "mod_setting.py",
             "model_gdrive_scan.py",
             "gdrive_scan.py",
+            "sql_query.py",
             "mate_engine.py",
             "category_migration.py",
             "kavita_migration.py",
@@ -47,6 +49,7 @@ class PluginStructureTest(unittest.TestCase):
             "templates/bookoasis_mate_gdrive_scan_setting.html",
             "templates/bookoasis_mate_gdrive_scan_list.html",
             "templates/bookoasis_mate_gdrive_scan_manual.html",
+            "templates/bookoasis_mate_sql.html",
             "scripts/gd_poller_ff_bridge.py",
         ]
         self.assertEqual([], [path for path in required if not (self.root / path).is_file()])
@@ -84,7 +87,7 @@ class PluginStructureTest(unittest.TestCase):
         setup = (self.root / "setup.py").read_text(encoding="utf-8")
         engine = (self.root / "mate_engine.py").read_text(encoding="utf-8")
 
-        for label in ("상태 요약", "문제 도서", "스캔 상태", "BookOasis 로그", "시리즈 누락", "표지 검사", "고아 표지파일 정리", "검사 이력", "카테고리 이관", "복사 설정", "복사 상태", "매뉴얼", "Google Drive 연동", "변경 이벤트", "설정", "로그"):
+        for label in ("상태 요약", "문제 도서", "스캔 상태", "BookOasis 로그", "시리즈 누락", "표지 검사", "고아 표지파일 정리", "검사 이력", "카테고리 이관", "복사 설정", "복사 상태", "매뉴얼", "Google Drive 연동", "변경 이벤트", "SQL 도구", "설정", "로그"):
             self.assertIn(label, setup)
         self.assertIn("?mode=ro", engine)
         self.assertIn("PRAGMA query_only = ON", engine)
@@ -92,6 +95,29 @@ class PluginStructureTest(unittest.TestCase):
         self.assertNotIn("julianday(\\'now\\')", engine)
         self.assertIn("P.history_model = None", setup)
         self.assertIn("P.gdrive_scan_model = None", setup)
+
+    def test_sql_tool_is_read_only_bounded_and_has_diagnostic_presets(self):
+        setup = (self.root / "setup.py").read_text(encoding="utf-8")
+        module = (self.root / "mod_sql.py").read_text(encoding="utf-8")
+        engine = (self.root / "sql_query.py").read_text(encoding="utf-8")
+        template = (self.root / "templates/bookoasis_mate_sql.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertLess(setup.index('"uri": "gdrive_scan"'), setup.index('"uri": "sql"'))
+        self.assertLess(setup.index('"uri": "sql"'), setup.index('"uri": "log"'))
+        self.assertIn('name="sql"', module)
+        self.assertIn("?mode=ro", engine)
+        self.assertIn("PRAGMA query_only = ON", engine)
+        self.assertIn("set_progress_handler", engine)
+        self.assertIn("SQLITE_DENY", engine)
+        self.assertIn("recent_progress_diagnosis", engine)
+        self.assertIn("orphan_progress_users", engine)
+        self.assertIn("library_book_counts", engine)
+        self.assertIn('id="sql_preset"', template)
+        self.assertIn('id="sql_query"', template)
+        self.assertIn('id="sql_run_btn"', template)
+        self.assertIn("textContent", template)
 
     def test_library_diagnosis_manual_explains_storage_rules(self):
         setup = (self.root / "setup.py").read_text(encoding="utf-8")

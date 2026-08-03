@@ -166,6 +166,20 @@
 .doctor-gdrive-status-completed { color:#198754; background:rgba(25,135,84,.13); }
 .doctor-gdrive-status-failed { color:#dc3545; background:rgba(220,53,69,.12); }
 .doctor-gdrive-json { min-height:260px; max-height:68vh; margin:14px 0 0; overflow:auto; padding:14px; border-radius:6px; background:#111827; color:#d1fae5; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.55 Consolas, Monaco, monospace; }
+.doctor-sql-card { margin-bottom:12px; }
+.doctor-sql-toolbar { display:grid; grid-template-columns:150px minmax(260px,1fr) 120px 120px auto; gap:10px; align-items:end; }
+.doctor-sql-toolbar label { margin:0; color:#495057; font-size:.82rem; font-weight:600; }
+.doctor-sql-toolbar label .form-control { margin-top:5px; }
+.doctor-sql-wide { align-self:center; margin-top:20px !important; white-space:nowrap; }
+.doctor-sql-query { margin-top:10px; resize:vertical; font:13px/1.55 Consolas, Monaco, monospace; }
+.doctor-sql-actions { margin:10px 0 0; }
+.doctor-sql-warning { display:flex; align-items:center; gap:10px; margin-bottom:12px; border-color:rgba(240,173,0,.55); padding-top:11px; padding-bottom:11px; color:#6c5a17; font-size:.84rem; }
+.doctor-sql-summary { padding:9px 4px; }
+.doctor-sql-results { max-height:68vh; border:1px solid #dee2e6; border-radius:6px; }
+.doctor-sql-table { width:max-content; min-width:100%; margin:0; font-size:.82rem; }
+.doctor-sql-table th { position:sticky; top:0; z-index:1; min-width:90px; background:#343a40; color:#fff; white-space:nowrap; }
+.doctor-sql-table td { max-width:520px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.doctor-sql-null { color:#6c757d; font-style:italic; }
 @media (prefers-color-scheme: dark) {
   .doctor-card { border-color:#495057; }
   .doctor-overview-center { background:#212529; }
@@ -183,6 +197,9 @@
   .doctor-log-summary { border-color:#6c757d; }
   .doctor-gdrive-summary, .doctor-gdrive-row { border-color:#495057; }
   .doctor-gdrive-library { color:#ced4da; }
+  .doctor-sql-toolbar label { color:#ced4da; }
+  .doctor-sql-warning { color:#f7d774; }
+  .doctor-sql-results { border-color:#495057; }
 }
 
 @media (max-width: 720px) {
@@ -211,4 +228,6 @@
   .doctor-gdrive-filter { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .doctor-gdrive-search { grid-column:span 2; }
   .doctor-gdrive-summary { flex-direction:column; }
+  .doctor-sql-toolbar { grid-template-columns:1fr; }
+  .doctor-sql-wide { margin-top:0 !important; }
 }
