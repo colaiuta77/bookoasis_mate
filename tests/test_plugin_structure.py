@@ -59,12 +59,12 @@ class PluginStructureTest(unittest.TestCase):
 
         self.assertEqual("bookoasis_mate", self.root.name)
         self.assertIn('package_name: "bookoasis_mate"', text)
-        self.assertIn('version: "1.0.2"', text)
+        self.assertIn('version: "1.1.0"', text)
         self.assertIn("colaiuta77/bookoasis_mate", text)
         readme = (self.root / "README.md").read_text(encoding="utf-8")
         self.assertIn("**FF용 플러그인이며", readme)
         self.assertNotIn("FlaskFarm(FF)", readme)
-        self.assertIn("v1.0.2 (2026-07-29)", readme)
+        self.assertIn("v1.1.0 (2026-08-03)", readme)
 
     def test_public_repository_excludes_local_development_and_runtime_files(self):
         ignore = (self.root / ".gitignore").read_text(encoding="utf-8")
