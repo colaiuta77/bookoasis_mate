@@ -60,6 +60,7 @@ var bookoasisMateBookActionItem = null;
 var bookoasisMateBookActionRefresh = null;
 var bookoasisMateBookActionOptions = null;
 var bookoasisMateMetadataPlugins = null;
+var bookoasisMateBatchRescanRunning = false;
 
 function bookoasisMateButton(text, className) {
   var button = bookoasisMateText('button', className || '', text);
@@ -181,7 +182,13 @@ function bookoasisMateShowBookActionMenu(event, item, refreshCallback, options) 
   bookoasisMateBookActionOptions = options || {};
   var menu = document.getElementById('doctor-book-action-menu');
   var scanButton = document.getElementById('doctor-action-scan-button');
-  if (scanButton) scanButton.style.display = bookoasisMateBookActionOptions.showScan === false ? 'none' : '';
+  if (scanButton) {
+    scanButton.style.display = bookoasisMateBookActionOptions.showScan === false ? 'none' : '';
+    scanButton.disabled = bookoasisMateBatchRescanRunning;
+    scanButton.title = bookoasisMateBatchRescanRunning
+      ? '일괄 재스캔이 끝난 후 실행할 수 있습니다.'
+      : '';
+  }
   menu.style.display = 'block';
   menu.style.left = Math.max(8, event.clientX) + 'px';
   menu.style.top = Math.max(8, event.clientY) + 'px';
@@ -256,6 +263,10 @@ function bookoasisMateOpenSelectedBookDetail() {
 function bookoasisMateScanSelectedBook() {
   var item = bookoasisMateBookActionItem;
   if (!item || !item.id) return;
+  if (bookoasisMateBatchRescanRunning) {
+    notify('일괄 재스캔이 실행 중입니다. 작업이 끝난 후 다시 시도해 주세요.', 'warning');
+    return;
+  }
   var title = item.title || item.series_name || ('도서 ' + item.id);
   if (!confirm('"' + title + '" 도서를 재스캔하시겠습니까? 표지와 로컬 메타데이터, 페이지 정보가 함께 갱신됩니다.')) return;
   bookoasisMateAjax('main', 'book_scan', {book_id:item.id, db_type:bookoasisMateSelectedDbType()}, function(ret) {
@@ -511,6 +522,7 @@ function bookoasisMateBatchRescanController(options) {
   function render(data) {
     data = data || {};
     running = data.is_working === 'run';
+    bookoasisMateBatchRescanRunning = running;
     belongsToPage = !(options.source && data.source && data.source !== options.source);
     if (!belongsToPage) {
       $('#batch_rescan_bar').css('width', '0%');

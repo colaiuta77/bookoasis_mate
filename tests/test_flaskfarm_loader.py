@@ -865,6 +865,27 @@ class FlaskFarmLoaderTest(unittest.TestCase):
         self.assertIsNone(service._cached_report)
         self.assertIsNone(service._cover_issue_cache)
 
+    def test_service_blocks_single_book_scan_while_batch_rescan_is_running(self):
+        _DummySetting.values = {
+            "bookoasis_url": "http://bookoasis:5930",
+            "bookoasis_username": "admin",
+            "bookoasis_password": "secret-password",
+        }
+        package = self._load_package(_DummyDb())
+        service = package.P.bookoasis_mate_service
+
+        with patch.object(
+            service,
+            "batch_rescan_status",
+            return_value={"is_working": "run", "source_label": "문제 도서"},
+        ):
+            with patch.object(service, "admin_client") as mocked_client:
+                result = service.scan_book(3, "general")
+
+        self.assertFalse(result["success"])
+        self.assertIn("일괄 재스캔", result["message"])
+        mocked_client.assert_not_called()
+
     def test_service_searches_and_applies_metadata_without_logging_credentials(self):
         _DummySetting.values = {
             "bookoasis_url": "http://bookoasis:5930",

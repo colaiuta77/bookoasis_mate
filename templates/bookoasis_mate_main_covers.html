@@ -24,7 +24,7 @@
   <span id="cover_progress" class="doctor-progress" role="status" aria-live="polite"></span>
   <span id="cover_count" class="doctor-muted"></span>
 </div>
-<p class="doctor-muted">선택한 검사 유형에 해당하는 표지만 결과에 표시합니다. 저해상도·파일 크기·비율 검사는 마운트된 실제 표지 파일을 읽기 전용으로 확인합니다. 도서 행에서는 상세 보기와 메타데이터 검색을 제공하며, 검사 결과 전체 재스캔은 아래 별도 작업으로 실행합니다.</p>
+<p class="doctor-muted">선택한 검사 유형에 해당하는 표지만 결과에 표시합니다. 저해상도·파일 크기·비율 검사는 마운트된 실제 표지 파일을 읽기 전용으로 확인합니다. 도서 행에서는 상세 보기, 개별 도서 재스캔과 메타데이터 검색을 제공하며, 검사 결과 전체 재스캔은 아래 별도 작업으로 실행합니다.</p>
 <div class="doctor-card doctor-batch-card">
   <div class="doctor-batch-header">
     <div><strong>검사 결과 일괄 재스캔</strong><div id="batch_rescan_status_text" class="doctor-muted">대기중</div></div>
@@ -77,7 +77,7 @@ function renderCovers(data) {
     if (inspection.http_status) details.push('HTTP ' + inspection.http_status);
     if (inspection.format || inspection.content_type) details.push(inspection.format || inspection.content_type);
     row.appendChild(bookoasisMateText('td', 'doctor-muted', details.join(' · ') || '-'));
-    bookoasisMateBindBookActions(row, item, function() { loadCovers(coverPage, true); }, {showScan:false});
+    bookoasisMateBindBookActions(row, item, function() { loadCovers(coverPage, true); });
     body.appendChild(row);
   });
   coverPage = data.page; coverPages = Math.max(1, data.pages || 1); $('#cover_page').text(coverPage + ' / ' + coverPages); $('#cover_prev').prop('disabled', coverPage <= 1); $('#cover_next').prop('disabled', coverPage >= coverPages);

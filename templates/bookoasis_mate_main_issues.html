@@ -23,7 +23,7 @@
   <button id="search_btn" class="btn btn-sm btn-primary">조회</button>
   <span id="issue_count" class="doctor-muted"></span>
 </div>
-<p class="doctor-muted">도서 행을 클릭하면 BookOasis 상세 보기와 플러그인 메타데이터 검색 메뉴가 열립니다. 일괄 재스캔은 현재 필터의 전체 검색 결과를 별도 프로세스에서 순차 처리합니다.</p>
+<p class="doctor-muted">도서 행을 클릭하면 BookOasis 상세 보기, 개별 도서 재스캔과 플러그인 메타데이터 검색 메뉴가 열립니다. 일괄 재스캔은 현재 필터의 전체 검색 결과를 별도 프로세스에서 순차 처리합니다.</p>
 <div class="doctor-card doctor-batch-card">
   <div class="doctor-batch-header">
     <div><strong>검색 결과 일괄 재스캔</strong><div id="batch_rescan_status_text" class="doctor-muted">대기중</div></div>
@@ -113,7 +113,7 @@ function renderIssues(data) {
     jsonButton.addEventListener('click', function(event) { openIssueJson(event, item); });
     actionCell.appendChild(jsonButton);
     row.appendChild(actionCell);
-    bookoasisMateBindBookActions(row, item, function() { loadIssues(issuePage); }, {showScan:false});
+    bookoasisMateBindBookActions(row, item, function() { loadIssues(issuePage); });
     body.appendChild(row);
   });
   issuePage = data.page; issuePages = Math.max(1, data.pages || 1);

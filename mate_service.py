@@ -719,6 +719,12 @@ class BookOasisMateService:
         return data
 
     def scan_book(self, book_id, db_type="general"):
+        batch_status = self.batch_rescan_status()
+        if batch_status.get("is_working") == "run":
+            return {
+                "success": False,
+                "message": "일괄 재스캔이 실행 중입니다. 작업이 끝난 후 개별 재스캔을 실행해 주세요.",
+            }
         started = time.monotonic()
         data = self.admin_client().scan_book(book_id, db_type)
         if data.get("success"):
