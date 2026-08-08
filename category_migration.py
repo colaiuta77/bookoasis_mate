@@ -11,11 +11,14 @@ from pathlib import Path, PurePosixPath
 
 try:
     from .cover_inspector import normalize_cover_path, resolve_cover_path
+    from .migration_database import MigrationDatabaseContext
 except ImportError:
     from cover_inspector import normalize_cover_path, resolve_cover_path
+    from migration_database import MigrationDatabaseContext
 
 
-PACKAGE_VERSION = "1.2"
+PACKAGE_VERSION = "2.0"
+SUPPORTED_PACKAGE_VERSIONS = {"1.2", "2.0"}
 MAX_JSON_SIZE = 64 * 1024 * 1024
 BOOK_COLUMNS = (
     "library_id",
@@ -83,7 +86,15 @@ def parse_library_ids(value):
 
 
 class CategoryMigrationEngine:
-    def __init__(self, work_dir, cover_root, should_stop=None, on_progress=None):
+    def __init__(
+        self,
+        work_dir,
+        cover_root,
+        should_stop=None,
+        on_progress=None,
+        database_settings=None,
+        database_context=None,
+    ):
         self.work_root = self._prepare_directory(
             work_dir,
             "이관 작업 디렉터리",
@@ -96,6 +107,14 @@ class CategoryMigrationEngine:
         )
         self.should_stop = should_stop or (lambda: False)
         self.on_progress = on_progress
+        self.database_context = database_context
+        if self.database_context is None and database_settings:
+            self.database_context = MigrationDatabaseContext(
+                database_settings,
+                work_dir=self.work_root,
+                should_stop=self.should_stop,
+                on_progress=self.on_progress,
+            )
 
     @staticmethod
     def _prepare_directory(value, label, create=False):
@@ -127,8 +146,15 @@ class CategoryMigrationEngine:
         connection.execute("PRAGMA busy_timeout = 30000")
         return connection
 
+    def _database_connection(self, db_path, db_type, readonly=False):
+        if self.database_context is not None:
+            return self.database_context.connect(db_type, readonly=readonly)
+        return self._connect(db_path, readonly=readonly)
+
     @staticmethod
     def _tables(connection):
+        if hasattr(connection, "tables"):
+            return connection.tables()
         return {
             row["name"]
             for row in connection.execute(
@@ -138,6 +164,8 @@ class CategoryMigrationEngine:
 
     @staticmethod
     def _columns(connection, table):
+        if hasattr(connection, "columns"):
+            return connection.columns(table)
         safe_table = str(table).replace('"', '""')
         return {
             row["name"]
@@ -210,7 +238,7 @@ class CategoryMigrationEngine:
 
         if not isinstance(manifest, dict) or not isinstance(metadata, dict):
             raise ValueError("패키지 메타데이터 형식이 올바르지 않습니다.")
-        if str(manifest.get("export_version") or "") != PACKAGE_VERSION:
+        if str(manifest.get("export_version") or "") not in SUPPORTED_PACKAGE_VERSIONS:
             raise ValueError(
                 f"지원하지 않는 패키지 버전입니다: {manifest.get('export_version')}"
             )
@@ -235,6 +263,8 @@ class CategoryMigrationEngine:
             "books_count": len(books),
             "covers_count": len(cover_members),
             "offsets_count": sum(len(items) for items in offsets.values() if isinstance(items, list)),
+            "user_progress_count": len(metadata.get("user_progress", [])),
+            "user_favorites_count": len(metadata.get("user_favorites", [])),
             "physical_paths": [str(path) for path in physical_paths],
             "root_paths_count": len(physical_paths),
             "cover_uncompressed_size": sum(member.file_size for member in cover_members),
@@ -274,6 +304,11 @@ class CategoryMigrationEngine:
             return [{"id": int(row["id"]), "name": row["name"]} for row in rows]
         finally:
             connection.close()
+
+    def list_libraries(self, db_path, db_type):
+        if self.database_context is not None:
+            return self.database_context.libraries(db_type)
+        return self.libraries(db_path)
 
     @staticmethod
     def _root_paths(raw_path):
@@ -337,7 +372,7 @@ class CategoryMigrationEngine:
         return {"db_type": db_type, "count": len(files), "files": files}
 
     def _export_one(self, db_path, db_type, library_id):
-        connection = self._connect(db_path, readonly=True)
+        connection = self._database_connection(db_path, db_type, readonly=True)
         partial_path = None
         try:
             tables = self._tables(connection)
@@ -366,6 +401,8 @@ class CategoryMigrationEngine:
             books = [dict(row) for row in rows]
             books_payload = []
             offsets_payload = {}
+            user_progress_payload = []
+            user_favorites_payload = []
             cover_paths = {}
             has_offsets = "book_offsets" in tables
             offset_columns = self._columns(connection, "book_offsets") if has_offsets else set()
@@ -404,6 +441,22 @@ class CategoryMigrationEngine:
                         offsets_payload[str(book_index)] = [
                             dict(offset) for offset in offset_rows
                         ]
+                if "user_progress" in tables:
+                    for progress in connection.execute(
+                        "SELECT * FROM user_progress WHERE book_id = ?",
+                        (book.get("id"),),
+                    ).fetchall():
+                        item = dict(progress)
+                        item["book_export_index"] = book_index
+                        user_progress_payload.append(item)
+                if "user_favorites" in tables:
+                    for favorite in connection.execute(
+                        "SELECT * FROM user_favorites WHERE book_id = ?",
+                        (book.get("id"),),
+                    ).fetchall():
+                        item = dict(favorite)
+                        item["book_export_index"] = book_index
+                        user_favorites_payload.append(item)
                 if book_index % 100 == 0 or book_index + 1 == len(books):
                     self._progress(
                         "export_books",
@@ -433,6 +486,9 @@ class CategoryMigrationEngine:
                 "root_paths_count": len(root_paths),
                 "books_count": len(books_payload),
                 "covers_count": len(cover_paths),
+                "user_progress_count": len(user_progress_payload),
+                "user_favorites_count": len(user_favorites_payload),
+                "media_kind": "book",
             }
             metadata = {
                 "library": {
@@ -446,6 +502,8 @@ class CategoryMigrationEngine:
                 },
                 "books": books_payload,
                 "offsets": offsets_payload,
+                "user_progress": user_progress_payload,
+                "user_favorites": user_favorites_payload,
             }
             with zipfile.ZipFile(
                 str(partial_path),
@@ -483,6 +541,8 @@ class CategoryMigrationEngine:
                 "books_count": len(books_payload),
                 "covers_count": len(cover_paths),
                 "offsets_count": sum(len(items) for items in offsets_payload.values()),
+                "user_progress_count": len(user_progress_payload),
+                "user_favorites_count": len(user_favorites_payload),
             }
         except Exception:
             if partial_path is not None:
@@ -494,15 +554,18 @@ class CategoryMigrationEngine:
         finally:
             connection.close()
 
-    @staticmethod
-    def _quick_check(connection):
+    def _quick_check(self, connection, db_type):
+        if self.database_context is not None:
+            self.database_context.integrity_check(db_type)
+            return
         rows = connection.execute("PRAGMA quick_check").fetchall()
         result = [str(row[0]) for row in rows]
         if result != ["ok"]:
             raise RuntimeError("대상 DB quick_check에 실패했습니다: " + ", ".join(result[:10]))
 
-    @staticmethod
-    def _check_required_sqlite_modules(connection):
+    def _check_required_sqlite_modules(self, connection):
+        if self.database_context is not None and self.database_context.engine != "sqlite":
+            return
         rows = connection.execute(
             """
             SELECT sql
@@ -524,6 +587,8 @@ class CategoryMigrationEngine:
             )
 
     def _backup_database(self, db_path, db_type):
+        if self.database_context is not None:
+            return self.database_context.backup(db_type, reason="before_import")
         backup_dir = self.work_root / "backups"
         backup_dir.mkdir(parents=True, exist_ok=True)
         source_name = Path(db_path).stem
@@ -570,12 +635,34 @@ class CategoryMigrationEngine:
     def _insert_row(connection, table, values):
         columns = list(values.keys())
         placeholders = ", ".join("?" for _ in columns)
-        safe_columns = ", ".join(f'"{column}"' for column in columns)
+        safe_columns = ", ".join(f'`{column}`' for column in columns)
         cursor = connection.execute(
-            f'INSERT INTO "{table}" ({safe_columns}) VALUES ({placeholders})',
+            f'INSERT INTO `{table}` ({safe_columns}) VALUES ({placeholders})',
             tuple(values[column] for column in columns),
         )
         return cursor.lastrowid
+
+    @classmethod
+    def _upsert_row(cls, connection, table, key_columns, values):
+        where = " AND ".join(f"`{column}` = ?" for column in key_columns)
+        existing = connection.execute(
+            f"SELECT id FROM `{table}` WHERE {where}",
+            tuple(values[column] for column in key_columns),
+        ).fetchone()
+        if existing is None:
+            return cls._insert_row(connection, table, values)
+        update_columns = [
+            column for column in values
+            if column not in key_columns and column != "id"
+        ]
+        if update_columns:
+            assignments = ", ".join(f"`{column}` = ?" for column in update_columns)
+            connection.execute(
+                f"UPDATE `{table}` SET {assignments} WHERE id = ?",
+                tuple(values[column] for column in update_columns)
+                + (int(existing["id"]),),
+            )
+        return int(existing["id"])
 
     def import_category(
         self,
@@ -603,10 +690,12 @@ class CategoryMigrationEngine:
 
         self._check_stop()
         self._progress("preflight", 0, 1, "패키지와 대상 DB를 검사하고 있습니다.")
-        connection = self._connect(db_path, readonly=False)
+        connection = self._database_connection(
+            db_path, selected_db_type, readonly=False
+        )
         try:
             self._check_required_sqlite_modules(connection)
-            self._quick_check(connection)
+            self._quick_check(connection, selected_db_type)
         finally:
             connection.close()
         package = self._work_path(package_path, must_exist=True)
@@ -635,6 +724,8 @@ class CategoryMigrationEngine:
                 metadata = self._read_json_member(archive, "metadata.json")
                 books = metadata["books"]
                 offsets = metadata.get("offsets", {})
+                user_progress = metadata.get("user_progress", [])
+                user_favorites = metadata.get("user_favorites", [])
                 library_meta = metadata["library"]
                 cover_members = [
                     member
@@ -664,7 +755,9 @@ class CategoryMigrationEngine:
                     )
 
             self._check_stop()
-            connection = self._connect(db_path, readonly=False)
+            connection = self._database_connection(
+                db_path, selected_db_type, readonly=False
+            )
             tables = self._tables(connection)
             if not {"libraries", "books"}.issubset(tables):
                 raise RuntimeError("libraries 또는 books 테이블이 없습니다.")
@@ -682,7 +775,10 @@ class CategoryMigrationEngine:
                 else set()
             )
 
-            connection.execute("BEGIN IMMEDIATE")
+            if hasattr(connection, "begin"):
+                connection.begin(immediate=True)
+            else:
+                connection.execute("BEGIN IMMEDIATE")
             merge_value = str(merge_to or "").strip()
             mode = "merge" if merge_value else "new"
             added_physical_paths = []
@@ -781,6 +877,7 @@ class CategoryMigrationEngine:
             imported_books = 0
             skipped_duplicate_books = 0
             fallback_books = 0
+            book_index_to_id = {}
             for book_index, book in enumerate(books):
                 self._check_stop()
                 relative = self._safe_relative_path(book.get("relative_path"))
@@ -795,6 +892,7 @@ class CategoryMigrationEngine:
                 ).fetchone()
                 if duplicate is not None:
                     skipped_duplicate_books += 1
+                    book_index_to_id[book_index] = int(duplicate["id"])
                 else:
                     cover_image = str(book.get("cover_image") or "").strip()
                     if cover_image:
@@ -830,6 +928,7 @@ class CategoryMigrationEngine:
                         if key in book_columns and key in BOOK_COLUMNS
                     }
                     new_book_id = self._insert_row(connection, "books", values)
+                    book_index_to_id[book_index] = int(new_book_id)
                     imported_books += 1
                     offset_items = offsets.get(
                         str(book_index),
@@ -860,6 +959,84 @@ class CategoryMigrationEngine:
                         book_index + 1,
                         len(books),
                         "도서와 offset을 대상 카테고리에 저장하고 있습니다.",
+                    )
+
+            valid_users = set()
+            if "users" in tables:
+                valid_users = {
+                    int(row["id"])
+                    for row in connection.execute("SELECT id FROM users").fetchall()
+                }
+            imported_progress = 0
+            skipped_progress = 0
+            if "user_progress" in tables:
+                progress_columns = self._columns(connection, "user_progress")
+                for item in user_progress if isinstance(user_progress, list) else []:
+                    export_index = int(item.get("book_export_index", -1))
+                    user_id = int(item.get("user_id") or 0)
+                    if export_index not in book_index_to_id or user_id not in valid_users:
+                        skipped_progress += 1
+                        continue
+                    values = {
+                        key: value
+                        for key, value in item.items()
+                        if key not in {"id", "book_export_index", "book_id"}
+                        and key in progress_columns
+                    }
+                    values["book_id"] = book_index_to_id[export_index]
+                    values["user_id"] = user_id
+                    self._upsert_row(
+                        connection,
+                        "user_progress",
+                        ("book_id", "user_id"),
+                        values,
+                    )
+                    imported_progress += 1
+
+            imported_favorites = 0
+            skipped_favorites = 0
+            if "user_favorites" in tables:
+                favorite_columns = self._columns(connection, "user_favorites")
+                for item in user_favorites if isinstance(user_favorites, list) else []:
+                    export_index = int(item.get("book_export_index", -1))
+                    user_id = int(item.get("user_id") or 0)
+                    if export_index not in book_index_to_id or user_id not in valid_users:
+                        skipped_favorites += 1
+                        continue
+                    values = {
+                        key: value
+                        for key, value in item.items()
+                        if key not in {"id", "book_export_index", "book_id"}
+                        and key in favorite_columns
+                    }
+                    values["book_id"] = book_index_to_id[export_index]
+                    values["user_id"] = user_id
+                    self._upsert_row(
+                        connection,
+                        "user_favorites",
+                        ("user_id", "book_id"),
+                        values,
+                    )
+                    imported_favorites += 1
+
+            if "series_summary" in tables:
+                connection.execute(
+                    "DELETE FROM series_summary WHERE library_id = ?",
+                    (new_library_id,),
+                )
+            if "series_summary_state" in tables:
+                state = connection.execute(
+                    "SELECT id FROM series_summary_state WHERE id = 1"
+                ).fetchone()
+                if state is None:
+                    connection.execute(
+                        "INSERT INTO series_summary_state "
+                        "(id, is_ready, refreshed_at) VALUES (1, 0, NULL)"
+                    )
+                else:
+                    connection.execute(
+                        "UPDATE series_summary_state SET is_ready = 0, "
+                        "refreshed_at = NULL WHERE id = 1"
                     )
 
             final_cover_dir = self.cover_root / str(new_library_id)
@@ -936,6 +1113,10 @@ class CategoryMigrationEngine:
                 "skipped_duplicate_books_count": skipped_duplicate_books,
                 "fallback_books_count": fallback_books,
                 "offsets_count": imported_offsets,
+                "user_progress_count": imported_progress,
+                "skipped_user_progress_count": skipped_progress,
+                "user_favorites_count": imported_favorites,
+                "skipped_user_favorites_count": skipped_favorites,
                 "covers_count": len(staged_names),
                 "backup_path": str(backup_path) if backup_path else "",
                 "package_path": str(package),
@@ -944,7 +1125,7 @@ class CategoryMigrationEngine:
             if connection is not None and not database_committed:
                 try:
                     connection.rollback()
-                except sqlite3.Error:
+                except Exception:
                     pass
             if not database_committed:
                 if moved_stage and final_cover_dir is not None:

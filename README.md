@@ -20,10 +20,22 @@
 - MariaDB 모드는 `PyMySQL 1.1` 이상이 필요하며 호스트·포트·사용자·비밀번호·DB 접두어를 입력합니다.
 - 자동 감지는 FF의 `DB_ENGINE`, `DBMS` 환경변수와 MariaDB 설정을 확인합니다. 연결 실패 시 남아 있는 SQLite 파일로 자동 전환하지 않습니다.
 - 상태 요약, 문제 도서, 스캔 상태, 시리즈 누락, 표지 검사, 고아 표지 정리, Google Drive 연동과 읽기 전용 SQL은 두 엔진을 지원합니다.
-- Mate의 통DB 패키지 이관은 SQLite DB 파일 교체 방식이므로 MariaDB에서는 실행하지 않습니다. BookOasis 공식 이관 도구를 사용해야 합니다.
-- Mate 내 카테고리 패키지 이관도 현재 SQLite 대상으로 제한됩니다. MariaDB 카테고리 이관은 BookOasis v1.8.7 이상의 공식 `tools/export_category.py`, `tools/import_category.py`를 사용합니다.
+- 카테고리 패키지 이관은 공식 2.0 데이터 형식을 사용하며 SQLite와 MariaDB에서 내보내기·신규 가져오기·기존 카테고리 병합을 지원합니다.
+- 통DB 이관은 SQLite 파일 패키지와 MariaDB 논리 백업 패키지를 엔진별로 지원합니다. MariaDB에서는 FF 컨테이너에 `mariadb-dump`와 `mariadb` 또는 호환 `mysql` 클라이언트가 필요합니다.
+- SQLite와 MariaDB 통DB 패키지는 서로 교차 복원할 수 없습니다.
 
 ## Changelog
+
+- v1.4.0 (2026-08-09)
+  - MariaDB 이관 지원
+    - 카테고리 내보내기·가져오기·병합을 공통 쓰기 어댑터와 트랜잭션으로 전환.
+    - Kavita → BookOasis 이관의 대상 DB로 MariaDB 지원 추가.
+    - 일반·성인·오디오북 DB를 `mariadb-dump` 논리 패키지로 내보내고 동일 엔진에 복원하는 통DB 이관 추가.
+  - 안전성 및 호환성
+    - MariaDB 통DB 패키지 manifest의 파일 크기와 SHA-256을 검사하고 실제 복원 전 논리 백업을 강제.
+    - 복원·경로 변경·무결성 검사 실패 시 기존 MariaDB 논리 백업으로 롤백.
+    - 기존 SQLite 2개 DB 통DB 패키지를 계속 지원하며 오디오북 DB가 있는 새 패키지는 함께 처리.
+    - DB 자격증명을 명령줄에 노출하지 않고 권한 제한 임시 client 설정으로 전달.
 
 - v1.3.0 (2026-08-08)
   - SQLite·MariaDB 이중 엔진 지원

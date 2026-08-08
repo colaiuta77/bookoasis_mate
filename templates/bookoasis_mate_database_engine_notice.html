@@ -1,6 +1,6 @@
-<!-- MariaDB에서 SQLite 파일 이관 기능이 제한됨을 안내합니다. -->
+<!-- 선택한 DB 엔진에 맞는 이관 패키지와 필수 도구를 안내합니다. -->
 {% if arg.get('database_engine', {}).get('resolved_engine') == 'mariadb' %}
-<div class="alert alert-warning">
-  현재 DB 엔진은 MariaDB입니다. Mate의 카테고리·통DB 이관은 SQLite 파일 패키지 전용이므로 실행할 수 없습니다. BookOasis 공식 이관 도구를 사용하세요.
+<div class="alert alert-info">
+  현재 DB 엔진은 MariaDB입니다. 카테고리 이관은 공식 2.0 데이터 패키지를 사용하고, 통DB 이관은 <code>mariadb-dump</code>와 <code>mariadb</code> 클라이언트로 논리 백업·복원합니다. SQLite 통DB 패키지와 MariaDB 통DB 패키지는 서로 교차 적용할 수 없습니다.
 </div>
 {% endif %}

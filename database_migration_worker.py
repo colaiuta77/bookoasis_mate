@@ -156,6 +156,11 @@ def run_worker(config_path, status_path, stop_path):
     config = _read_json(config_path)
     if not isinstance(config, dict):
         raise ValueError("통DB 이관 작업 설정을 읽을 수 없습니다.")
+    if config.get("delete_config_after_read"):
+        try:
+            Path(config_path).unlink()
+        except FileNotFoundError:
+            pass
     if hasattr(os, "nice"):
         try:
             os.nice(5)
@@ -193,6 +198,8 @@ def run_worker(config_path, status_path, stop_path):
                 target_db_path,
                 config.get("target_cover_root"),
                 config["work_dir"],
+                database_settings=config,
+                target_db_type=target_db_type,
                 should_stop=stop_file.exists,
                 on_progress=writer.progress,
             )
@@ -219,6 +226,7 @@ def run_worker(config_path, status_path, stop_path):
                 ).health(),
                 should_stop=stop_file.exists,
                 on_progress=writer.progress,
+                database_settings=config,
             )
             if package_action == "export":
                 result = engine.export_package(

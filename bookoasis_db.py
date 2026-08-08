@@ -36,6 +36,10 @@ class CursorProxy:
     def rowcount(self):
         return self._cursor.rowcount
 
+    @property
+    def lastrowid(self):
+        return self._cursor.lastrowid
+
     def _row(self, value):
         if value is None:
             return None
@@ -88,6 +92,33 @@ class ConnectionProxy:
                 f"MariaDB 조회 실패: {error}"
             ) from error
         return CursorProxy(cursor)
+
+    def executemany(self, sql, parameters):
+        values = [tuple(item or ()) for item in parameters]
+        if self.engine == "sqlite":
+            return CursorProxy(self._connection.executemany(sql, values))
+        cursor = self._connection.cursor()
+        try:
+            cursor.executemany(convert_placeholders(sql), values)
+        except Exception as error:
+            cursor.close()
+            raise BookOasisDatabaseError(
+                f"MariaDB 쿼리 실행 실패: {error}"
+            ) from error
+        return CursorProxy(cursor)
+
+    def begin(self, immediate=False):
+        if self.engine == "sqlite":
+            statement = "BEGIN IMMEDIATE" if immediate else "BEGIN"
+            self._connection.execute(statement)
+        else:
+            self._connection.begin()
+
+    def commit(self):
+        self._connection.commit()
+
+    def rollback(self):
+        self._connection.rollback()
 
     def close(self):
         self._connection.close()
@@ -183,31 +214,35 @@ class BookOasisDatabaseAdapter:
             database=self.database_name(db_type) if self.engine == "mariadb" else "",
         )
 
-    def connect(self, target):
+    def connect(self, target, readonly=True):
         if target.engine != self.engine:
             raise BookOasisDatabaseError("DB 대상과 선택된 엔진이 일치하지 않습니다.")
         if self.engine == "sqlite":
-            return self._connect_sqlite(target)
-        return self._connect_mariadb(target)
+            return self._connect_sqlite(target, readonly=readonly)
+        return self._connect_mariadb(target, readonly=readonly)
 
     @staticmethod
-    def _connect_sqlite(target):
+    def _connect_sqlite(target, readonly=True):
         if not target.path:
             raise BookOasisDatabaseError(f"{target.label} DB 경로가 비어 있습니다.")
         path = Path(target.path).expanduser()
         if not path.is_file():
             raise BookOasisDatabaseError(f"DB 파일을 찾을 수 없습니다: {target.path}")
         try:
-            uri = f"{path.resolve().as_uri()}?mode=ro"
-            connection = sqlite3.connect(uri, uri=True, timeout=10)
+            if readonly:
+                uri = f"{path.resolve().as_uri()}?mode=ro"
+                connection = sqlite3.connect(uri, uri=True, timeout=30)
+            else:
+                connection = sqlite3.connect(str(path.resolve()), timeout=30)
             connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA query_only = ON")
-            connection.execute("PRAGMA busy_timeout = 10000")
+            if readonly:
+                connection.execute("PRAGMA query_only = ON")
+            connection.execute("PRAGMA busy_timeout = 30000")
             return ConnectionProxy(connection, target)
         except sqlite3.Error as error:
             raise BookOasisDatabaseError(f"SQLite 연결 실패: {error}") from error
 
-    def _connect_mariadb(self, target):
+    def _connect_mariadb(self, target, readonly=True):
         module = self._pymysql_module
         if module is None:
             try:
@@ -232,7 +267,7 @@ class BookOasisDatabaseAdapter:
                 password=str(self.settings.get("mariadb_password") or ""),
                 database=target.database,
                 charset="utf8mb4",
-                autocommit=True,
+                autocommit=bool(readonly),
                 cursorclass=module.cursors.DictCursor,
                 connect_timeout=bounded_int(
                     self.settings.get("mariadb_connect_timeout"), 10, 1, 60

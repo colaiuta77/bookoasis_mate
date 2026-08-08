@@ -10,6 +10,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from .migration_database import MigrationDatabaseContext
+except ImportError:
+    from migration_database import MigrationDatabaseContext
+
 
 class KavitaMigrationStopped(RuntimeError):
     pass
@@ -75,14 +80,34 @@ class KavitaMigrationEngine:
         work_dir,
         should_stop=None,
         on_progress=None,
+        database_settings=None,
+        target_db_type="general",
+        database_context=None,
     ):
         self.kavita_db_path = self._required_file(kavita_db_path, "Kavita DB 파일")
         self.kavita_cover_root = self._optional_directory(
             kavita_cover_root, "Kavita 표지 디렉터리"
         )
-        self.bookoasis_db_path = self._required_file(
-            bookoasis_db_path, "BookOasis DB 파일"
-        )
+        self.target_db_type = str(target_db_type or "general").strip().lower()
+        self.database_context = database_context
+        if self.database_context is None and database_settings:
+            context_settings = dict(database_settings)
+            context_settings.setdefault(
+                f"{self.target_db_type}_db_path",
+                bookoasis_db_path,
+            )
+            self.database_context = MigrationDatabaseContext(
+                context_settings,
+                work_dir=work_dir,
+                should_stop=should_stop,
+                on_progress=on_progress,
+            )
+        if self.database_context is not None and self.database_context.engine == "mariadb":
+            self.bookoasis_db_path = None
+        else:
+            self.bookoasis_db_path = self._required_file(
+                bookoasis_db_path, "BookOasis DB 파일"
+            )
         self.bookoasis_cover_root = self._optional_directory(
             bookoasis_cover_root, "BookOasis 표지 디렉터리"
         )
@@ -134,8 +159,18 @@ class KavitaMigrationEngine:
         connection.execute("PRAGMA busy_timeout = 30000")
         return connection
 
+    def _target_connect(self, readonly=False):
+        if self.database_context is not None:
+            return self.database_context.connect(
+                self.target_db_type,
+                readonly=readonly,
+            )
+        return self._connect(self.bookoasis_db_path, readonly=readonly)
+
     @staticmethod
     def _tables(connection):
+        if hasattr(connection, "tables"):
+            return connection.tables()
         return {
             row["name"]
             for row in connection.execute(
@@ -145,6 +180,8 @@ class KavitaMigrationEngine:
 
     @staticmethod
     def _columns(connection, table):
+        if hasattr(connection, "columns"):
+            return connection.columns(table)
         safe = str(table).replace('"', '""')
         return {
             row["name"]
@@ -449,7 +486,7 @@ class KavitaMigrationEngine:
             connection.close()
 
     def _target_snapshot(self):
-        connection = self._connect(self.bookoasis_db_path, readonly=True)
+        connection = self._target_connect(readonly=True)
         try:
             tables = self._tables(connection)
             if not {"books", "libraries", "users"}.issubset(tables):
@@ -706,6 +743,11 @@ class KavitaMigrationEngine:
         }
 
     def _backup_database(self):
+        if self.database_context is not None:
+            return self.database_context.backup(
+                self.target_db_type,
+                reason="before_kavita",
+            )
         backup_dir = self.work_dir / "backups"
         backup_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -909,10 +951,7 @@ class KavitaMigrationEngine:
                 len(migration_books),
                 "Kavita 데이터를 준비하고 있습니다.",
             )
-            schema_connection = self._connect(
-                self.bookoasis_db_path,
-                readonly=True,
-            )
+            schema_connection = self._target_connect(readonly=True)
             try:
                 columns = self._columns(schema_connection, "books")
                 library_columns = self._columns(
@@ -938,11 +977,11 @@ class KavitaMigrationEngine:
                 )
             preview["cover_candidates_count"] = converted_covers
 
-            connection = self._connect(
-                self.bookoasis_db_path,
-                readonly=False,
-            )
-            connection.execute("BEGIN IMMEDIATE")
+            connection = self._target_connect(readonly=False)
+            if hasattr(connection, "begin"):
+                connection.begin(immediate=True)
+            else:
+                connection.execute("BEGIN IMMEDIATE")
             mapped_library_paths = self._mapped_library_paths(
                 books,
                 library_paths,
@@ -958,13 +997,11 @@ class KavitaMigrationEngine:
                 physical_path = "\n".join(paths)
                 library_id = library_cache.get(library_name)
                 if library_id is None:
-                    connection.execute(
+                    insert_cursor = connection.execute(
                         "INSERT INTO libraries (name, physical_path) VALUES (?, ?)",
                         (library_name, physical_path),
                     )
-                    library_id = int(connection.execute(
-                        "SELECT last_insert_rowid()"
-                    ).fetchone()[0])
+                    library_id = int(insert_cursor.lastrowid)
                     library_cache[library_name] = library_id
                 elif "physical_path" in library_columns:
                     connection.execute(
@@ -1025,7 +1062,7 @@ class KavitaMigrationEngine:
                         for field in active_fields
                     ]
                     assignments = [
-                        f'"{field}"=?' for field in active_fields
+                        f'`{field}`=?' for field in active_fields
                     ]
                     for field, value in (
                         ("library_id", library_id),
@@ -1033,7 +1070,7 @@ class KavitaMigrationEngine:
                         ("total_pages", total_pages),
                     ):
                         if field in columns:
-                            assignments.append(f'"{field}"=?')
+                            assignments.append(f'`{field}`=?')
                             values.append(value)
                     if lock_metadata and "metadata_locked" in columns:
                         assignments.append("metadata_locked=1")
@@ -1116,7 +1153,7 @@ class KavitaMigrationEngine:
                         fields = list(insert_values)
                         placeholders = ", ".join("?" for _ in fields)
                         quoted_fields = ", ".join(
-                            f'"{field}"' for field in fields
+                            f'`{field}`' for field in fields
                         )
                         statement = (
                             "INSERT INTO books "
@@ -1179,15 +1216,26 @@ class KavitaMigrationEngine:
                 )
 
             if import_progress and mapped_progress:
-                progress_statement = """
-                    INSERT INTO user_progress
-                    (book_id, user_id, pages_read, is_completed, last_read_at)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(book_id, user_id) DO UPDATE SET
-                        pages_read=excluded.pages_read,
-                        is_completed=excluded.is_completed,
-                        last_read_at=excluded.last_read_at
-                """
+                if self.database_context is not None and self.database_context.engine == "mariadb":
+                    progress_statement = """
+                        INSERT INTO user_progress
+                        (book_id, user_id, pages_read, is_completed, last_read_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON DUPLICATE KEY UPDATE
+                            pages_read=VALUES(pages_read),
+                            is_completed=VALUES(is_completed),
+                            last_read_at=VALUES(last_read_at)
+                    """
+                else:
+                    progress_statement = """
+                        INSERT INTO user_progress
+                        (book_id, user_id, pages_read, is_completed, last_read_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT(book_id, user_id) DO UPDATE SET
+                            pages_read=excluded.pages_read,
+                            is_completed=excluded.is_completed,
+                            last_read_at=excluded.last_read_at
+                    """
                 for batch_start in range(
                     0,
                     len(mapped_progress),

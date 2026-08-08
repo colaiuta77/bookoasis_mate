@@ -404,7 +404,7 @@ function databaseMigrationRenderKavita(data, root) {
 function databaseMigrationRenderBookOasis(data, root) {
   var databaseOnly = data.inspection_scope === 'database';
   root.append($('<div>').append($('<strong>').text(
-    'DB 2개 · 보관함 ' + Number(data.libraries_count || 0).toLocaleString() + '개 · ' +
+    'DB ' + Number(data.database_count || (data.databases || []).length || 2).toLocaleString() + '개 · 보관함 ' + Number(data.libraries_count || 0).toLocaleString() + '개 · ' +
     '도서 ' + Number(data.books_count || 0).toLocaleString() + '권 · ' +
     (databaseOnly
       ? 'DB 표지 참조 ' + Number(data.cover_references_count || 0).toLocaleString() + '건'
@@ -422,12 +422,19 @@ function databaseMigrationRenderBookOasis(data, root) {
     Number(data.changed_books_count || 0).toLocaleString() + '권'
   ));
   (data.databases || []).forEach(function(item) {
+    var dbLabel = item.db_type === 'audiobook' ? '오디오북 DB' : (item.db_type === 'adult' ? '성인 DB' : '일반 DB');
+    var mediaCount = item.db_type === 'audiobook'
+      ? Number(item.audiobooks_count || 0).toLocaleString() + '개'
+      : Number(item.books_count || 0).toLocaleString() + '권';
     root.append($('<div>').addClass('mt-2').text(
-      (item.db_type === 'adult' ? '성인 DB' : '일반 DB') + ' · 보관함 ' +
-      Number(item.libraries_count || 0).toLocaleString() + '개 · 도서 ' +
-      Number(item.books_count || 0).toLocaleString() + '권 · quick_check ok'
+      dbLabel + ' · 보관함 ' + Number(item.libraries_count || 0).toLocaleString() +
+      '개 · 항목 ' + mediaCount + ' · ' +
+      (data.package_engine === 'mariadb' ? 'SHA-256 ok' : 'quick_check ok')
     ));
   });
+  if (data.validation_note) {
+    root.append($('<div>').addClass('text-info mt-2').text(data.validation_note));
+  }
   if ((data.source_paths || []).length) {
     root.append($('<div>').addClass('doctor-muted mt-2').text('공유 DB 원본 경로'));
     (data.source_paths || []).forEach(function(path) {

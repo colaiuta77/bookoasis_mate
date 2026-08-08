@@ -334,14 +334,11 @@ def _run_category_migration(config, writer, stop_file):
         config.get("cover_root_path"),
         should_stop=stop_file.exists,
         on_progress=writer.category_progress,
+        database_settings=config,
     )
     if operation == "export":
         db_type = str(config.get("export_db_type") or "general")
-        target_db_path = (
-            config.get("target_adult_db")
-            if db_type == "adult"
-            else config.get("target_general_db")
-        )
+        target_db_path = config.get(f"target_{db_type}_db")
         result = engine.export_categories(
             target_db_path,
             db_type,
@@ -351,11 +348,7 @@ def _run_category_migration(config, writer, stop_file):
         inspection = engine.inspect_package(config.get("import_package"))
         requested_type = str(config.get("import_db_type") or "auto")
         db_type = inspection["db_type"] if requested_type == "auto" else requested_type
-        target_db_path = (
-            config.get("target_adult_db")
-            if db_type == "adult"
-            else config.get("target_general_db")
-        )
+        target_db_path = config.get(f"target_{db_type}_db")
         result = engine.import_category(
             target_db_path,
             config.get("import_package"),

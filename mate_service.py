@@ -374,13 +374,6 @@ class BookOasisMateService:
     def database_engine_info(self, settings=None):
         return self.engine(settings).database_adapter.public_info()
 
-    def _require_sqlite_migration(self, feature):
-        if self.database_engine_info()["resolved_engine"] != "sqlite":
-            raise ValueError(
-                f"{feature}은 현재 Mate의 SQLite 파일 이관 전용 기능입니다. "
-                "MariaDB에서는 BookOasis 공식 이관 도구를 사용해 주세요."
-            )
-
     def admin_client(self, settings=None):
         settings = settings or self.settings()
         fingerprint = (
@@ -1980,12 +1973,12 @@ class BookOasisMateService:
             settings.get("cover_root_path"),
             should_stop=self._migration_stop.is_set,
             on_progress=on_progress,
+            database_settings=settings,
         )
 
     def migration_libraries(self, db_type="general"):
-        self._require_sqlite_migration("카테고리 이관")
         target = self.engine().get_target(db_type)
-        data = CategoryMigrationEngine.libraries(target.path)
+        data = self._migration_engine().list_libraries(target.path, db_type)
         self._debug("이관 카테고리 목록 조회", db_type=db_type, count=len(data))
         return data
 
@@ -2058,7 +2051,6 @@ class BookOasisMateService:
             del logs[:-300]
 
     def start_migration(self):
-        self._require_sqlite_migration("카테고리 이관")
         config = self.migration_config()
         operation = config.get("operation")
         if operation not in {"export", "import"}:
@@ -2112,15 +2104,27 @@ class BookOasisMateService:
         worker_config = {
             **config,
             "job_type": "category_migration",
+            "delete_config_after_read": True,
             "cover_root_path": settings.get("cover_root_path"),
             "target_general_db": settings.get("general_db_path"),
             "target_adult_db": settings.get("adult_db_path"),
+            "target_audiobook_db": settings.get("audiobook_db_path"),
+            "db_engine": settings.get("db_engine"),
+            "mariadb_host": settings.get("mariadb_host"),
+            "mariadb_port": settings.get("mariadb_port"),
+            "mariadb_user": settings.get("mariadb_user"),
+            "mariadb_password": settings.get("mariadb_password"),
+            "mariadb_database_prefix": settings.get("mariadb_database_prefix"),
+            "mariadb_connect_timeout": settings.get("mariadb_connect_timeout"),
+            "mariadb_read_timeout": settings.get("mariadb_read_timeout"),
+            "mariadb_write_timeout": settings.get("mariadb_write_timeout"),
         }
         try:
             process = self._launch_maintenance_worker(
                 paths,
                 worker_config,
                 self._migration_status,
+                sensitive_config=True,
             )
         except Exception as error:
             with self._lock:
@@ -2282,6 +2286,8 @@ class BookOasisMateService:
                 target.path,
                 settings.get("cover_root_path"),
                 config["work_dir"],
+                database_settings=settings,
+                target_db_type=config["target_db_type"],
                 **common,
             )
         if config["source_type"] == "bookoasis":
@@ -2294,12 +2300,12 @@ class BookOasisMateService:
                     settings.get("bookoasis_url"),
                     settings.get("api_timeout", 30),
                 ).health(),
+                database_settings=settings,
                 **common,
             )
         raise ValueError("지원하지 않는 이관 원본 유형입니다.")
 
     def inspect_database_migration(self, values=None):
-        self._require_sqlite_migration("통DB 이관")
         config = self.database_migration_config(values)
         engine = self._database_migration_engine(config)
         if config["source_type"] == "kavita":
@@ -2479,11 +2485,22 @@ class BookOasisMateService:
             paths["stop"].unlink()
         worker_config = {
             **config,
+            "delete_config_after_read": True,
             "target_general_db": settings.get("general_db_path"),
             "target_adult_db": settings.get("adult_db_path"),
+            "target_audiobook_db": settings.get("audiobook_db_path"),
             "target_cover_root": settings.get("cover_root_path"),
             "bookoasis_url": settings.get("bookoasis_url"),
             "api_timeout": settings.get("api_timeout", 30),
+            "db_engine": settings.get("db_engine"),
+            "mariadb_host": settings.get("mariadb_host"),
+            "mariadb_port": settings.get("mariadb_port"),
+            "mariadb_user": settings.get("mariadb_user"),
+            "mariadb_password": settings.get("mariadb_password"),
+            "mariadb_database_prefix": settings.get("mariadb_database_prefix"),
+            "mariadb_connect_timeout": settings.get("mariadb_connect_timeout"),
+            "mariadb_read_timeout": settings.get("mariadb_read_timeout"),
+            "mariadb_write_timeout": settings.get("mariadb_write_timeout"),
         }
         self._database_migration_status_path = paths["status"]
         self._database_migration_stop_path = paths["stop"]
@@ -2491,6 +2508,8 @@ class BookOasisMateService:
             paths["config"],
             worker_config,
         )
+        if os.name != "nt":
+            os.chmod(paths["config"], 0o600)
         self._write_database_migration_json(
             paths["status"],
             self._database_migration_status,
@@ -2537,7 +2556,6 @@ class BookOasisMateService:
             del logs[:-300]
 
     def start_database_migration(self, values=None):
-        self._require_sqlite_migration("통DB 이관")
         config = self.database_migration_config(values)
         if config["source_type"] not in {"kavita", "bookoasis"}:
             raise ValueError("이관 원본 유형이 올바르지 않습니다.")

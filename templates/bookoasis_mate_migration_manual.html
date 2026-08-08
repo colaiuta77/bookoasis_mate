@@ -5,7 +5,7 @@
 
 <div class="doctor-section doctor-card">
   <h3>카테고리 이관 매뉴얼</h3>
-  <p>BookOasis 공식 카테고리 패키지 형식 1.2를 사용해 도서 메타데이터, 뷰어 offset과 표지를 내보내거나 신규·기존 카테고리로 가져옵니다.</p>
+  <p>BookOasis 공식 카테고리 패키지 형식 2.0을 사용해 도서 메타데이터, 뷰어 offset, 진행률·즐겨찾기와 표지를 내보내거나 신규·기존 카테고리로 가져옵니다.</p>
 </div>
 
 <div class="doctor-section doctor-card">
@@ -36,7 +36,7 @@
     <li>설정을 저장하고 복사 상태에서 시작을 누릅니다.</li>
   </ol>
   <p>대상 경로는 원본 경로 순서대로 대응합니다. 대상 경로가 부족하면 남은 도서는 첫 번째 대상 경로로 가져옵니다.</p>
-  <p>가져오기 전에 ZIP CRC와 DB quick_check를 검사합니다. DB 백업을 켜면 <code>backups</code> 폴더에 SQLite 백업을 생성합니다.</p>
+  <p>가져오기 전에 ZIP CRC와 DB 무결성을 검사합니다. DB 백업을 켜면 <code>backups</code> 폴더에 SQLite 백업 또는 MariaDB 논리 백업을 생성합니다.</p>
 </div>
 
 <div class="doctor-section doctor-card">
@@ -54,7 +54,8 @@
   <h4>주의 사항</h4>
   <ul>
     <li>병합 대상은 공식 <code>--merge-to</code>와 같이 카테고리 ID로 지정합니다.</li>
-    <li>BookOasis DB가 FTS5를 사용하면 FlaskFarm Python의 SQLite도 FTS5를 지원해야 하며, 가져오기 전에 자동 검사합니다.</li>
+    <li>SQLite DB가 FTS5를 사용하면 FF Python의 SQLite도 FTS5를 지원해야 하며, 가져오기 전에 자동 검사합니다.</li>
+    <li>MariaDB 백업에는 FF 컨테이너에서 실행 가능한 <code>mariadb-dump</code> 또는 <code>mysqldump</code>가 필요합니다.</li>
     <li>실행 중인 가져오기 작업을 중지하면 DB 트랜잭션과 임시 표지를 정리합니다.</li>
     <li>가져오기 중에는 BookOasis 스캔과 메타데이터 변경 작업을 피하는 것이 안전합니다.</li>
   </ul>

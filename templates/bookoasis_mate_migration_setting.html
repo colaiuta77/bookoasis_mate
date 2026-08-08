@@ -21,7 +21,7 @@
 
   <div id="migration_export_panel" class="doctor-section doctor-card">
     <h4>내보내기 설정</h4>
-    <p class="doctor-muted">선택한 카테고리의 도서 메타데이터, 뷰어 offset과 표지를 공식 1.2 패키지로 저장합니다.</p>
+    <p class="doctor-muted">선택한 카테고리의 도서 메타데이터, 뷰어 offset, 진행률·즐겨찾기와 표지를 공식 2.0 패키지로 저장합니다.</p>
     <div class="form-group row">
       <label class="col-sm-3 col-form-label">대상 DB</label>
       <div class="col-sm-9">
@@ -99,7 +99,7 @@
         <small class="form-text text-muted">개수 제한 없이 한 줄에 하나씩 입력합니다. 원본 경로 순서대로 대응하며, 경로가 부족하면 남은 도서는 첫 번째 대상 경로를 사용합니다.</small>
       </div>
     </div>
-    {{ macros.setting_checkbox('migration_backup_before_import', '가져오기 전 DB 백업', value=arg['migration_backup_before_import'], desc=['SQLite backup API로 작업 디렉터리의 backups 폴더에 대상 DB를 백업합니다.', '안전을 위해 기본값은 On입니다.']) }}
+    {{ macros.setting_checkbox('migration_backup_before_import', '가져오기 전 DB 백업', value=arg['migration_backup_before_import'], desc=['SQLite는 backup API, MariaDB는 mariadb-dump로 작업 디렉터리의 backups 폴더에 대상 DB를 백업합니다.', '안전을 위해 기본값은 On입니다.']) }}
     <div id="migration_package_info" class="doctor-card doctor-muted">패키지 검사를 실행하면 원본 경로와 포함 항목을 표시합니다.</div>
   </div>
 </form>
@@ -215,6 +215,8 @@ function migrationRenderPackageInfo(data) {
     ' · 도서 ' + Number(data.books_count || 0).toLocaleString() + '권' +
     ' · 표지 ' + Number(data.covers_count || 0).toLocaleString() + '개' +
     ' · offset ' + Number(data.offsets_count || 0).toLocaleString() + '건' +
+    ' · 진행률 ' + Number(data.user_progress_count || 0).toLocaleString() + '건' +
+    ' · 즐겨찾기 ' + Number(data.user_favorites_count || 0).toLocaleString() + '건' +
     '<div class="mt-2"><strong>원본 DB 물리 경로</strong></div>' +
     (rootLines ? '<ul class="mb-0 mt-1">' + rootLines + '</ul>' : '<div class="doctor-muted mt-1">기록된 원본 경로가 없습니다.</div>')
   );
