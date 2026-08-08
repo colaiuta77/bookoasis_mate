@@ -358,7 +358,7 @@ function databaseMigrationRenderKavita(data, root) {
     }
   }
   root.append($('<div>').append($('<strong>').text(
-    '도서 ' + Number(data.books_count || 0).toLocaleString() + '권 · ' +
+    '도서 ' + Number(data.books_count || 0).toLocaleString() + '권 · 오디오북 ' + Number(data.audiobooks_count || 0).toLocaleString() + '개 · ' +
     '기존 도서 갱신 ' + Number(data.matched_books_count || 0).toLocaleString() + '권 · ' +
     '신규 도서 생성 ' + Number(data.new_books_count || 0).toLocaleString() + '권'
   )));

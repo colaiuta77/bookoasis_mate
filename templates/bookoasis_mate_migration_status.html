@@ -58,9 +58,14 @@ function migrationRenderStatus(data) {
     result.removeClass('doctor-muted');
     result.append($('<div>').append($('<strong>').text('내보낸 패키지 ' + Number(data.result.count || 0).toLocaleString() + '개')));
     (data.result.files || []).forEach(function(item) {
+      var isAudio = item.media_kind === 'audiobook' || item.db_type === 'audiobook';
+      var mediaSummary = isAudio
+        ? ' · 오디오북 ' + Number(item.audiobooks_count || 0).toLocaleString() + '개' +
+          ' · 트랙 ' + Number(item.audiobook_tracks_count || 0).toLocaleString() + '개'
+        : ' · 도서 ' + Number(item.books_count || 0).toLocaleString() + '권';
       result.append($('<div>').addClass('mt-1').text(
         (item.library_name || '') + ' · ' + (item.path || '') +
-        ' · 도서 ' + Number(item.books_count || 0).toLocaleString() + '권' +
+        mediaSummary +
         ' · 표지 ' + Number(item.covers_count || 0).toLocaleString() + '개'
       ));
     });
@@ -71,17 +76,23 @@ function migrationRenderStatus(data) {
       (isMerge ? '병합 카테고리 ' : '신규 카테고리 ') + (data.result.library_name || '') +
       ' (ID ' + Number(data.result.library_id || 0) + ')'
     )));
-    result.append($('<div>').addClass('mt-1').text(
-      '원본 도서 ' + Number(data.result.source_books_count || data.result.books_count || 0).toLocaleString() + '권' +
-      ' · 가져옴 ' + Number(data.result.books_count || 0).toLocaleString() + '권' +
-      ' · 중복 건너뜀 ' + Number(data.result.skipped_duplicate_books_count || 0).toLocaleString() + '권' +
-      ' · 표지 ' + Number(data.result.covers_count || 0).toLocaleString() + '개' +
-      ' · offset ' + Number(data.result.offsets_count || 0).toLocaleString() + '건'
+    var isAudio = data.result.media_kind === 'audiobook' || data.result.db_type === 'audiobook';
+    result.append($('<div>').addClass('mt-1').text(isAudio
+      ? '원본 오디오북 ' + Number(data.result.source_audiobooks_count || 0).toLocaleString() + '개' +
+        ' · 가져옴 ' + Number(data.result.audiobooks_count || 0).toLocaleString() + '개' +
+        ' · 중복 건너뜀 ' + Number(data.result.skipped_duplicate_audiobooks_count || 0).toLocaleString() + '개' +
+        ' · 트랙 ' + Number(data.result.audiobook_tracks_count || 0).toLocaleString() + '개' +
+        ' · 포스터 ' + Number(data.result.covers_count || 0).toLocaleString() + '개'
+      : '원본 도서 ' + Number(data.result.source_books_count || data.result.books_count || 0).toLocaleString() + '권' +
+        ' · 가져옴 ' + Number(data.result.books_count || 0).toLocaleString() + '권' +
+        ' · 중복 건너뜀 ' + Number(data.result.skipped_duplicate_books_count || 0).toLocaleString() + '권' +
+        ' · 표지 ' + Number(data.result.covers_count || 0).toLocaleString() + '개' +
+        ' · offset ' + Number(data.result.offsets_count || 0).toLocaleString() + '건'
     ));
     result.append($('<div>').addClass('mt-1').text(
       '대상 물리 경로 ' + Number((data.result.physical_paths || []).length).toLocaleString() + '개' +
       ' · 새로 추가한 경로 ' + Number((data.result.added_physical_paths || []).length).toLocaleString() + '개' +
-      ' · 첫 경로 폴백 ' + Number(data.result.fallback_books_count || 0).toLocaleString() + '권'
+      ' · 첫 경로 폴백 ' + Number(isAudio ? data.result.fallback_audiobooks_count || 0 : data.result.fallback_books_count || 0).toLocaleString() + (isAudio ? '개' : '권')
     ));
     if (data.result.backup_path) {
       result.append($('<div>').addClass('mt-1').text('DB 백업 · ' + data.result.backup_path));

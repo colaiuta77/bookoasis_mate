@@ -21,7 +21,7 @@
 
   <div id="migration_export_panel" class="doctor-section doctor-card">
     <h4>내보내기 설정</h4>
-    <p class="doctor-muted">선택한 카테고리의 도서 메타데이터, 뷰어 offset, 진행률·즐겨찾기와 표지를 공식 2.0 패키지로 저장합니다.</p>
+    <p class="doctor-muted">선택한 도서·오디오북 카테고리의 메타데이터, 진행률과 표지·포스터를 공식 2.0 패키지로 저장합니다.</p>
     <div class="form-group row">
       <label class="col-sm-3 col-form-label">대상 DB</label>
       <div class="col-sm-9">
@@ -30,6 +30,7 @@
           {% if arg.get('adult_enabled') == 'True' %}
           <option value="adult" {% if arg['migration_export_db_type'] == 'adult' %}selected{% endif %}>성인 DB</option>
           {% endif %}
+          <option value="audiobook" {% if arg['migration_export_db_type'] == 'audiobook' %}selected{% endif %}>오디오북 DB</option>
         </select>
       </div>
     </div>
@@ -78,6 +79,7 @@
           {% if arg.get('adult_enabled') == 'True' %}
           <option value="adult" {% if arg['migration_import_db_type'] == 'adult' %}selected{% endif %}>성인 DB</option>
           {% endif %}
+          <option value="audiobook" {% if arg['migration_import_db_type'] == 'audiobook' %}selected{% endif %}>오디오북 DB</option>
         </select>
       </div>
     </div>
@@ -205,6 +207,16 @@ function migrationLoadPackages() {
 }
 
 function migrationRenderPackageInfo(data) {
+  var isAudio = data.media_kind === 'audiobook' || data.db_type === 'audiobook';
+  var mediaSummary = isAudio
+    ? ' · 오디오북 ' + Number(data.audiobooks_count || 0).toLocaleString() + '개' +
+      ' · 트랙 ' + Number(data.audiobook_tracks_count || 0).toLocaleString() + '개' +
+      ' · 재생 진행률 ' + Number(data.audiobook_progress_count || 0).toLocaleString() + '건' +
+      ' · 트랙 진행률 ' + Number(data.audiobook_track_progress_count || 0).toLocaleString() + '건'
+    : ' · 도서 ' + Number(data.books_count || 0).toLocaleString() + '권' +
+      ' · offset ' + Number(data.offsets_count || 0).toLocaleString() + '건' +
+      ' · 진행률 ' + Number(data.user_progress_count || 0).toLocaleString() + '건' +
+      ' · 즐겨찾기 ' + Number(data.user_favorites_count || 0).toLocaleString() + '건';
   var rootLines = (data.physical_paths || []).map(function(path, index) {
     return '<li><code>' + bookoasisMateEscape(path) + '</code></li>';
   }).join('');
@@ -212,11 +224,8 @@ function migrationRenderPackageInfo(data) {
     '<strong>' + bookoasisMateEscape(data.library_name || '') + '</strong><br>' +
     '패키지 버전 ' + bookoasisMateEscape(data.export_version) +
     ' · ' + bookoasisMateEscape(data.db_type) +
-    ' · 도서 ' + Number(data.books_count || 0).toLocaleString() + '권' +
+    mediaSummary +
     ' · 표지 ' + Number(data.covers_count || 0).toLocaleString() + '개' +
-    ' · offset ' + Number(data.offsets_count || 0).toLocaleString() + '건' +
-    ' · 진행률 ' + Number(data.user_progress_count || 0).toLocaleString() + '건' +
-    ' · 즐겨찾기 ' + Number(data.user_favorites_count || 0).toLocaleString() + '건' +
     '<div class="mt-2"><strong>원본 DB 물리 경로</strong></div>' +
     (rootLines ? '<ul class="mb-0 mt-1">' + rootLines + '</ul>' : '<div class="doctor-muted mt-1">기록된 원본 경로가 없습니다.</div>')
   );
@@ -260,7 +269,13 @@ $('#migration_package_inspect_btn').click(function() {
     work_dir:$('#migration_work_dir').val(),
     package_path:$('#migration_import_package').val()
   }, function(ret) {
-    if (ret.data) migrationRenderPackageInfo(ret.data);
+    if (ret.data) {
+      migrationRenderPackageInfo(ret.data);
+      if ($('#migration_import_mode').val() === 'merge') {
+        $('#migration_import_db_type').val(ret.data.db_type || 'general');
+        migrationLoadMergeLibraries();
+      }
+    }
   });
 });
 $('#migration_save_btn').click(function(e) {

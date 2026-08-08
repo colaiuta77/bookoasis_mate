@@ -1999,7 +1999,11 @@ class BookOasisMateService:
         self._debug(
             "이관 패키지 검사 완료",
             db_type=data.get("db_type"),
-            books=data.get("books_count", 0),
+            media_count=(
+                data.get("audiobooks_count", 0)
+                if data.get("media_kind") == "audiobook"
+                else data.get("books_count", 0)
+            ),
             covers=data.get("covers_count", 0),
             roots=data.get("root_paths_count", 0),
         )
