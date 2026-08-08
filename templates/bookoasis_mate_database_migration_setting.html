@@ -25,7 +25,7 @@
 
   <div id="kavita_source_fields" class="doctor-section doctor-card">
     <h4>Kavita → BookOasis 설정</h4>
-    <p class="doctor-muted">Kavita의 도서 메타데이터와 선택한 사용자 진행률을 BookOasis로 이관합니다.</p>
+    <p class="doctor-muted">Kavita의 도서·메타데이터·표지와 선택한 사용자 진행률을 BookOasis 일반 또는 성인 DB로 이관합니다. 대상 DB 엔진은 SQLite와 MariaDB를 모두 지원합니다.</p>
     <div id="kavita_target_database_field" class="form-group row">
       <label class="col-sm-3 col-form-label">BookOasis 대상 DB</label>
       <div class="col-sm-9">
@@ -69,7 +69,7 @@
     {{ macros.setting_checkbox('kavita_import_covers', 'Kavita 표지 이관', value=arg.get('kavita_import_covers', 'True'), desc=['유효한 표지만 WebP로 변환합니다.']) }}
     {{ macros.setting_checkbox('kavita_import_progress', '독서 진행률 이관', value=arg.get('kavita_import_progress', 'False'), desc=['명시적으로 매핑한 사용자만 반영합니다.']) }}
     {{ macros.setting_checkbox('kavita_lock_metadata', '이관 메타데이터 잠금', value=arg.get('kavita_lock_metadata', 'True'), desc=['스캐너가 이관 메타데이터를 덮어쓰지 않도록 잠급니다.']) }}
-    {{ macros.setting_checkbox('kavita_backup_before_import', '실행 전 DB 백업', value=arg.get('kavita_backup_before_import', 'True'), desc=['실제 이관 전에 SQLite backup API로 백업합니다.']) }}
+    {{ macros.setting_checkbox('kavita_backup_before_import', '실행 전 DB 백업', value=arg.get('kavita_backup_before_import', 'True'), desc=['실제 이관 전에 SQLite는 backup API, MariaDB는 mariadb-dump로 선택한 일반 또는 성인 DB를 백업합니다.', 'MariaDB 백업에는 FF 컨테이너에서 실행 가능한 mariadb-dump 또는 mysqldump가 필요합니다.']) }}
     {{ macros.setting_checkbox('kavita_dry_run', 'Kavita Dry Run', value=arg.get('kavita_dry_run', 'True'), desc=['DB와 표지를 변경하지 않고 신규 생성·기존 갱신 예정 수를 계산합니다.']) }}
     <div class="text-right"><button type="button" id="database_migration_kavita_inspect_btn" class="btn btn-outline-info btn-sm database-migration-inspect-btn">DB 검사·자동 설정</button></div>
   </div>

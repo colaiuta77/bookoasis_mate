@@ -5,7 +5,7 @@
 
 <div class="doctor-section doctor-card">
   <h3>통DB 이관 매뉴얼</h3>
-  <p>Kavita의 메타데이터·진행률을 기존 BookOasis 도서에 적용하거나, BookOasis 전체 DB와 표지를 공유 패키지로 내보내고 가져옵니다.</p>
+  <p>Kavita 도서·메타데이터·표지와 진행률을 BookOasis에 새로 생성하거나 기존 항목에 적용하고, BookOasis 전체 DB와 표지를 공유 패키지로 내보내고 가져옵니다.</p>
 </div>
 
 <div class="doctor-section doctor-card">
@@ -16,7 +16,7 @@
     <li>미리보기에서 신규 생성·기존 갱신·경로 미일치 도서 수를 확인합니다.</li>
     <li>Dry Run 결과를 확인한 뒤 BookOasis 읽기·스캔 작업을 중지하고 실제 이관합니다.</li>
   </ol>
-  <p class="doctor-muted">선택한 Kavita 보관함과 도서는 BookOasis에 새로 생성하거나 기존 항목을 갱신합니다. 사용자 계정 자체는 만들지 않으며, 진행률은 매핑한 기존 BookOasis 사용자에게만 적용합니다.</p>
+  <p class="doctor-muted">대상은 BookOasis 일반 또는 성인 DB이며 SQLite와 MariaDB를 모두 지원합니다. 선택한 Kavita 보관함과 도서는 새로 생성하거나 기존 항목을 갱신합니다. 사용자 계정 자체는 만들지 않으며, 진행률은 매핑한 기존 BookOasis 사용자에게만 적용합니다.</p>
 
   <h5>2. BookOasis 패키지 내보내기</h5>
   <ol>
@@ -67,7 +67,7 @@ RUN apt-get update \
     <li>MariaDB 내보내기·가져오기에는 FF 컨테이너에 PyMySQL과 <code>mariadb-dump</code>·<code>mariadb</code> 또는 호환 <code>mysql</code> 클라이언트가 필요합니다.</li>
     <li>통DB 패키지는 생성 엔진과 같은 엔진에만 복원할 수 있습니다. SQLite와 MariaDB 사이의 변환 도구로 사용하지 않습니다.</li>
     <li>경로 매핑은 보관함과 도서 경로, 표준 <code>book_해시.webp</code> 참조·파일명에 적용됩니다. 사용자 지정 표지와 <code>series_</code> 표지는 이름을 바꾸지 않습니다.</li>
-    <li>압축 경로 이탈, 심볼릭 링크, 필수 DB 누락, SQLite 무결성 실패나 도서 경로 충돌이 발견되면 실제 적용이 차단됩니다.</li>
+    <li>압축 경로 이탈, 심볼릭 링크, 필수 DB 누락, DB 무결성 검사 실패나 도서·오디오북 경로 충돌이 발견되면 실제 적용이 차단됩니다.</li>
   </ul>
 </div>
 {% endblock %}

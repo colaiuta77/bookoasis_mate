@@ -13,8 +13,8 @@
 
   <h5>상태 요약</h5>
   <ul>
-    <li><strong>설명</strong> — 활성 도서의 정상·점검 필요 비율, 메타데이터 누락, 페이지 수·파일 크기 미기록과 최근 스캔 상태를 한 화면에 집계합니다.</li>
-    <li><strong>동작 방식</strong> — BookOasis DB를 읽기 전용으로 조회합니다. <strong>검사 실행 및 기록</strong>을 누르면 최신 값을 다시 계산해 검사 이력에 저장하며, 수동 DB 무결성 검사는 선택한 DB에 <code>PRAGMA quick_check</code>를 실행합니다.</li>
+    <li><strong>설명</strong> — 일반·성인 활성 도서의 정상·점검 필요 비율과 메타데이터·페이지 수·파일 크기 미기록, 오디오북·트랙 상태와 최근 스캔 상태를 한 화면에 집계합니다.</li>
+    <li><strong>동작 방식</strong> — BookOasis DB를 읽기 전용으로 조회합니다. <strong>검사 실행 및 기록</strong>을 누르면 최신 값을 다시 계산해 검사 이력에 저장합니다. 수동 DB 무결성 검사는 SQLite에 <code>PRAGMA quick_check</code>, MariaDB에 <code>CHECK TABLE ... QUICK</code>을 실행합니다.</li>
   </ul>
 
   <h5>문제 도서</h5>
@@ -102,10 +102,11 @@
 <div class="doctor-section doctor-card">
   <h4>오디오북 대응</h4>
   <ul>
-    <li>최신 BookOasis의 <code>db/media_audiobook.db</code>를 별도 DB로 연결하며 상태 요약, <code>quick_check</code>, DB 크기·보관함 확인, 스캔 상태와 읽기 전용 SQL에서 사용할 수 있습니다.</li>
+    <li>SQLite의 <code>db/media_audiobook.db</code> 또는 MariaDB의 오디오북 DB를 별도로 연결하며 상태 요약, DB 무결성 검사, DB 정보·보관함 확인, 스캔 상태와 읽기 전용 SQL에서 사용할 수 있습니다.</li>
     <li>Google Drive 변경 연동은 MP3·M4B·M4A·FLAC·AAC·WAV·OGG·OPUS·WMA 이벤트를 오디오북 보관함에 연결해 VFS 갱신과 보관함 스캔을 요청할 수 있습니다.</li>
     <li>오디오북은 <code>audiobooks</code>·<code>audiobook_tracks</code> 구조를 사용하므로 도서 전용 문제 도서, 시리즈 누락, 표지 검사, 개별 도서 재스캔과 메타데이터 적용 메뉴에는 표시하지 않습니다.</li>
-    <li>BookOasis 공식 카테고리 도구는 오디오북 패키지를 지원하지만, Mate의 카테고리 이관과 통DB 공유 패키지는 아직 일반·성인 도서용입니다. 오디오북 이관은 BookOasis 공식 <code>export_category.py</code>·<code>import_category.py</code>를 사용하세요.</li>
+    <li>Mate의 카테고리 이관은 오디오북·트랙·재생 진행률·포스터를 공식 2.0 패키지로 내보내고 신규 또는 기존 오디오북 카테고리로 가져올 수 있습니다.</li>
+    <li>통DB 공유 패키지는 SQLite에서 오디오북 DB가 존재하면 함께 포함하고, MariaDB에서는 일반·성인·오디오북 3개 DB를 한 세트로 내보내고 가져옵니다.</li>
   </ul>
 </div>
 
