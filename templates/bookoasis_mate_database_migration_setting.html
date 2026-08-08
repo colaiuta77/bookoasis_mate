@@ -85,12 +85,12 @@
     </div>
     <div id="bookoasis_export_panel" class="doctor-section doctor-card">
       <h4>내보내기 설정</h4>
-      <p class="doctor-muted">현재 일반·성인 DB와 전체 표지를 공유 가능한 두 개의 패키지로 저장합니다.</p>
+      <p class="doctor-muted">현재 일반·성인·오디오북 DB와 전체 표지를 공유 가능한 두 개의 패키지로 저장합니다.</p>
       <div class="form-group row mb-0">
         <label class="col-sm-3 col-form-label">패키지 이름</label>
         <div class="col-sm-9">
           <input type="text" id="bookoasis_export_name" name="bookoasis_export_name" class="form-control form-control-sm" value="{{ arg.get('bookoasis_export_name', 'dist_books') }}" placeholder="dist_books">
-          <small class="form-text text-muted">이관 작업 디렉터리에 `db_이름_날짜.tar.gz`와 `covers_이름_날짜.tar.gz`를 생성합니다. 일반·성인 DB는 SQLite backup API로 복사합니다.</small>
+          <small class="form-text text-muted">이관 작업 디렉터리에 `db_이름_날짜.tar.gz`와 `covers_이름_날짜.tar.gz`를 생성합니다. SQLite는 존재하는 일반·성인·오디오북 DB를 backup API로 복사하고, MariaDB는 3개 DB의 논리 백업을 생성합니다.</small>
         </div>
       </div>
       <div class="alert alert-info mt-3 mb-0">DB와 표지의 시점을 정확히 맞추려면 스캐너와 메타데이터 변경 작업을 멈춘 상태에서 내보내세요.</div>
@@ -98,7 +98,7 @@
     <div id="bookoasis_import_panel" class="doctor-section doctor-card">
       <h4>가져오기 설정</h4>
       <p class="doctor-muted">공유받은 DB와 표지 패키지를 검사하고 현재 BookOasis 설치에 교체 적용합니다.</p>
-      <div class="alert alert-warning">현재 일반·성인 DB와 전체 표지 디렉터리를 공유 패키지 세트로 교체합니다. 기존 DB와 병합하지 않으며 사용자·진행률도 공유 DB 내용으로 바뀝니다.</div>
+      <div class="alert alert-warning">패키지에 포함된 일반·성인·오디오북 DB와 전체 표지 디렉터리를 공유 패키지 세트로 교체합니다. 기존 DB와 병합하지 않으며 사용자·진행률도 공유 DB 내용으로 바뀝니다.</div>
       <input type="hidden" id="bookoasis_db_package_path" name="bookoasis_db_package_path" value="{{ arg.get('bookoasis_db_package_path', '') }}">
       <input type="hidden" id="bookoasis_cover_package_path" name="bookoasis_cover_package_path" value="{{ arg.get('bookoasis_cover_package_path', '') }}">
       <div class="form-group row">
@@ -137,7 +137,7 @@
           </div>
         </div>
       </div>
-      {{ macros.setting_checkbox('bookoasis_backup_before_import', '실행 전 DB 백업', value=arg.get('bookoasis_backup_before_import', 'True'), desc=['현재 일반·성인 DB를 SQLite backup API로 백업합니다.', '현재 표지 디렉터리는 같은 상위 경로에 별도 백업 디렉터리로 보존합니다.']) }}
+      {{ macros.setting_checkbox('bookoasis_backup_before_import', '실행 전 DB 백업', value=arg.get('bookoasis_backup_before_import', 'True'), desc=['SQLite는 패키지에 포함된 일반·성인·오디오북 DB 중 현재 존재하는 대상 DB를 backup API로 백업합니다.', 'MariaDB는 일반·성인·오디오북 3개 DB를 mariadb-dump 논리 백업으로 저장하며 실제 가져오기에서는 반드시 켜야 합니다.', '현재 표지 디렉터리는 같은 상위 경로에 별도 백업 디렉터리로 보존합니다.']) }}
       {{ macros.setting_checkbox('bookoasis_package_dry_run', 'BookOasis 패키지 Dry Run', value=arg.get('bookoasis_package_dry_run', 'True'), desc=['임시 DB와 임시 표지에서 압축 해제·경로 변경·무결성 검사를 끝까지 실행하되 현재 설치에는 적용하지 않습니다.']) }}
       <div class="alert alert-danger mt-3 mb-0">Dry Run을 끈 실제 가져오기는 상태 화면에서 매번 BookOasis 중지 여부를 확인해야 시작됩니다. 상태 API가 healthy로 응답하면 적용을 차단합니다.</div>
     </div>

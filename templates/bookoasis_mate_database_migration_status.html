@@ -187,7 +187,7 @@ $('#database_migration_start_btn').click(function(e) {
   e.preventDefault();
   var exporting = databaseMigrationSource === 'bookoasis' && databaseMigrationPackageAction === 'export';
   var message = exporting
-    ? '현재 일반·성인 DB와 전체 표지를 이관 작업 디렉터리로 내보내시겠습니까?\n\n정확한 시점의 패키지가 필요하면 스캐너와 메타데이터 변경 작업을 먼저 중지하세요.'
+    ? '현재 일반·성인·오디오북 DB와 전체 표지를 이관 작업 디렉터리로 내보내시겠습니까?\n\n정확한 시점의 패키지가 필요하면 스캐너와 메타데이터 변경 작업을 먼저 중지하세요.'
     : '저장된 설정으로 통DB 이관을 시작하시겠습니까?\n\nBookOasis 패키지 실제 가져오기라면 BookOasis 컨테이너와 모든 스캐너를 완전히 중지한 상태여야 합니다.';
   if (!confirm(message)) return;
   $('#database_migration_start_btn').prop('disabled', true);
