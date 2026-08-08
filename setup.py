@@ -54,6 +54,8 @@ setting = {
                 ],
             },
             {"uri": "sql", "name": "SQL 도구"},
+            {"uri": "font", "name": "커스텀 폰트"},
+            {"uri": "manual", "name": "매뉴얼"},
             {"uri": "log", "name": "로그"},
         ],
     },
@@ -86,7 +88,9 @@ except Exception as error:
 from .mod_main import ModuleMain
 from .mod_database_migration import ModuleDatabaseMigration
 from .mod_gdrive_scan import ModuleGDriveScan
+from .mod_font import ModuleFont
 from .mod_migration import ModuleMigration
+from .mod_manual import ModuleManual
 from .mod_sql import ModuleSql
 from .mod_setting import ModuleSetting
 
@@ -98,6 +102,8 @@ P.set_module_list(
         ModuleGDriveScan,
         ModuleSql,
         ModuleSetting,
+        ModuleFont,
+        ModuleManual,
     ]
 )
 logger = P.logger

@@ -187,6 +187,35 @@
 .doctor-font-dropzone:hover, .doctor-font-dropzone:focus, .doctor-font-dropzone.is-dragover { border-color:#6f42c1; background:rgba(111,66,193,.07); outline:none; }
 .doctor-font-list { margin:12px 0; border-top:1px solid #e9ecef; }
 .doctor-font-row { display:flex; justify-content:space-between; gap:16px; padding:8px 2px; border-bottom:1px solid #e9ecef; }
+.doctor-setting-tabs { margin-top:14px; }
+.doctor-setting-tabs .nav-link { padding:.7rem 1.1rem; }
+.doctor-setting-content { padding-top:2px; }
+.doctor-section-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:14px; }
+.doctor-section-heading h4 { margin-bottom:4px; }
+.doctor-db-action-grid { display:grid; grid-template-columns:repeat(3,minmax(220px,1fr)); gap:12px; }
+.doctor-db-action-card { display:flex; flex-direction:column; justify-content:space-between; gap:14px; min-height:142px; padding:15px; border:1px solid #dee2e6; border-radius:8px; background:rgba(127,127,127,.035); }
+.doctor-db-action-card > div:first-child { display:grid; grid-template-columns:auto 1fr; gap:4px 9px; align-items:center; }
+.doctor-db-action-card strong { font-size:1rem; }
+.doctor-db-action-card small { grid-column:2; color:#6c757d; font-family:monospace; }
+.doctor-db-kind { grid-row:1 / span 2; display:inline-flex; align-items:center; justify-content:center; min-width:44px; height:44px; padding:0 8px; border-radius:8px; color:#0d6efd; background:rgba(13,110,253,.12); font-size:.72rem; font-weight:700; }
+.doctor-db-kind-adult { color:#b45309; background:rgba(245,158,11,.16); }
+.doctor-db-kind-audio { color:#6f42c1; background:rgba(111,66,193,.14); }
+.doctor-db-action-buttons { display:flex; gap:7px; }
+.doctor-db-action-buttons .btn { flex:1 1 0; }
+.doctor-db-modal-summary { display:grid; grid-template-columns:repeat(4,minmax(110px,1fr)); gap:8px; margin-bottom:12px; }
+.doctor-db-modal-summary > div { padding:10px 12px; border-radius:6px; background:rgba(127,127,127,.07); }
+.doctor-db-modal-summary span, .doctor-db-modal-summary strong { display:block; }
+.doctor-db-modal-summary span { margin-bottom:3px; color:#6c757d; font-size:.75rem; }
+.doctor-db-modal-summary strong { font-size:.95rem; }
+.doctor-db-modal-identity { padding:10px 12px; border:1px solid #dee2e6; border-radius:6px; background:rgba(127,127,127,.03); }
+.doctor-db-modal-table { max-height:56vh; margin-top:14px; }
+.doctor-db-modal-table .doctor-table { margin-bottom:0; }
+.doctor-db-modal-empty { margin-top:14px; padding:24px 12px; }
+.doctor-db-modal-note { margin:10px 2px 0; }
+.doctor-guide-grid { display:grid; grid-template-columns:repeat(2,minmax(240px,1fr)); gap:10px; }
+.doctor-guide-grid > div { padding:12px 14px; border:1px solid #dee2e6; border-radius:7px; }
+.doctor-guide-grid strong, .doctor-guide-grid span { display:block; }
+.doctor-guide-grid span { margin-top:4px; color:#6c757d; font-size:.84rem; }
 @media (prefers-color-scheme: dark) {
   .doctor-card { border-color:#495057; }
   .doctor-overview-center { background:#212529; }
@@ -209,6 +238,7 @@
   .doctor-sql-results { border-color:#495057; }
   .doctor-font-upload, .doctor-font-list, .doctor-font-row { border-color:#495057; }
   .doctor-font-dropzone { border-color:#6c757d; color:#ced4da; }
+  .doctor-db-action-card, .doctor-db-modal-identity, .doctor-guide-grid > div { border-color:#495057; }
 }
 
 @media (max-width: 720px) {
@@ -221,6 +251,7 @@
   .doctor-overview-group:nth-child(n+3) { margin-top:12px; }
   .doctor-gdrive-filter { grid-template-columns:repeat(3,minmax(120px,1fr)); }
   .doctor-gdrive-search { grid-column:span 3; }
+  .doctor-db-action-grid { grid-template-columns:1fr; }
 }
 @media (max-width: 640px) {
   .doctor-overview-card { grid-template-columns:1fr; }
@@ -239,4 +270,7 @@
   .doctor-gdrive-summary { flex-direction:column; }
   .doctor-sql-toolbar { grid-template-columns:1fr; }
   .doctor-sql-wide { margin-top:0 !important; }
+  .doctor-setting-tabs .nav-link { padding:.6rem .7rem; font-size:.84rem; }
+  .doctor-db-modal-summary { grid-template-columns:repeat(2,minmax(100px,1fr)); }
+  .doctor-guide-grid { grid-template-columns:1fr; }
 }

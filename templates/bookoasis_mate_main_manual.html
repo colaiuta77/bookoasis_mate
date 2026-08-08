@@ -110,14 +110,4 @@
   </ul>
 </div>
 
-<div class="doctor-section doctor-card">
-  <h4>커스텀 폰트 업로드</h4>
-  <ol>
-    <li>호스트 폴더 하나를 FlaskFarm 컨테이너에서는 쓰기 가능한 경로로, BookOasis 컨테이너에서는 <code>/app/static/fonts/custom</code>으로 각각 마운트합니다.</li>
-    <li>Mate 설정의 <strong>폰트 업로드 디렉터리</strong>에 FlaskFarm 컨테이너에서 보이는 경로를 선택합니다.</li>
-    <li>TTF·OTF·WOFF·WOFF2 파일을 드래그 앤 드롭하고 업로드합니다. 확장자와 파일 시그니처가 일치하지 않거나 같은 이름이 이미 있으면 저장하지 않습니다.</li>
-    <li>마운트를 추가하거나 바꾼 경우 사용자가 BookOasis Docker 컨테이너를 직접 재시작합니다. 기존 마운트에 파일만 추가한 경우 BookOasis가 폰트 목록을 다시 조회합니다.</li>
-  </ol>
-  <p class="doctor-muted">Mate는 Docker 컨테이너를 자동으로 재시작하지 않습니다. 자세한 BookOasis 폰트 규칙은 <a href="https://github.com/leeyj/BookOasis_stable/blob/main/docs/guide_admin.md" target="_blank" rel="noopener noreferrer">공식 관리자 가이드</a>를 따릅니다.</p>
-</div>
 {% endblock %}

@@ -1,0 +1,67 @@
+{# BookOasis Mate의 공통 요구사항과 설치 방법을 안내합니다. #}
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+
+<div class="doctor-section doctor-card">
+  <h3>BookOasis Mate 매뉴얼</h3>
+  <p>모든 기능에 공통으로 적용되는 연결 조건, 필수 패키지, 파일 권한과 안전 수칙을 안내합니다. 기능별 세부 절차는 각 메뉴의 매뉴얼을 확인하세요.</p>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>1. 공통 연결 조건</h4>
+  <ul>
+    <li>FF에서 BookOasis URL에 접근할 수 있어야 하며 관리자 API 기능에는 BookOasis 관리자 계정이 필요합니다.</li>
+    <li>보관함 스캔 웹훅은 BookOasis <code>.env</code>의 <code>WEBHOOK_TOKEN</code>과 같은 값을 사용합니다.</li>
+    <li>SQLite 진단·이관은 FF 컨테이너에서 BookOasis DB 파일을 볼 수 있어야 합니다. 표지 검사·정리, 로그와 커스텀 폰트도 해당 호스트 경로를 FF에 마운트해야 합니다.</li>
+    <li>MariaDB 진단·이관은 FF에서 MariaDB 호스트에 접속할 수 있어야 합니다. 진단은 읽기 권한, 실제 이관은 대상 DB 쓰기와 논리 백업·복원 권한이 필요합니다.</li>
+    <li>경로 입력값은 호스트 경로가 아니라 <strong>FF 컨테이너에서 보이는 경로</strong>를 기준으로 합니다.</li>
+  </ul>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>2. MariaDB 필수 패키지</h4>
+  <p><strong>PyMySQL 1.1 이상</strong>은 FF가 MariaDB에 직접 연결할 때 사용하는 Python 드라이버입니다. 실행 중인 FF 컨테이너와 같은 Python에 설치합니다.</p>
+  <pre><code>docker exec -u 0 flaskfarm python -m pip install --no-cache-dir "PyMySQL&gt;=1.1"
+docker exec flaskfarm python -c "import pymysql; print(pymysql.__version__)"</code></pre>
+  <p><strong>mariadb-client</strong>는 MariaDB 통DB·카테고리·Kavita 이관의 논리 백업과 복원에 사용하는 <code>mariadb</code>와 <code>mariadb-dump</code> 명령을 제공합니다.</p>
+  <pre><code>docker exec -u 0 flaskfarm sh -lc 'apt-get update &amp;&amp; apt-get install -y --no-install-recommends mariadb-client &amp;&amp; rm -rf /var/lib/apt/lists/*'
+docker exec flaskfarm sh -lc 'mariadb --version &amp;&amp; mariadb-dump --version'</code></pre>
+  <p class="doctor-muted">컨테이너 이름이 다르면 <code>flaskfarm</code>을 실제 이름으로 바꿉니다. 배포판은 <code>docker exec flaskfarm cat /etc/os-release</code>로 확인하며 Alpine 계열은 <code>apk add --no-cache mariadb-client</code>를 사용합니다.</p>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>3. 컨테이너 재생성 후에도 유지하기</h4>
+  <p>실행 중인 컨테이너에 직접 설치한 패키지는 단순 재시작에는 남지만 이미지 업데이트나 컨테이너 재생성 시 사라집니다. 계속 사용할 환경은 사용자 이미지를 권장합니다.</p>
+  <pre><code># Dockerfile.ff-bookoasis-mate
+FROM flaskfarm/flaskfarm:4.1
+USER root
+RUN apt-get update \
+    &amp;&amp; apt-get install -y --no-install-recommends mariadb-client \
+    &amp;&amp; python -m pip install --no-cache-dir "PyMySQL&gt;=1.1" \
+    &amp;&amp; rm -rf /var/lib/apt/lists/*</code></pre>
+  <p class="doctor-muted">PyMySQL만 설치하면 MariaDB 진단·조회는 가능하지만 논리 백업·복원 기능은 실행할 수 없습니다.</p>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>4. 안전 수칙</h4>
+  <ul>
+    <li>카테고리·Kavita·통DB 실제 이관 전에는 Dry Run과 별도 외부 백업을 완료합니다.</li>
+    <li>DB를 변경하거나 교체하는 동안 BookOasis, 스캐너와 메타데이터 변경 작업을 중지합니다.</li>
+    <li>API 키, 관리자 비밀번호와 MariaDB 비밀번호는 로그·스크린샷·공유 설정 파일에 포함하지 않습니다.</li>
+    <li>고아 표지 정리는 Dry Run 결과를 먼저 확인하고, 삭제 범위와 백업 위치를 검토한 후 실행합니다.</li>
+    <li>SQLite와 MariaDB 통DB 패키지는 서로 교차 복원하지 않습니다.</li>
+  </ul>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>5. 기능별 안내 위치</h4>
+  <div class="doctor-guide-grid">
+    <div><strong>라이브러리 진단</strong><span>판정 기준, 스캔 상태, 표지·고아 파일 동작 방식.</span></div>
+    <div><strong>카테고리 이관</strong><span>내보내기, 신규 가져오기, 기존 카테고리 병합.</span></div>
+    <div><strong>통DB 이관</strong><span>Kavita 이관과 BookOasis 전체 패키지 내보내기·가져오기.</span></div>
+    <div><strong>Google Drive 연동</strong><span>gd-poller 래퍼, 경로 매핑, VFS 갱신과 스캔 큐.</span></div>
+    <div><strong>커스텀 폰트</strong><span>공유 마운트 경로, 파일 업로드와 BookOasis 재시작 조건.</span></div>
+  </div>
+</div>
+{% endblock %}

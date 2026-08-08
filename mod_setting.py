@@ -26,7 +26,6 @@ class ModuleSetting(PluginModuleBase):
             "audiobook_db_path",
             "bookoasis_log_dir",
             "cover_root_path",
-            "custom_font_dir",
         ):
             arg[key] = settings.get(key, "")
         return render_template(f"{P.package_name}_{self.name}.html", arg=arg)
@@ -58,21 +57,6 @@ class ModuleSetting(PluginModuleBase):
                         if data["success"]
                         else data.get("message") or "DB 정보를 확인하지 못했습니다."
                     ),
-                    "data": data,
-                })
-            if command == "font_list":
-                return jsonify({
-                    "ret": "success",
-                    "data": self.service.custom_fonts(settings),
-                })
-            if command == "font_upload":
-                data = self.service.upload_custom_fonts(
-                    req.files.getlist("files"),
-                    settings,
-                )
-                return jsonify({
-                    "ret": "success" if data.get("uploaded") else "warning",
-                    "msg": data.get("message"),
                     "data": data,
                 })
             return jsonify({"ret": "warning", "msg": "지원하지 않는 요청입니다."}), 400
