@@ -1,12 +1,15 @@
 # gd-poller 변경 이벤트를 BookOasis 보관함 스캔과 rclone VFS 갱신으로 변환합니다.
 import json
 import posixpath
-import sqlite3
 from contextlib import closing
-from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
+
+try:
+    from .bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
+except ImportError:
+    from bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
 
 
 SUPPORTED_ACTIONS = {
@@ -228,18 +231,20 @@ def event_vfs_operations(event):
     return result
 
 
-def read_bookoasis_libraries(db_type, db_path):
-    path = Path(str(db_path or "")).expanduser()
-    if not path.is_file():
+def read_bookoasis_libraries(db_type, settings, optional=False):
+    adapter = BookOasisDatabaseAdapter(settings)
+    path = settings.get(f"{db_type}_db_path")
+    if adapter.engine == "sqlite" and not str(path or "").strip():
         return []
-    uri = f"{path.resolve().as_uri()}?mode=ro"
-    with closing(sqlite3.connect(uri, uri=True, timeout=10)) as connection:
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA query_only = ON")
-        table = connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='libraries'"
-        ).fetchone()
-        if not table:
+    target = adapter.target(db_type, db_type, path)
+    try:
+        connection = adapter.connect(target)
+    except BookOasisDatabaseError:
+        if optional and adapter.engine == "sqlite":
+            return []
+        raise
+    with closing(connection):
+        if "libraries" not in connection.tables():
             return []
         rows = connection.execute(
             "SELECT id, name, physical_path FROM libraries ORDER BY id"
@@ -351,19 +356,13 @@ class GDriveScanProcessor:
         self.libraries = self._load_libraries()
 
     def _load_libraries(self):
-        libraries = read_bookoasis_libraries(
-            "general", self.settings.get("general_db_path")
-        )
+        libraries = read_bookoasis_libraries("general", self.settings)
         if str(self.settings.get("adult_enabled")).lower() in {"1", "true", "yes", "on"}:
             libraries.extend(
-                read_bookoasis_libraries(
-                    "adult", self.settings.get("adult_db_path")
-                )
+                read_bookoasis_libraries("adult", self.settings)
             )
         libraries.extend(
-            read_bookoasis_libraries(
-                "audiobook", self.settings.get("audiobook_db_path")
-            )
+            read_bookoasis_libraries("audiobook", self.settings, optional=True)
         )
         return sorted(libraries, key=lambda item: len(item["root"]), reverse=True)
 

@@ -5,7 +5,7 @@
 ## 주요 기능
 
 - BookOasis 라이브러리 상태 요약과 문제 도서 진단.
-- 일반·성인·오디오북 DB 상태와 스캔 작업 확인.
+- SQLite·MariaDB를 선택해 일반·성인·오디오북 DB 상태와 스캔 작업 확인.
 - 스캔 상태 및 주요 로그 실시간 확인.
 - 시리즈 누락, 표지 문제와 고아 표지파일 검사.
 - 안전한 읽기 전용 SQL 진단 도구와 운영 프리셋.
@@ -14,7 +14,27 @@
 - Kavita 및 BookOasis 공유 패키지 통DB 이관.
 - BookOasis 커스텀 폰트 업로드와 설치 상태 확인.
 
+## DB 엔진 설정
+
+- BookOasis v1.8 계열은 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
+- MariaDB 모드는 `PyMySQL 1.1` 이상이 필요하며 호스트·포트·사용자·비밀번호·DB 접두어를 입력합니다.
+- 자동 감지는 FF의 `DB_ENGINE`, `DBMS` 환경변수와 MariaDB 설정을 확인합니다. 연결 실패 시 남아 있는 SQLite 파일로 자동 전환하지 않습니다.
+- 상태 요약, 문제 도서, 스캔 상태, 시리즈 누락, 표지 검사, 고아 표지 정리, Google Drive 연동과 읽기 전용 SQL은 두 엔진을 지원합니다.
+- Mate의 통DB 패키지 이관은 SQLite DB 파일 교체 방식이므로 MariaDB에서는 실행하지 않습니다. BookOasis 공식 이관 도구를 사용해야 합니다.
+- Mate 내 카테고리 패키지 이관도 현재 SQLite 대상으로 제한됩니다. MariaDB 카테고리 이관은 BookOasis v1.8.7 이상의 공식 `tools/export_category.py`, `tools/import_category.py`를 사용합니다.
+
 ## Changelog
+
+- v1.3.0 (2026-08-08)
+  - SQLite·MariaDB 이중 엔진 지원
+    - 설정에서 DB 엔진을 명시적으로 선택하거나 BookOasis 환경변수를 기준으로 자동 감지하도록 추가.
+    - 일반·성인·오디오북 진단, 보관함 조회, 스캔 상태, 시리즈 누락과 표지 참조 조회를 공통 읽기 전용 DB 어댑터로 전환.
+    - MariaDB의 `%s` placeholder, dict row, `utf8mb4_bin` 환경과 날짜·Decimal 결과 정규화 반영.
+  - 운영 안전성
+    - MariaDB 연결 실패 시 오래된 SQLite 파일로 조용히 전환하지 않도록 원본 엔진을 명확히 표시.
+    - 표지 검사, 고아 표지 정리와 일괄 재스캔 작업의 MariaDB 설정 파일을 일회성·제한 권한으로 처리.
+    - SQL 도구에 MariaDB 제한 시간과 민감 테이블·시스템 스키마 차단 정책 적용.
+    - SQLite 파일 교체 방식의 카테고리·통DB 이관을 MariaDB에서 차단하고 공식 도구 안내 추가.
 
 - v1.2.0 (2026-08-04)
   - 오디오북 대응

@@ -13,11 +13,20 @@ class ModuleMain(PluginModuleBase):
     def __init__(self, plugin):
         super().__init__(plugin, name="main", first_menu="dashboard", scheduler_desc="BookOasis 라이브러리 자동 진단")
         self.db_default = {
+            "db_engine": "sqlite",
             "bookoasis_root_path": "",
             "general_db_path": "/bookoasis-db/media_general.db",
             "adult_enabled": "False",
             "adult_db_path": "/bookoasis-db/media_adult.db",
             "audiobook_db_path": "/bookoasis-db/media_audiobook.db",
+            "mariadb_host": "",
+            "mariadb_port": "3306",
+            "mariadb_user": "",
+            "mariadb_password": "",
+            "mariadb_database_prefix": "media_",
+            "mariadb_connect_timeout": "10",
+            "mariadb_read_timeout": "30",
+            "mariadb_write_timeout": "30",
             "bookoasis_url": "http://127.0.0.1:5930",
             "bookoasis_username": "admin",
             "bookoasis_password": "",

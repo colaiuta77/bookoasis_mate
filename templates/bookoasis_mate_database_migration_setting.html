@@ -1,6 +1,7 @@
 {# Kavita 또는 BookOasis 원본을 선택해 통DB 이관을 설정하고 미리봅니다. #}
 {% extends "base.html" %}
 {% block content %}
+{% include "bookoasis_mate_database_engine_notice.html" %}
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 

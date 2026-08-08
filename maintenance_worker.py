@@ -1,7 +1,6 @@
 # 장시간 걸리는 BookOasis 유지보수 작업을 FlaskFarm 웹 프로세스 밖에서 실행합니다.
 import json
 import os
-import sqlite3
 import sys
 import time
 import traceback
@@ -12,11 +11,13 @@ from pathlib import Path
 
 try:
     from .bookoasis_client import BookOasisClient
+    from .bookoasis_db import BookOasisDatabaseAdapter
     from .category_migration import CategoryMigrationEngine, MigrationStopped
     from .cover_inspector import cleanup_orphan_files, inspect_cover_file
     from .mate_engine import BookOasisMateEngine
 except ImportError:
     from bookoasis_client import BookOasisClient
+    from bookoasis_db import BookOasisDatabaseAdapter
     from category_migration import CategoryMigrationEngine, MigrationStopped
     from cover_inspector import cleanup_orphan_files, inspect_cover_file
     from mate_engine import BookOasisMateEngine
@@ -372,14 +373,14 @@ def _run_category_migration(config, writer, stop_file):
     writer.complete_category(result, operation)
 
 
-def _open_book_database(db_path):
-    path = Path(str(db_path or "")).expanduser()
-    if not path.is_file():
-        raise FileNotFoundError("일괄 재스캔 대상 BookOasis DB 파일을 찾을 수 없습니다.")
-    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=10)
-    connection.execute("PRAGMA query_only = ON")
-    connection.execute("PRAGMA busy_timeout = 10000")
-    return connection
+def _open_book_database(settings, db_type):
+    adapter = BookOasisDatabaseAdapter(settings)
+    target = adapter.target(
+        db_type,
+        db_type,
+        settings.get(f"{db_type}_db_path"),
+    )
+    return adapter.connect(target)
 
 
 def _scan_book_with_retry(client, book_id, db_type, stop_file, max_attempts=3):
@@ -444,7 +445,11 @@ def _run_batch_book_rescan(config, writer, stop_file):
         raise RuntimeError(login.get("message") or "BookOasis 관리자 로그인에 실패했습니다.")
 
     consecutive_transport_failures = 0
-    with closing(_open_book_database(config.get("db_path"))) as connection:
+    db_settings = config.get("db_settings") or {
+        "db_engine": "sqlite",
+        f"{db_type}_db_path": config.get("db_path"),
+    }
+    with closing(_open_book_database(db_settings, db_type)) as connection:
         for book_id in book_ids:
             if stop_file.exists():
                 writer.complete_batch_rescan(stopped=True)
@@ -453,7 +458,7 @@ def _run_batch_book_rescan(config, writer, stop_file):
                 "SELECT title FROM books WHERE id = ?",
                 (book_id,),
             ).fetchone()
-            title = str(row[0] or "") if row else ""
+            title = str(row["title"] or "") if row else ""
             result = _scan_book_with_retry(
                 client,
                 book_id,

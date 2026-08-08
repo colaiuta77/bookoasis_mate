@@ -44,6 +44,7 @@ class ModuleDatabaseMigration(PluginModuleBase):
         page = page if page in {"setting", "status", "manual"} else "setting"
         P.logger.debug(f"[BookOasisMate] 통DB 이관 메뉴 열기 page={page}")
         arg = P.ModelSetting.to_dict()
+        arg["database_engine"] = self.service.database_engine_info()
         arg["page"] = page
         return render_template(
             f"{P.package_name}_{self.name}_{page}.html",

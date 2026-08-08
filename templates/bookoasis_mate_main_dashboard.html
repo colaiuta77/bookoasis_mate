@@ -12,12 +12,12 @@
 <div id="database_list" class="doctor-section"></div>
 <div class="doctor-section doctor-card">
   <h5>수동 DB 무결성 검사</h5>
-  <p class="doctor-muted">PRAGMA quick_check는 읽기 전용이지만 큰 DB에서는 부하가 생길 수 있습니다. 필요한 경우에만 실행하세요.</p>
+  <p class="doctor-muted">SQLite는 PRAGMA quick_check, MariaDB는 CHECK TABLE QUICK을 실행합니다. 큰 DB에서는 부하가 생길 수 있으므로 필요한 경우에만 실행하세요.</p>
   <div class="doctor-toolbar mb-0">
     <select id="quick_db_type" class="form-control form-control-sm">
       <option value="general">일반 DB</option>
     </select>
-    <button id="quick_check_btn" class="btn btn-sm btn-warning">quick_check 실행</button>
+    <button id="quick_check_btn" class="btn btn-sm btn-warning">무결성 검사 실행</button>
   </div>
 </div>
 
@@ -167,10 +167,14 @@ function renderReport(report) {
         facts.appendChild(item);
       });
       card.appendChild(facts);
-      card.appendChild(bookoasisMateText('div', 'doctor-path doctor-db-path', db.path || '경로 없음'));
-      card.appendChild(bookoasisMateText('div', 'doctor-sub', 'SQLite ' + (db.journal_mode || '-') + ' · ' + bookoasisMateBytes(db.file_size) + ' · 조회 ' + (db.duration_ms || 0) + 'ms'));
+      var dbIdentity = db.engine === 'mariadb' ? db.database : db.path;
+      var engineSummary = db.engine === 'mariadb'
+        ? 'MariaDB ' + (db.server_version || '-') + ' · ' + (db.collation || '-')
+        : 'SQLite ' + (db.journal_mode || '-');
+      card.appendChild(bookoasisMateText('div', 'doctor-path doctor-db-path', dbIdentity || 'DB 정보 없음'));
+      card.appendChild(bookoasisMateText('div', 'doctor-sub', engineSummary + ' · ' + bookoasisMateBytes(db.file_size) + ' · 조회 ' + (db.duration_ms || 0) + 'ms'));
     } else {
-      card.appendChild(bookoasisMateText('div', 'doctor-path mt-2', db.path || '경로 없음'));
+      card.appendChild(bookoasisMateText('div', 'doctor-path mt-2', (db.engine === 'mariadb' ? db.database : db.path) || 'DB 정보 없음'));
       card.appendChild(bookoasisMateText('div', 'doctor-error mt-2', db.error || 'DB 연결 실패'));
     }
     list.appendChild(card);
@@ -195,11 +199,11 @@ $('#run_scan_btn').click(function(e) {
 });
 $('#quick_check_btn').click(function(e) {
   e.preventDefault();
-  if (!confirm('선택한 DB에 quick_check를 실행하시겠습니까?')) return;
+  if (!confirm('선택한 DB에 무결성 검사를 실행하시겠습니까?')) return;
   bookoasisMateAjax('main', 'quick_check', {db_type:$('#quick_db_type').val()}, function(ret) {
     if (!ret.data) return;
     var result = (ret.data.result || []).map(bookoasisMateEscape).join('<br>');
-    showModal(result || bookoasisMateEscape(ret.data.message || ''), 'DB quick_check', false);
+    showModal(result || bookoasisMateEscape(ret.data.message || ''), 'DB 무결성 검사', false);
   });
 });
 $(document).ready(loadReport);

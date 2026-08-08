@@ -1,0 +1,6 @@
+<!-- MariaDB에서 SQLite 파일 이관 기능이 제한됨을 안내합니다. -->
+{% if arg.get('database_engine', {}).get('resolved_engine') == 'mariadb' %}
+<div class="alert alert-warning">
+  현재 DB 엔진은 MariaDB입니다. Mate의 카테고리·통DB 이관은 SQLite 파일 패키지 전용이므로 실행할 수 없습니다. BookOasis 공식 이관 도구를 사용하세요.
+</div>
+{% endif %}

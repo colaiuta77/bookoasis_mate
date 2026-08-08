@@ -1,16 +1,16 @@
-# BookOasis SQLite DB를 읽기 전용으로 검사하고 진단 결과를 생성합니다.
-import os
-import sqlite3
+# BookOasis DB를 읽기 전용으로 검사하고 진단 결과를 생성합니다.
 import time
+import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlparse
 
 try:
+    from .bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
     from .cover_inspector import normalize_cover_path
     from .series_gap import find_series_gaps
 except ImportError:
+    from bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
     from cover_inspector import normalize_cover_path
     from series_gap import find_series_gaps
 
@@ -95,18 +95,14 @@ def _as_int(value, default, minimum, maximum):
         return default
 
 
-class DatabaseTarget:
-    def __init__(self, db_type, label, path):
-        self.db_type = db_type
-        self.label = label
-        self.path = str(path or "").strip()
-
-
 class BookOasisMateEngine:
     """BookOasis DB에 쓰기 작업을 하지 않는 진단 엔진입니다."""
 
-    def __init__(self, settings):
+    def __init__(self, settings, database_adapter=None):
         self.settings = dict(settings or {})
+        self.database_adapter = database_adapter or BookOasisDatabaseAdapter(
+            self.settings
+        )
         self.stale_days = _as_int(self.settings.get("stale_days"), 14, 1, 3650)
         self.check_missing_isbn = _as_bool(self.settings.get("check_missing_isbn"), False)
         self.bookoasis_url = str(self.settings.get("bookoasis_url") or "").strip().rstrip("/")
@@ -116,13 +112,19 @@ class BookOasisMateEngine:
 
     def targets(self):
         targets = [
-            DatabaseTarget("general", "일반", self.settings.get("general_db_path")),
+            self.database_adapter.target(
+                "general", "일반", self.settings.get("general_db_path")
+            ),
         ]
         if _as_bool(self.settings.get("adult_enabled"), False):
-            targets.append(DatabaseTarget("adult", "성인", self.settings.get("adult_db_path")))
+            targets.append(
+                self.database_adapter.target(
+                    "adult", "성인", self.settings.get("adult_db_path")
+                )
+            )
         if str(self.settings.get("audiobook_db_path") or "").strip():
             targets.append(
-                DatabaseTarget(
+                self.database_adapter.target(
                     "audiobook",
                     "오디오북",
                     self.settings.get("audiobook_db_path"),
@@ -136,37 +138,16 @@ class BookOasisMateEngine:
                 return target
         raise ValueError(f"활성화되지 않은 DB 유형입니다: {db_type}")
 
-    @staticmethod
-    def _connect(target):
-        if not target.path:
-            raise FileNotFoundError(f"{target.label} DB 경로가 비어 있습니다.")
-        path = Path(target.path).expanduser()
-        if not path.is_file():
-            raise FileNotFoundError(f"DB 파일을 찾을 수 없습니다: {target.path}")
-
-        uri = f"{path.resolve().as_uri()}?mode=ro"
-        connection = sqlite3.connect(uri, uri=True, timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA query_only = ON")
-        connection.execute("PRAGMA busy_timeout = 10000")
-        return connection
+    def _connect(self, target):
+        return self.database_adapter.connect(target)
 
     @staticmethod
     def _tables(connection):
-        return {
-            row["name"]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
-        }
+        return connection.tables()
 
     @staticmethod
     def _columns(connection, table):
-        safe_table = str(table).replace('"', '""')
-        return {
-            row["name"]
-            for row in connection.execute(f'PRAGMA table_info("{safe_table}")').fetchall()
-        }
+        return connection.columns(table)
 
     @staticmethod
     def _column_expr(columns, column, expression, alias):
@@ -360,8 +341,7 @@ class BookOasisMateEngine:
                 )
         return result
 
-    @staticmethod
-    def _issue_diagnostics(item, issue_keys):
+    def _issue_diagnostics(self, item, issue_keys):
         reasons = []
         for issue_type in issue_keys:
             definition = ISSUE_DIAGNOSTIC_RULES[issue_type]
@@ -395,7 +375,10 @@ class BookOasisMateEngine:
                 },
                 "matched_issue_count": len(reasons),
                 "reasons": reasons,
-                "note": "BookOasis Mate가 SQLite를 읽기 전용으로 조회한 판정 근거입니다.",
+                "note": (
+                    "BookOasis Mate가 "
+                    f"{self.database_adapter.engine}를 읽기 전용으로 조회한 판정 근거입니다."
+                ),
             },
         }
 
@@ -418,7 +401,7 @@ class BookOasisMateEngine:
                 scan_status = "scan_status" in columns
                 stale_expression = (
                     "SUM(CASE WHEN last_scanned_at IS NULL "
-                    "OR julianday('now') - julianday(last_scanned_at) > ? "
+                    "OR last_scanned_at < ? "
                     "THEN 1 ELSE 0 END)"
                     if last_scan
                     else "0"
@@ -442,7 +425,13 @@ class BookOasisMateEngine:
                         {active_expression} AS active_libraries
                     FROM libraries
                     """,
-                    (self.stale_days,) if last_scan else (),
+                    (
+                        (
+                            datetime.now(timezone.utc) - timedelta(days=self.stale_days)
+                        ).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"),
+                    )
+                    if last_scan
+                    else (),
                 ).fetchone()
                 for key in ("total_libraries", "stale_libraries", "failed_libraries", "active_libraries"):
                     result[key] = int(row[key] or 0)
@@ -451,10 +440,15 @@ class BookOasisMateEngine:
             columns = self._columns(connection, "scanner_tasks")
             if "status" in columns:
                 recent_condition = (
-                    "enqueue_at >= datetime('now', '-7 days') OR status IN ('pending', 'running', 'exit_pending')"
+                    "enqueue_at >= ? OR status IN ('pending', 'running', 'exit_pending')"
                     if "enqueue_at" in columns
                     else "status IN ('pending', 'running', 'exit_pending', 'failed')"
                 )
+                params = (
+                    (
+                        datetime.now(timezone.utc) - timedelta(days=7)
+                    ).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"),
+                ) if "enqueue_at" in columns else ()
                 row = connection.execute(
                     f"""
                     SELECT
@@ -463,7 +457,8 @@ class BookOasisMateEngine:
                         SUM(CASE WHEN status IN ('running', 'exit_pending') THEN 1 ELSE 0 END) AS running_tasks
                     FROM scanner_tasks
                     WHERE {recent_condition}
-                    """
+                    """,
+                    params,
                 ).fetchone()
                 for key in ("recent_failed_tasks", "pending_tasks", "running_tasks"):
                     result[key] = int(row[key] or 0)
@@ -481,8 +476,8 @@ class BookOasisMateEngine:
                     else self._book_summary(connection)
                 )
                 scanner = self._scanner_summary(connection)
-                journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
-                user_version = connection.execute("PRAGMA user_version").fetchone()[0]
+                engine_details = connection.engine_details()
+                database_size = connection.database_size()
             problem_count = summary[
                 "problem_audiobooks" if media_kind == "audiobook" else "problem_books"
             ]
@@ -518,24 +513,33 @@ class BookOasisMateEngine:
                 "media_kind": media_kind,
                 "label": target.label,
                 "path": target.path,
+                "database": target.database,
+                "engine": target.engine,
                 "connected": True,
                 "status": status,
                 "status_reasons": status_reasons,
-                "file_size": os.path.getsize(target.path),
-                "journal_mode": str(journal_mode),
-                "user_version": int(user_version or 0),
+                "file_size": database_size,
+                **engine_details,
                 "tables": sorted(tables),
                 "summary": summary,
                 "scanner": scanner,
                 "error": None,
                 "duration_ms": round((datetime.now(timezone.utc) - started).total_seconds() * 1000),
             }
-        except (OSError, sqlite3.Error, RuntimeError, ValueError) as error:
+        except (
+            OSError,
+            sqlite3.Error,
+            BookOasisDatabaseError,
+            RuntimeError,
+            ValueError,
+        ) as error:
             return {
                 "db_type": target.db_type,
                 "media_kind": "audiobook" if target.db_type == "audiobook" else "book",
                 "label": target.label,
                 "path": target.path,
+                "database": target.database,
+                "engine": target.engine,
                 "connected": False,
                 "status": "error",
                 "status_reasons": [{
@@ -614,6 +618,7 @@ class BookOasisMateEngine:
         totals["health_percent"] = round(healthy_books / totals["total_books"] * 100) if totals["total_books"] else 0
         return {
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "database_engine": self.database_adapter.public_info(),
             "status": status,
             "databases": databases,
             "totals": totals,
@@ -988,8 +993,10 @@ class BookOasisMateEngine:
         targets = self.targets()
         adult_path = self.settings.get("adult_db_path")
         if include_inactive_adult and not any(target.db_type == "adult" for target in targets):
-            if adult_path and Path(adult_path).expanduser().is_file():
-                targets.append(DatabaseTarget("adult", "성인", adult_path))
+            if self.database_adapter.engine == "mariadb" or adult_path:
+                targets.append(
+                    self.database_adapter.target("adult", "성인", adult_path)
+                )
         for target in targets:
             if should_stop and should_stop():
                 break
@@ -1032,17 +1039,65 @@ class BookOasisMateEngine:
         started = datetime.now(timezone.utc)
         try:
             with closing(self._connect(target)) as connection:
-                rows = [str(row[0]) for row in connection.execute("PRAGMA quick_check").fetchall()]
-            success = rows == ["ok"]
+                if target.engine == "sqlite":
+                    rows = [
+                        str(row[0])
+                        for row in connection.execute("PRAGMA quick_check").fetchall()
+                    ]
+                    success = rows == ["ok"]
+                    message = (
+                        "DB quick_check 결과가 정상입니다."
+                        if success
+                        else "DB quick_check에서 문제가 발견되었습니다."
+                    )
+                else:
+                    rows = []
+                    success = True
+                    for table in sorted(connection.tables()):
+                        for item in connection.execute(
+                            f"CHECK TABLE `{table}` QUICK"
+                        ).fetchall():
+                            message_type = str(
+                                item.get("Msg_type") or item.get("msg_type") or ""
+                            )
+                            message_text = str(
+                                item.get("Msg_text") or item.get("msg_text") or ""
+                            )
+                            rows.append(f"{table}: {message_type} - {message_text}")
+                            if (
+                                message_type.lower() not in {"status", "note"}
+                                or message_text.lower() != "ok"
+                            ):
+                                success = False
+                    message = (
+                        "MariaDB CHECK TABLE QUICK 결과가 정상입니다."
+                        if success
+                        else "MariaDB CHECK TABLE QUICK에서 문제가 발견되었습니다."
+                    )
             return {
                 "success": success,
                 "db_type": db_type,
+                "engine": target.engine,
+                "database": target.database,
                 "result": rows,
                 "duration_ms": round((datetime.now(timezone.utc) - started).total_seconds() * 1000),
-                "message": "DB quick_check 결과가 정상입니다." if success else "DB quick_check에서 문제가 발견되었습니다.",
+                "message": message,
             }
-        except (OSError, sqlite3.Error, RuntimeError, ValueError) as error:
-            return {"success": False, "db_type": db_type, "result": [], "message": str(error)}
+        except (
+            OSError,
+            sqlite3.Error,
+            BookOasisDatabaseError,
+            RuntimeError,
+            ValueError,
+        ) as error:
+            return {
+                "success": False,
+                "db_type": db_type,
+                "engine": target.engine,
+                "database": target.database,
+                "result": [],
+                "message": str(error),
+            }
 
     def database_details(self, db_type="general"):
         target = self.get_target(db_type)
@@ -1050,6 +1105,7 @@ class BookOasisMateEngine:
         try:
             with closing(self._connect(target)) as connection:
                 tables = self._tables(connection)
+                database_size = connection.database_size()
                 libraries = []
                 if "libraries" in tables:
                     columns = self._columns(connection, "libraries")
@@ -1066,19 +1122,29 @@ class BookOasisMateEngine:
                 "media_kind": "audiobook" if target.db_type == "audiobook" else "book",
                 "label": target.label,
                 "path": target.path,
-                "file_size": os.path.getsize(target.path),
+                "database": target.database,
+                "engine": target.engine,
+                "file_size": database_size,
                 "libraries": libraries,
                 "duration_ms": round(
                     (datetime.now(timezone.utc) - started).total_seconds() * 1000
                 ),
             }
-        except (OSError, sqlite3.Error, RuntimeError, ValueError) as error:
+        except (
+            OSError,
+            sqlite3.Error,
+            BookOasisDatabaseError,
+            RuntimeError,
+            ValueError,
+        ) as error:
             return {
                 "success": False,
                 "db_type": target.db_type,
                 "media_kind": "audiobook" if target.db_type == "audiobook" else "book",
                 "label": target.label,
                 "path": target.path,
+                "database": target.database,
+                "engine": target.engine,
                 "file_size": 0,
                 "libraries": [],
                 "message": str(error),

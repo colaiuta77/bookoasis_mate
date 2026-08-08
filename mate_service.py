@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .bookoasis_client import BookOasisClient
+from .bookoasis_db import BookOasisDatabaseAdapter
 from .bookoasis_logs import list_log_files, read_lazy_progress, read_log_tail
 from .bookoasis_package_import import BookOasisPackageImportEngine
 from .category_migration import (
@@ -265,11 +266,26 @@ class BookOasisMateService:
     def settings(self):
         model = self.P.ModelSetting
         values = {
+            "db_engine": model.get("db_engine") or "sqlite",
             "bookoasis_root_path": model.get("bookoasis_root_path"),
             "general_db_path": model.get("general_db_path"),
             "adult_enabled": model.get_bool("adult_enabled"),
             "adult_db_path": model.get("adult_db_path"),
             "audiobook_db_path": model.get("audiobook_db_path"),
+            "mariadb_host": model.get("mariadb_host"),
+            "mariadb_port": _as_int(model.get("mariadb_port"), 3306, 1, 65535),
+            "mariadb_user": model.get("mariadb_user"),
+            "mariadb_password": model.get("mariadb_password"),
+            "mariadb_database_prefix": model.get("mariadb_database_prefix") or "media_",
+            "mariadb_connect_timeout": _as_int(
+                model.get("mariadb_connect_timeout"), 10, 1, 60
+            ),
+            "mariadb_read_timeout": _as_int(
+                model.get("mariadb_read_timeout"), 30, 1, 600
+            ),
+            "mariadb_write_timeout": _as_int(
+                model.get("mariadb_write_timeout"), 30, 1, 600
+            ),
             "bookoasis_url": model.get("bookoasis_url"),
             "bookoasis_username": model.get("bookoasis_username"),
             "bookoasis_password": model.get("bookoasis_password"),
@@ -301,11 +317,26 @@ class BookOasisMateService:
     @staticmethod
     def settings_from_mapping(values):
         settings = {
+            "db_engine": str(values.get("db_engine") or "sqlite").strip().lower(),
             "bookoasis_root_path": str(values.get("bookoasis_root_path") or "").strip(),
             "general_db_path": values.get("general_db_path"),
             "adult_enabled": _as_bool(values.get("adult_enabled"), False),
             "adult_db_path": values.get("adult_db_path"),
             "audiobook_db_path": values.get("audiobook_db_path"),
+            "mariadb_host": values.get("mariadb_host"),
+            "mariadb_port": _as_int(values.get("mariadb_port"), 3306, 1, 65535),
+            "mariadb_user": values.get("mariadb_user"),
+            "mariadb_password": values.get("mariadb_password"),
+            "mariadb_database_prefix": values.get("mariadb_database_prefix") or "media_",
+            "mariadb_connect_timeout": _as_int(
+                values.get("mariadb_connect_timeout"), 10, 1, 60
+            ),
+            "mariadb_read_timeout": _as_int(
+                values.get("mariadb_read_timeout"), 30, 1, 600
+            ),
+            "mariadb_write_timeout": _as_int(
+                values.get("mariadb_write_timeout"), 30, 1, 600
+            ),
             "bookoasis_url": values.get("bookoasis_url"),
             "bookoasis_username": values.get("bookoasis_username"),
             "bookoasis_password": values.get("bookoasis_password"),
@@ -339,6 +370,16 @@ class BookOasisMateService:
 
     def engine(self, settings=None):
         return BookOasisMateEngine(settings or self.settings())
+
+    def database_engine_info(self, settings=None):
+        return self.engine(settings).database_adapter.public_info()
+
+    def _require_sqlite_migration(self, feature):
+        if self.database_engine_info()["resolved_engine"] != "sqlite":
+            raise ValueError(
+                f"{feature}은 현재 Mate의 SQLite 파일 이관 전용 기능입니다. "
+                "MariaDB에서는 BookOasis 공식 이관 도구를 사용해 주세요."
+            )
 
     def admin_client(self, settings=None):
         settings = settings or self.settings()
@@ -912,10 +953,14 @@ class BookOasisMateService:
             if normalized_db_type == "adult"
             else settings.get("general_db_path")
         )
+        database_info = BookOasisDatabaseAdapter(settings).public_info()
         cache_key = (
             normalized_db_type,
             normalized_library_id,
             normalized_search,
+            str(database_info.get("resolved_engine") or ""),
+            str(database_info.get("host") or ""),
+            str(database_info.get("database_prefix") or ""),
             str(target_path or ""),
         )
 
@@ -996,11 +1041,16 @@ class BookOasisMateService:
         }[mode]
         file_mode = mode != "missing"
         search = str(search or "").strip()
+        adapter = BookOasisDatabaseAdapter(settings)
+        database_info = adapter.public_info()
         cache_key = (
             db_type,
             str(library_id or ""),
             mode,
             search,
+            str(database_info.get("resolved_engine") or ""),
+            str(database_info.get("host") or ""),
+            str(database_info.get("database_prefix") or ""),
             str(settings.get("general_db_path") or ""),
             str(settings.get("adult_db_path") or ""),
             str(settings.get("cover_root_path") or ""),
@@ -1117,15 +1167,11 @@ class BookOasisMateService:
 
     def _cover_inspection_paths(self, settings=None):
         settings = settings or self.settings()
-        db_path = str(
-            settings.get("general_db_path")
-            or settings.get("adult_db_path")
-            or ""
-        ).strip()
-        if not db_path:
+        state_root = self._maintenance_state_root(settings)
+        if state_root is None:
             return None
         paths = self._maintenance_worker_paths(
-            Path(db_path).expanduser().resolve().parent / ".bookoasis_mate_jobs",
+            state_root,
             "cover_inspection",
         )
         paths["result"] = paths["status"].with_name(
@@ -1144,7 +1190,7 @@ class BookOasisMateService:
             if numeric_library_id < 1:
                 raise ValueError("보관함 ID가 올바르지 않습니다.")
             selected_library_id = str(numeric_library_id)
-        db_path = Path(str(target.path or "")).expanduser()
+        db_path = Path(str(target.path or "")).expanduser() if target.path else None
 
         def file_signature(path):
             try:
@@ -1157,9 +1203,11 @@ class BookOasisMateService:
             "db_type": target.db_type,
             "library_id": selected_library_id,
             "search": str(search or "").strip(),
-            "db_path": str(db_path.resolve()),
-            "db_signature": file_signature(db_path),
-            "wal_signature": file_signature(Path(f"{db_path}-wal")),
+            "db_engine": target.engine,
+            "database": target.database,
+            "db_path": str(db_path.resolve()) if db_path is not None else "",
+            "db_signature": file_signature(db_path) if db_path is not None else [0, 0],
+            "wal_signature": file_signature(Path(f"{db_path}-wal")) if db_path is not None else [0, 0],
             "cover_root_path": str(settings.get("cover_root_path") or ""),
             "cover_min_width": int(settings["cover_min_width"]),
             "cover_min_height": int(settings["cover_min_height"]),
@@ -1289,9 +1337,19 @@ class BookOasisMateService:
             }
         )
         safe_setting_keys = (
+            "db_engine",
             "general_db_path",
             "adult_db_path",
+            "audiobook_db_path",
             "adult_enabled",
+            "mariadb_host",
+            "mariadb_port",
+            "mariadb_user",
+            "mariadb_password",
+            "mariadb_database_prefix",
+            "mariadb_connect_timeout",
+            "mariadb_read_timeout",
+            "mariadb_write_timeout",
             "bookoasis_url",
             "cover_root_path",
             "cover_min_width",
@@ -1313,6 +1371,7 @@ class BookOasisMateService:
             paths,
             worker_config,
             initial_status,
+            sensitive_config=True,
         )
         with self._lock:
             self._cover_inspection_process = process
@@ -1409,6 +1468,31 @@ class BookOasisMateService:
             "log": root / f"{prefix}_worker.log",
         }
 
+    def _maintenance_state_root(self, settings=None):
+        settings = settings or self.settings()
+        if self.engine(settings).database_adapter.engine == "sqlite":
+            db_path = str(
+                settings.get("general_db_path")
+                or settings.get("adult_db_path")
+                or ""
+            ).strip()
+            if db_path:
+                return (
+                    Path(db_path).expanduser().resolve().parent
+                    / ".bookoasis_mate_jobs"
+                )
+        for candidate in (
+            settings.get("cover_root_path"),
+            settings.get("bookoasis_root_path"),
+            Path(str(settings.get("general_db_path") or "")).parent
+            if str(settings.get("general_db_path") or "").strip()
+            else "",
+        ):
+            value = str(candidate or "").strip()
+            if value:
+                return Path(value).expanduser().resolve() / ".bookoasis_mate_jobs"
+        return None
+
     @staticmethod
     def _worker_pid_alive(pid):
         if os.name == "nt":
@@ -1487,11 +1571,11 @@ class BookOasisMateService:
 
     def _batch_rescan_paths(self, settings=None):
         settings = settings or self.settings()
-        db_path = str(settings.get("general_db_path") or "").strip()
-        if not db_path:
+        state_root = self._maintenance_state_root(settings)
+        if state_root is None:
             return None
         return self._maintenance_worker_paths(
-            Path(db_path).expanduser().resolve().parent / ".bookoasis_mate_jobs",
+            state_root,
             "batch_book_rescan",
         )
 
@@ -1604,7 +1688,23 @@ class BookOasisMateService:
             "job_type": "batch_book_rescan",
             "delete_config_after_read": True,
             "db_type": db_type,
-            "db_path": str(target.path or ""),
+            "db_settings": {
+                key: settings.get(key)
+                for key in (
+                    "db_engine",
+                    "general_db_path",
+                    "adult_db_path",
+                    "audiobook_db_path",
+                    "mariadb_host",
+                    "mariadb_port",
+                    "mariadb_user",
+                    "mariadb_password",
+                    "mariadb_database_prefix",
+                    "mariadb_connect_timeout",
+                    "mariadb_read_timeout",
+                    "mariadb_write_timeout",
+                )
+            },
             "book_ids": book_ids,
             "source": source,
             "source_label": source_label,
@@ -1751,10 +1851,21 @@ class BookOasisMateService:
         paths = self._orphan_cleanup_paths(root)
         worker_config = {
             "job_type": "orphan_cleanup",
+            "delete_config_after_read": True,
             "settings": {
+                "db_engine": settings.get("db_engine"),
                 "general_db_path": settings.get("general_db_path"),
                 "adult_db_path": settings.get("adult_db_path"),
+                "audiobook_db_path": settings.get("audiobook_db_path"),
                 "adult_enabled": settings.get("adult_enabled"),
+                "mariadb_host": settings.get("mariadb_host"),
+                "mariadb_port": settings.get("mariadb_port"),
+                "mariadb_user": settings.get("mariadb_user"),
+                "mariadb_password": settings.get("mariadb_password"),
+                "mariadb_database_prefix": settings.get("mariadb_database_prefix"),
+                "mariadb_connect_timeout": settings.get("mariadb_connect_timeout"),
+                "mariadb_read_timeout": settings.get("mariadb_read_timeout"),
+                "mariadb_write_timeout": settings.get("mariadb_write_timeout"),
                 "cover_root_path": settings.get("cover_root_path"),
             },
             "db_type": db_type,
@@ -1768,6 +1879,7 @@ class BookOasisMateService:
                 paths,
                 worker_config,
                 self._orphan_cleanup_status,
+                sensitive_config=True,
             )
         except Exception as error:
             with self._lock:
@@ -1871,6 +1983,7 @@ class BookOasisMateService:
         )
 
     def migration_libraries(self, db_type="general"):
+        self._require_sqlite_migration("카테고리 이관")
         target = self.engine().get_target(db_type)
         data = CategoryMigrationEngine.libraries(target.path)
         self._debug("이관 카테고리 목록 조회", db_type=db_type, count=len(data))
@@ -1945,6 +2058,7 @@ class BookOasisMateService:
             del logs[:-300]
 
     def start_migration(self):
+        self._require_sqlite_migration("카테고리 이관")
         config = self.migration_config()
         operation = config.get("operation")
         if operation not in {"export", "import"}:
@@ -2185,6 +2299,7 @@ class BookOasisMateService:
         raise ValueError("지원하지 않는 이관 원본 유형입니다.")
 
     def inspect_database_migration(self, values=None):
+        self._require_sqlite_migration("통DB 이관")
         config = self.database_migration_config(values)
         engine = self._database_migration_engine(config)
         if config["source_type"] == "kavita":
@@ -2422,6 +2537,7 @@ class BookOasisMateService:
             del logs[:-300]
 
     def start_database_migration(self, values=None):
+        self._require_sqlite_migration("통DB 이관")
         config = self.database_migration_config(values)
         if config["source_type"] not in {"kavita", "bookoasis"}:
             raise ValueError("이관 원본 유형이 올바르지 않습니다.")
