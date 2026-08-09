@@ -99,16 +99,20 @@ function doctorSummaryOverview(totals, scanner, audiobook, staleDays) {
     groups.appendChild(doctorMetricGroup('오디오북', [
       {label:'전체 오디오북', value:doctorFormatCount(audiobook.total_audiobooks, '개')},
       {label:'점검 필요', value:doctorFormatCount(audiobook.problem_audiobooks, '개'), tone:Number(audiobook.problem_audiobooks || 0) ? 'warning' : 'healthy'},
+      {label:'포스터 없음', value:doctorFormatCount(audiobook.cover, '개')},
+      {label:'저자 없음', value:doctorFormatCount(audiobook.author, '개')},
+      {label:'출판사 없음', value:doctorFormatCount(audiobook.publisher, '개')},
+      {label:'소개 없음', value:doctorFormatCount(audiobook.summary, '개')},
       {label:'전체 트랙', value:doctorFormatCount(audiobook.total_tracks, '개')},
       {label:'트랙 수 미기록', value:doctorFormatCount(audiobook.tracks, '개')},
-      {label:'트랙 크기 미기록', value:doctorFormatCount(audiobook.track_file_size_missing, '개')}
+      {label:'트랙 크기 미기록 (참고)', value:doctorFormatCount(audiobook.track_file_size_missing, '개')}
     ]));
   }
   card.appendChild(groups);
   card.appendChild(bookoasisMateText(
     'div',
     'doctor-overview-note',
-    '활성 도서 기준입니다. 원격 ZIP/CBZ의 내부 표지·페이지 분석 제한은 점검 필요에서 제외합니다. 문제 유형은 서로 중복될 수 있습니다. 스캔 실패는 최근 7일 · 장기 미스캔은 ' + staleDays + '일 기준입니다.'
+    '활성 도서 기준입니다. 오디오북 점검 필요는 포스터·저자·출판사·소개·트랙 수 미기록 중 하나 이상인 오디오북을 중복 없이 집계합니다. 트랙 크기 미기록은 별도 참고값입니다. 원격 ZIP/CBZ의 내부 표지·페이지 분석 제한은 점검 필요에서 제외합니다. 문제 유형은 서로 중복될 수 있습니다. 스캔 실패는 최근 7일 · 장기 미스캔은 ' + staleDays + '일 기준입니다.'
   ));
   return card;
 }
