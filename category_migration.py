@@ -1,4 +1,5 @@
 # BookOasis 카테고리 패키지를 검사하고 안전하게 내보내거나 신규·병합으로 가져옵니다.
+import io
 import json
 import os
 import re
@@ -19,7 +20,10 @@ except ImportError:
 
 PACKAGE_VERSION = "2.0"
 SUPPORTED_PACKAGE_VERSIONS = {"1.2", "2.0"}
-MAX_JSON_SIZE = 64 * 1024 * 1024
+MAX_MANIFEST_JSON_SIZE = 4 * 1024 * 1024
+MAX_METADATA_JSON_SIZE = 2 * 1024 * 1024 * 1024
+MAX_INLINE_INSPECTION_METADATA_SIZE = 64 * 1024 * 1024
+MAX_LIBRARY_JSON_PREFIX_CHARS = 8 * 1024 * 1024
 BOOK_COLUMNS = (
     "library_id",
     "title",
@@ -242,17 +246,91 @@ class CategoryMigrationEngine:
         return resolved
 
     @staticmethod
-    def _read_json_member(archive, name):
+    def _json_member_info(archive, name, max_size):
         try:
             info = archive.getinfo(name)
         except KeyError:
             raise ValueError(f"올바른 패키지가 아닙니다. {name} 파일이 없습니다.")
-        if info.file_size > MAX_JSON_SIZE:
-            raise ValueError(f"{name} 파일이 허용 크기를 초과했습니다.")
+        if info.file_size > max_size:
+            raise ValueError(
+                f"{name} 파일이 허용 크기를 초과했습니다. "
+                f"최대 {max_size // (1024 * 1024):,}MB까지 지원합니다."
+            )
+        return info
+
+    @staticmethod
+    def _read_json_member(archive, name):
+        max_size = (
+            MAX_MANIFEST_JSON_SIZE
+            if name == "manifest.json"
+            else MAX_METADATA_JSON_SIZE
+        )
+        info = CategoryMigrationEngine._json_member_info(archive, name, max_size)
         try:
-            return json.loads(archive.read(name).decode("utf-8"))
+            with archive.open(info, "r") as source:
+                with io.TextIOWrapper(source, encoding="utf-8") as text:
+                    return json.load(text)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError(f"{name} 파일을 읽을 수 없습니다: {error}")
+        except MemoryError as error:
+            raise ValueError(
+                f"{name} 파일을 처리할 메모리가 부족합니다. "
+                "더 작은 카테고리로 나누어 다시 내보내 주세요."
+            ) from error
+
+    @staticmethod
+    def _read_library_metadata(archive):
+        info = CategoryMigrationEngine._json_member_info(
+            archive,
+            "metadata.json",
+            MAX_METADATA_JSON_SIZE,
+        )
+        try:
+            with archive.open(info, "r") as source:
+                with io.TextIOWrapper(source, encoding="utf-8") as text:
+                    prefix = text.read(MAX_LIBRARY_JSON_PREFIX_CHARS)
+        except UnicodeDecodeError as error:
+            raise ValueError(f"metadata.json 파일을 읽을 수 없습니다: {error}")
+
+        match = re.search(r'"library"\s*:\s*', prefix)
+        if match is None:
+            raise ValueError("metadata.json에서 library 정보를 찾을 수 없습니다.")
+        start = match.end()
+        if start >= len(prefix) or prefix[start] != "{":
+            raise ValueError("metadata.json의 library 형식이 올바르지 않습니다.")
+
+        depth = 0
+        in_string = False
+        escaped = False
+        for index in range(start, len(prefix)):
+            character = prefix[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    in_string = False
+                continue
+            if character == '"':
+                in_string = True
+            elif character == "{":
+                depth += 1
+            elif character == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        library = json.loads(prefix[start : index + 1])
+                    except json.JSONDecodeError as error:
+                        raise ValueError(
+                            f"metadata.json의 library 정보를 읽을 수 없습니다: {error}"
+                        ) from error
+                    if not isinstance(library, dict):
+                        raise ValueError("패키지 library 형식이 올바르지 않습니다.")
+                    return library
+        raise ValueError(
+            "metadata.json의 library 정보가 너무 크거나 형식이 올바르지 않습니다."
+        )
 
     def inspect_package(self, package_path):
         path = self._work_path(package_path, must_exist=True)
@@ -264,46 +342,94 @@ class CategoryMigrationEngine:
                 if corrupt:
                     raise ValueError(f"ZIP CRC 검사에 실패했습니다: {corrupt}")
                 manifest = self._read_json_member(archive, "manifest.json")
-                metadata = self._read_json_member(archive, "metadata.json")
-                cover_members = [
-                    member
-                    for member in archive.infolist()
-                    if member.filename.startswith("covers/") and not member.is_dir()
-                ]
+                if not isinstance(manifest, dict):
+                    raise ValueError("패키지 manifest 형식이 올바르지 않습니다.")
+                metadata_info = self._json_member_info(
+                    archive,
+                    "metadata.json",
+                    MAX_METADATA_JSON_SIZE,
+                )
+                summary_only = (
+                    metadata_info.file_size > MAX_INLINE_INSPECTION_METADATA_SIZE
+                )
+                metadata = (
+                    None
+                    if summary_only
+                    else self._read_json_member(archive, "metadata.json")
+                )
+                library = (
+                    self._read_library_metadata(archive)
+                    if summary_only
+                    else metadata.get("library")
+                )
+                covers_count = 0
+                cover_uncompressed_size = 0
+                for member in archive.infolist():
+                    if member.filename.startswith("covers/") and not member.is_dir():
+                        covers_count += 1
+                        cover_uncompressed_size += member.file_size
         except zipfile.BadZipFile as error:
             raise ValueError(f"ZIP 패키지를 읽을 수 없습니다: {error}")
 
-        if not isinstance(manifest, dict) or not isinstance(metadata, dict):
+        if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("패키지 메타데이터 형식이 올바르지 않습니다.")
         if str(manifest.get("export_version") or "") not in SUPPORTED_PACKAGE_VERSIONS:
             raise ValueError(
                 f"지원하지 않는 패키지 버전입니다: {manifest.get('export_version')}"
             )
-        library = metadata.get("library")
         media_kind = str(manifest.get("media_kind") or "book").strip().lower()
         db_type = str(manifest.get("db_type") or "general").strip().lower()
         is_audiobook = media_kind == "audiobook" or db_type == "audiobook"
-        books = metadata.get("books", [])
-        offsets = metadata.get("offsets", {})
-        audiobooks = metadata.get("audiobooks", [])
-        audiobook_tracks = metadata.get("audiobook_tracks", [])
-        audiobook_progress = metadata.get("audiobook_progress", [])
-        audiobook_track_progress = metadata.get("audiobook_track_progress", [])
         if not isinstance(library, dict):
             raise ValueError("패키지 library 형식이 올바르지 않습니다.")
-        if is_audiobook:
-            if not all(
-                isinstance(items, list)
-                for items in (
-                    audiobooks,
-                    audiobook_tracks,
-                    audiobook_progress,
-                    audiobook_track_progress,
-                )
-            ):
-                raise ValueError("오디오북 패키지 데이터 형식이 올바르지 않습니다.")
-        elif not isinstance(books, list) or not isinstance(offsets, dict):
-            raise ValueError("패키지 books 또는 offsets 형식이 올바르지 않습니다.")
+        deferred_counts = []
+        if summary_only:
+            books_count = int(manifest.get("books_count") or 0)
+            audiobooks_count = int(manifest.get("audiobooks_count") or 0)
+            audiobook_tracks_count = int(
+                manifest.get("audiobook_tracks_count") or 0
+            )
+            audiobook_progress_count = int(
+                manifest.get("audiobook_progress_count") or 0
+            )
+            audiobook_track_progress_count = int(
+                manifest.get("audiobook_track_progress_count") or 0
+            )
+            offsets_count = int(manifest.get("offsets_count") or 0)
+            if "offsets_count" not in manifest and not is_audiobook:
+                deferred_counts.append("offsets_count")
+            user_progress_count = int(manifest.get("user_progress_count") or 0)
+            user_favorites_count = int(manifest.get("user_favorites_count") or 0)
+        else:
+            books = metadata.get("books", [])
+            offsets = metadata.get("offsets", {})
+            audiobooks = metadata.get("audiobooks", [])
+            audiobook_tracks = metadata.get("audiobook_tracks", [])
+            audiobook_progress = metadata.get("audiobook_progress", [])
+            audiobook_track_progress = metadata.get("audiobook_track_progress", [])
+            if is_audiobook:
+                if not all(
+                    isinstance(items, list)
+                    for items in (
+                        audiobooks,
+                        audiobook_tracks,
+                        audiobook_progress,
+                        audiobook_track_progress,
+                    )
+                ):
+                    raise ValueError("오디오북 패키지 데이터 형식이 올바르지 않습니다.")
+            elif not isinstance(books, list) or not isinstance(offsets, dict):
+                raise ValueError("패키지 books 또는 offsets 형식이 올바르지 않습니다.")
+            books_count = len(books)
+            audiobooks_count = len(audiobooks)
+            audiobook_tracks_count = len(audiobook_tracks)
+            audiobook_progress_count = len(audiobook_progress)
+            audiobook_track_progress_count = len(audiobook_track_progress)
+            offsets_count = sum(
+                len(items) for items in offsets.values() if isinstance(items, list)
+            )
+            user_progress_count = len(metadata.get("user_progress", []))
+            user_favorites_count = len(metadata.get("user_favorites", []))
         physical_paths = library.get("physical_paths", [])
         if not isinstance(physical_paths, list):
             raise ValueError("패키지 물리 경로 형식이 올바르지 않습니다.")
@@ -318,18 +444,21 @@ class CategoryMigrationEngine:
             "media_kind": "audiobook" if is_audiobook else "book",
             "library_id": manifest.get("library_id"),
             "library_name": manifest.get("library_name") or library.get("name"),
-            "books_count": len(books),
-            "audiobooks_count": len(audiobooks),
-            "audiobook_tracks_count": len(audiobook_tracks),
-            "audiobook_progress_count": len(audiobook_progress),
-            "audiobook_track_progress_count": len(audiobook_track_progress),
-            "covers_count": len(cover_members),
-            "offsets_count": sum(len(items) for items in offsets.values() if isinstance(items, list)),
-            "user_progress_count": len(metadata.get("user_progress", [])),
-            "user_favorites_count": len(metadata.get("user_favorites", [])),
+            "books_count": books_count,
+            "audiobooks_count": audiobooks_count,
+            "audiobook_tracks_count": audiobook_tracks_count,
+            "audiobook_progress_count": audiobook_progress_count,
+            "audiobook_track_progress_count": audiobook_track_progress_count,
+            "covers_count": covers_count,
+            "offsets_count": offsets_count,
+            "user_progress_count": user_progress_count,
+            "user_favorites_count": user_favorites_count,
             "physical_paths": [str(path) for path in physical_paths],
             "root_paths_count": len(physical_paths),
-            "cover_uncompressed_size": sum(member.file_size for member in cover_members),
+            "cover_uncompressed_size": cover_uncompressed_size,
+            "metadata_json_size": metadata_info.file_size,
+            "metadata_summary_only": summary_only,
+            "deferred_counts": deferred_counts,
         }
 
     def list_packages(self):
@@ -563,6 +692,7 @@ class CategoryMigrationEngine:
                 "covers_count": len(cover_paths),
                 "user_progress_count": len(user_progress_payload),
                 "user_favorites_count": len(user_favorites_payload),
+                "offsets_count": sum(len(items) for items in offsets_payload.values()),
                 "media_kind": "book",
             }
             metadata = {

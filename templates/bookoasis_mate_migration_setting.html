@@ -208,13 +208,17 @@ function migrationLoadPackages() {
 
 function migrationRenderPackageInfo(data) {
   var isAudio = data.media_kind === 'audiobook' || data.db_type === 'audiobook';
+  var deferredCounts = data.deferred_counts || [];
+  var offsetSummary = deferredCounts.indexOf('offsets_count') !== -1
+    ? ' · offset 가져오기 중 집계'
+    : ' · offset ' + Number(data.offsets_count || 0).toLocaleString() + '건';
   var mediaSummary = isAudio
     ? ' · 오디오북 ' + Number(data.audiobooks_count || 0).toLocaleString() + '개' +
       ' · 트랙 ' + Number(data.audiobook_tracks_count || 0).toLocaleString() + '개' +
       ' · 재생 진행률 ' + Number(data.audiobook_progress_count || 0).toLocaleString() + '건' +
       ' · 트랙 진행률 ' + Number(data.audiobook_track_progress_count || 0).toLocaleString() + '건'
     : ' · 도서 ' + Number(data.books_count || 0).toLocaleString() + '권' +
-      ' · offset ' + Number(data.offsets_count || 0).toLocaleString() + '건' +
+      offsetSummary +
       ' · 진행률 ' + Number(data.user_progress_count || 0).toLocaleString() + '건' +
       ' · 즐겨찾기 ' + Number(data.user_favorites_count || 0).toLocaleString() + '건';
   var rootLines = (data.physical_paths || []).map(function(path, index) {
@@ -226,6 +230,9 @@ function migrationRenderPackageInfo(data) {
     ' · ' + bookoasisMateEscape(data.db_type) +
     mediaSummary +
     ' · 표지 ' + Number(data.covers_count || 0).toLocaleString() + '개' +
+    (data.metadata_summary_only
+      ? '<div class="doctor-muted mt-1">대형 metadata.json은 manifest와 카테고리 정보만 경량 검사했습니다. 전체 데이터는 별도 가져오기 작업에서 검증합니다.</div>'
+      : '') +
     '<div class="mt-2"><strong>원본 DB 물리 경로</strong></div>' +
     (rootLines ? '<ul class="mb-0 mt-1">' + rootLines + '</ul>' : '<div class="doctor-muted mt-1">기록된 원본 경로가 없습니다.</div>')
   );
