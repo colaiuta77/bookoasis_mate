@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css', v='dashboard-chart-2') }}">
 <script src="{{ url_for('bookoasis_mate.static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
@@ -102,8 +102,16 @@ function doctorSummaryOverview(totals, scanner, audiobook, staleDays) {
 
   var chartArea = bookoasisMateText('div', 'doctor-overview-chart-area', '');
   var donut = bookoasisMateText('div', 'doctor-overview-chart-wrap', '');
+  donut.style.position = 'relative';
+  donut.style.width = '176px';
+  donut.style.height = '176px';
+  donut.style.flex = '0 0 176px';
   var canvas = document.createElement('canvas');
   canvas.id = 'doctor_health_chart';
+  canvas.width = 176;
+  canvas.height = 176;
+  canvas.style.width = '176px';
+  canvas.style.height = '176px';
   canvas.setAttribute('aria-label', '정상 도서와 점검 필요 도서 비율');
   donut.appendChild(canvas);
   var center = bookoasisMateText('div', 'doctor-overview-center', '');
@@ -205,8 +213,8 @@ function doctorRenderHealthChart(totals) {
       }]
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
+      responsive: false,
+      maintainAspectRatio: true,
       animation: false,
       cutout: '74%',
       plugins: {
