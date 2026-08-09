@@ -16,6 +16,7 @@ setting = {
                 "name": "라이브러리 진단",
                 "list": [
                     {"uri": "dashboard", "name": "상태 요약"},
+                    {"uri": "statistics", "name": "라이브러리 통계"},
                     {"uri": "scanner", "name": "스캔 상태"},
                     {"uri": "issues", "name": "문제 도서"},
                     {"uri": "gaps", "name": "시리즈 누락"},

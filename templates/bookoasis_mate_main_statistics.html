@@ -1,0 +1,113 @@
+{# BookOasis 라이브러리 분포와 메타데이터 통계를 차트로 표시합니다. #}
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+<div class="doctor-toolbar doctor-statistics-toolbar">
+  <select id="statistics_db_type" class="form-control form-control-sm">
+    <option value="general">일반 DB</option>
+    {% if arg.get('adult_enabled') == 'True' %}<option value="adult">성인 DB</option>{% endif %}
+    <option value="audiobook">오디오북 DB</option>
+  </select>
+  <select id="statistics_library" class="form-control form-control-sm" disabled>
+    <option value="">전체 보관함</option>
+  </select>
+  <button id="statistics_start" type="button" class="btn btn-sm btn-primary" disabled>분석</button>
+  <button id="statistics_stop" type="button" class="btn btn-sm btn-outline-secondary" disabled>중지</button>
+  <span id="statistics_catalog_note" class="doctor-muted"></span>
+</div>
+<p class="doctor-muted">페이지 진입 시 자동 분석하지 않습니다. 분석 버튼을 누르면 별도 작업에서 통계를 계산하며, 다른 메뉴로 이동했다 돌아와도 실행 상태와 마지막 결과를 복원합니다.</p>
+
+<section id="statistics_status" class="doctor-card doctor-statistics-status">
+  <div class="doctor-statistics-status-head">
+    <div>
+      <strong id="statistics_status_title">대기중</strong>
+      <div id="statistics_status_message" class="doctor-muted">분석 조건을 선택하고 분석 버튼을 눌러 주세요.</div>
+    </div>
+    <span id="statistics_elapsed" class="doctor-muted"></span>
+  </div>
+  <div class="doctor-live-progress-track" aria-hidden="true">
+    <div id="statistics_progress_bar" class="doctor-live-progress-bar"></div>
+  </div>
+  <div id="statistics_error" class="doctor-live-error" style="display:none"></div>
+</section>
+
+<section id="statistics_result" style="display:none">
+  <div class="doctor-statistics-result-head">
+    <div>
+      <h3 id="statistics_result_title">라이브러리 통계</h3>
+      <div id="statistics_result_meta" class="doctor-muted"></div>
+    </div>
+  </div>
+
+  <div id="statistics_kpis" class="doctor-statistics-kpis"></div>
+
+  <div class="doctor-statistics-grid">
+    <article class="doctor-card doctor-statistics-chart-card">
+      <h4>파일 형식 분포</h4>
+      <div class="doctor-statistics-canvas"><canvas id="statistics_format_count"></canvas></div>
+      <div id="statistics_format_empty" class="doctor-empty" style="display:none">파일 형식 정보가 없습니다.</div>
+    </article>
+    <article class="doctor-card doctor-statistics-chart-card">
+      <h4>형식별 저장 용량</h4>
+      <div class="doctor-statistics-canvas"><canvas id="statistics_format_size"></canvas></div>
+      <div id="statistics_format_size_empty" class="doctor-empty" style="display:none">파일 크기 정보가 없습니다.</div>
+    </article>
+    <article class="doctor-card doctor-statistics-chart-card">
+      <h4>보관함별 자료 수</h4>
+      <div class="doctor-statistics-canvas"><canvas id="statistics_libraries"></canvas></div>
+      <div id="statistics_libraries_empty" class="doctor-empty" style="display:none">보관함 분포가 없습니다.</div>
+    </article>
+    <article class="doctor-card doctor-statistics-chart-card">
+      <h4>메타데이터 완성도</h4>
+      <div class="doctor-statistics-canvas"><canvas id="statistics_metadata_score"></canvas></div>
+      <div id="statistics_metadata_score_empty" class="doctor-empty" style="display:none">분석 가능한 메타데이터가 없습니다.</div>
+    </article>
+    <article class="doctor-card doctor-statistics-chart-card">
+      <h4>항목별 메타데이터 누락</h4>
+      <div class="doctor-statistics-canvas doctor-statistics-canvas-tall"><canvas id="statistics_metadata_missing"></canvas></div>
+      <div id="statistics_metadata_missing_empty" class="doctor-empty" style="display:none">메타데이터 누락 정보가 없습니다.</div>
+    </article>
+    <article class="doctor-card doctor-statistics-chart-card">
+      <h4 id="statistics_progress_title">독서 상태</h4>
+      <div class="doctor-statistics-canvas"><canvas id="statistics_progress"></canvas></div>
+      <div id="statistics_progress_empty" class="doctor-empty" style="display:none">진행 기록이 없습니다.</div>
+    </article>
+    <article id="statistics_genres_card" class="doctor-card doctor-statistics-chart-card">
+      <h4>장르 상위 분포</h4>
+      <div class="doctor-statistics-canvas doctor-statistics-canvas-tall"><canvas id="statistics_genres"></canvas></div>
+      <div id="statistics_genres_empty" class="doctor-empty" style="display:none">장르 정보가 없습니다.</div>
+    </article>
+    <article id="statistics_tags_card" class="doctor-card doctor-statistics-chart-card">
+      <h4>태그 상위 분포</h4>
+      <div class="doctor-statistics-canvas doctor-statistics-canvas-tall"><canvas id="statistics_tags"></canvas></div>
+      <div id="statistics_tags_empty" class="doctor-empty" style="display:none">태그 정보가 없습니다.</div>
+    </article>
+    <article class="doctor-card doctor-statistics-chart-card">
+      <h4>등록 추이</h4>
+      <div class="doctor-statistics-canvas"><canvas id="statistics_timeline"></canvas></div>
+      <div id="statistics_timeline_empty" class="doctor-empty" style="display:none">등록 시각 정보가 없습니다.</div>
+    </article>
+    <article class="doctor-card doctor-statistics-chart-card">
+      <h4 id="statistics_year_title">출간 연도 분포</h4>
+      <div class="doctor-statistics-canvas"><canvas id="statistics_years"></canvas></div>
+      <div id="statistics_years_empty" class="doctor-empty" style="display:none">연도 정보가 없습니다.</div>
+    </article>
+  </div>
+
+  <article class="doctor-card doctor-statistics-largest">
+    <h4>용량이 큰 항목</h4>
+    <div class="doctor-table-wrap">
+      <table class="table table-sm doctor-table">
+        <thead><tr><th>순위</th><th>제목</th><th>시리즈</th><th>보관함</th><th>용량</th></tr></thead>
+        <tbody id="statistics_largest_rows"></tbody>
+      </table>
+    </div>
+    <div id="statistics_largest_empty" class="doctor-empty" style="display:none">파일 크기 정보가 없습니다.</div>
+  </article>
+</section>
+
+<script src="{{ url_for('bookoasis_mate.static', filename='js/library_statistics.js') }}"></script>
+{% endblock %}

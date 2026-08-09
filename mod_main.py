@@ -55,7 +55,7 @@ class ModuleMain(PluginModuleBase):
         return P.bookoasis_mate_service
 
     def process_menu(self, page, req):
-        page = page if page in {"dashboard", "issues", "scanner", "logs", "gaps", "covers", "orphan_covers", "history", "manual"} else "dashboard"
+        page = page if page in {"dashboard", "statistics", "issues", "scanner", "logs", "gaps", "covers", "orphan_covers", "history", "manual"} else "dashboard"
         P.logger.debug(f"[BookOasisMate] 메인 메뉴 열기 page={page}")
         arg = P.ModelSetting.to_dict()
         arg["page"] = page
@@ -79,6 +79,33 @@ class ModuleMain(PluginModuleBase):
                 return jsonify({"ret": "success", "data": self.service.report()})
             if command == "run_scan":
                 return jsonify({"ret": "success", "msg": "검사를 완료했습니다.", "data": self.service.run_and_record("manual")})
+            if command == "statistics_catalog":
+                data = self.service.library_statistics_catalog(
+                    req.form.get("db_type", "general")
+                )
+                return jsonify({"ret": "success", "data": data})
+            if command == "statistics_start":
+                data = self.service.start_library_statistics(
+                    db_type=req.form.get("db_type", "general"),
+                    library_id=req.form.get("library_id"),
+                )
+                return jsonify({
+                    "ret": "success" if data.get("started") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
+            if command == "statistics_status":
+                return jsonify({
+                    "ret": "success",
+                    "data": self.service.library_statistics_status(),
+                })
+            if command == "statistics_stop":
+                data = self.service.stop_library_statistics()
+                return jsonify({
+                    "ret": "success" if data.get("requested") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
             if command == "quick_check":
                 data = self.service.quick_check(req.form.get("db_type", "general"))
                 return jsonify({

@@ -22,6 +22,10 @@ from .category_migration import (
     parse_paths,
 )
 from .kavita_migration import KavitaMigrationEngine, parse_name_list
+from .library_statistics import (
+    LibraryStatisticsCancelled,
+    LibraryStatisticsEngine,
+)
 from .mate_engine import BookOasisMateEngine, _as_bool, _as_int
 from .font_manager import CustomFontManager
 
@@ -148,6 +152,10 @@ class BookOasisMateService:
         self._cover_inspection_status_path = None
         self._cover_inspection_stop_path = None
         self._cover_inspection_status = self._empty_cover_inspection_status()
+        self._library_statistics_thread = None
+        self._library_statistics_stop = threading.Event()
+        self._library_statistics_started_monotonic = None
+        self._library_statistics_status = self._empty_library_statistics_status()
         self._migration_stop = threading.Event()
         self._migration_process = None
         self._migration_status_path = None
@@ -249,6 +257,27 @@ class BookOasisMateService:
             "logs": [],
             "stopped": False,
             "error": "",
+        }
+
+    @staticmethod
+    def _empty_library_statistics_status():
+        return {
+            "is_working": "wait",
+            "job_type": "library_statistics",
+            "db_type": "general",
+            "library_id": "",
+            "library_name": "전체 보관함",
+            "stage": "",
+            "current": 0,
+            "total": 100,
+            "progress_percent": 0,
+            "started_at": "",
+            "finished_at": "",
+            "elapsed_seconds": 0,
+            "message": "분석 조건을 선택하고 분석 버튼을 눌러 주세요.",
+            "result": None,
+            "error": "",
+            "stopped": False,
         }
 
     def _debug(self, event, **fields):
@@ -415,7 +444,196 @@ class BookOasisMateService:
             self._cover_issue_cache_key = None
             self._cover_issue_cache = None
             self._gap_cache = {}
+            if self._library_statistics_status.get("is_working") != "run":
+                self._library_statistics_status = self._empty_library_statistics_status()
         self._debug("상태 요약 캐시 초기화")
+
+    def library_statistics_catalog(self, db_type="general"):
+        started = time.monotonic()
+        data = LibraryStatisticsEngine(self.settings()).catalog(db_type)
+        self._debug(
+            "라이브러리 통계 보관함 조회 완료",
+            db_type=db_type,
+            libraries=len(data.get("libraries", [])),
+            duration_ms=self._duration_ms(started),
+        )
+        return data
+
+    def library_statistics_status(self):
+        with self._lock:
+            status = copy.deepcopy(self._library_statistics_status)
+            if (
+                status.get("is_working") == "run"
+                and self._library_statistics_started_monotonic is not None
+            ):
+                status["elapsed_seconds"] = round(
+                    time.monotonic() - self._library_statistics_started_monotonic,
+                    1,
+                )
+            return status
+
+    def _library_statistics_progress(self, stage, current, total, message):
+        with self._lock:
+            status = self._library_statistics_status
+            if status.get("is_working") != "run":
+                return
+            status["stage"] = str(stage or "")
+            status["current"] = int(current or 0)
+            status["total"] = max(1, int(total or 100))
+            status["progress_percent"] = max(
+                0,
+                min(100, round(status["current"] / status["total"] * 100)),
+            )
+            status["message"] = str(message or "")
+
+    def _run_library_statistics(self, settings, db_type, library_id):
+        try:
+            result = LibraryStatisticsEngine(settings).analyze(
+                db_type=db_type,
+                library_id=library_id,
+                on_progress=self._library_statistics_progress,
+                should_stop=self._library_statistics_stop.is_set,
+            )
+            with self._lock:
+                status = self._library_statistics_status
+                status.update(
+                    {
+                        "is_working": "done",
+                        "stage": "complete",
+                        "current": 100,
+                        "total": 100,
+                        "progress_percent": 100,
+                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "elapsed_seconds": round(
+                            time.monotonic() - self._library_statistics_started_monotonic,
+                            1,
+                        ),
+                        "message": "라이브러리 통계 분석을 완료했습니다.",
+                        "result": result,
+                        "error": "",
+                    }
+                )
+            self._debug(
+                "라이브러리 통계 분석 완료",
+                db_type=db_type,
+                library_id=library_id or "all",
+                total_items=result.get("summary", {}).get("total_items", 0),
+                duration_ms=result.get("duration_ms", 0),
+            )
+        except LibraryStatisticsCancelled as error:
+            with self._lock:
+                self._library_statistics_status.update(
+                    {
+                        "is_working": "stopped",
+                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "elapsed_seconds": round(
+                            time.monotonic() - self._library_statistics_started_monotonic,
+                            1,
+                        ),
+                        "message": str(error),
+                        "stopped": True,
+                    }
+                )
+            self._debug(
+                "라이브러리 통계 분석 중지",
+                db_type=db_type,
+                library_id=library_id or "all",
+            )
+        except Exception as error:
+            self.P.logger.error(f"BookOasis Mate 라이브러리 통계 오류: {error}")
+            with self._lock:
+                self._library_statistics_status.update(
+                    {
+                        "is_working": "fail",
+                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "elapsed_seconds": round(
+                            time.monotonic() - self._library_statistics_started_monotonic,
+                            1,
+                        ),
+                        "message": "라이브러리 통계 분석에 실패했습니다.",
+                        "error": str(error),
+                    }
+                )
+        finally:
+            with self._lock:
+                self._library_statistics_thread = None
+
+    def start_library_statistics(self, db_type="general", library_id=None):
+        db_type = str(db_type or "general").strip().lower()
+        selected_library_id = str(library_id or "").strip()
+        with self._lock:
+            if self._library_statistics_status.get("is_working") == "run":
+                return {
+                    "started": False,
+                    "message": "라이브러리 통계 분석이 이미 실행 중입니다.",
+                    "status": copy.deepcopy(self._library_statistics_status),
+                }
+        catalog = self.library_statistics_catalog(db_type)
+        library_name = "전체 보관함"
+        if selected_library_id:
+            library = next(
+                (
+                    item
+                    for item in catalog.get("libraries", [])
+                    if str(item.get("id")) == selected_library_id
+                ),
+                None,
+            )
+            if library is None:
+                raise ValueError("선택한 보관함을 찾을 수 없습니다.")
+            library_name = str(library.get("name") or f"보관함 {selected_library_id}")
+        initial = self._empty_library_statistics_status()
+        initial.update(
+            {
+                "is_working": "run",
+                "db_type": db_type,
+                "library_id": selected_library_id,
+                "library_name": library_name,
+                "stage": "prepare",
+                "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "message": "라이브러리 통계 분석을 준비하고 있습니다.",
+            }
+        )
+        self._library_statistics_stop.clear()
+        with self._lock:
+            self._library_statistics_status = initial
+            self._library_statistics_started_monotonic = time.monotonic()
+            thread = threading.Thread(
+                target=self._run_library_statistics,
+                args=(self.settings(), db_type, selected_library_id or None),
+                name="bookoasis-mate-library-statistics",
+                daemon=True,
+            )
+            self._library_statistics_thread = thread
+            thread.start()
+        self._debug(
+            "라이브러리 통계 백그라운드 분석 시작",
+            db_type=db_type,
+            library_id=selected_library_id or "all",
+        )
+        return {
+            "started": True,
+            "message": "라이브러리 통계 분석을 시작했습니다.",
+            "status": copy.deepcopy(initial),
+        }
+
+    def stop_library_statistics(self):
+        current = self.library_statistics_status()
+        if current.get("is_working") != "run":
+            return {
+                "requested": False,
+                "message": "실행 중인 라이브러리 통계 분석이 없습니다.",
+                "status": current,
+            }
+        self._library_statistics_stop.set()
+        with self._lock:
+            self._library_statistics_status["message"] = "현재 데이터 묶음 처리 후 중지합니다."
+        self._debug("라이브러리 통계 분석 중지 요청")
+        return {
+            "requested": True,
+            "message": "라이브러리 통계 분석 중지를 요청했습니다.",
+            "status": self.library_statistics_status(),
+        }
 
     def report(self, force=False):
         started = time.monotonic()
