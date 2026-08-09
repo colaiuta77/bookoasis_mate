@@ -8,8 +8,8 @@
 .doctor-sub { margin-top:7px; font-size:.85rem; color:#6c757d; }
 .doctor-overview-card { display:grid; grid-template-columns:230px minmax(0,1fr); gap:22px; align-items:center; }
 .doctor-overview-chart-area { display:flex; flex-direction:column; align-items:center; gap:12px; }
-.doctor-overview-donut { --doctor-health-percent:0%; position:relative; width:154px; height:154px; border-radius:50%; background:conic-gradient(#198754 0 var(--doctor-health-percent), #f0ad00 var(--doctor-health-percent) 100%); }
-.doctor-overview-donut-empty { background:#dee2e6; }
+.doctor-overview-chart-wrap { position:relative; width:154px; height:154px; }
+.doctor-overview-chart-wrap canvas { position:absolute; inset:0; width:100% !important; height:100% !important; }
 .doctor-overview-center { position:absolute; inset:20px; display:flex; flex-direction:column; align-items:center; justify-content:center; border-radius:50%; background:#fff; text-align:center; box-shadow:inset 0 0 0 1px rgba(127,127,127,.08); }
 .doctor-overview-center strong { font-size:1.35rem; line-height:1.2; }
 .doctor-overview-center span { margin-top:3px; color:#6c757d; font-size:.76rem; }
@@ -27,6 +27,10 @@
 .doctor-overview-stat-healthy { color:#198754; }
 .doctor-overview-stat-warning { color:#b06a00; }
 .doctor-overview-note { grid-column:2; margin:10px 16px 0; padding-top:8px; border-top:1px dashed #dee2e6; color:#6c757d; font-size:.75rem; line-height:1.45; }
+.doctor-report-refresh { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:14px; border-color:rgba(13,110,253,.35); }
+.doctor-report-refresh strong::before { content:""; display:inline-block; width:12px; height:12px; margin-right:7px; border:2px solid #0d6efd; border-right-color:transparent; border-radius:50%; animation:doctor-spin .75s linear infinite; vertical-align:-1px; }
+.doctor-report-refresh-fail { border-color:rgba(220,53,69,.45); }
+.doctor-report-refresh-fail strong::before { content:"!"; width:auto; height:auto; border:0; color:#dc3545; animation:none; font-weight:700; }
 .doctor-db-reason { margin-top:14px; padding:11px 13px; border-left:4px solid; border-radius:4px; font-size:.86rem; }
 .doctor-db-reason ul { display:flex; flex-wrap:wrap; gap:6px 20px; margin:7px 0 5px; padding-left:18px; }
 .doctor-db-reason small { color:#6c757d; }

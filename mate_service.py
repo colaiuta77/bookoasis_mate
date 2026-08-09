@@ -130,6 +130,10 @@ class BookOasisMateService:
     def __init__(self, plugin):
         self.P = plugin
         self._lock = threading.RLock()
+        self._report_build_lock = threading.Lock()
+        self._report_thread = None
+        self._report_started_monotonic = None
+        self._report_status = self._empty_report_status()
         self._cached_report = None
         self._cached_at = 0.0
         self._settings_fingerprint = None
@@ -168,6 +172,20 @@ class BookOasisMateService:
         self._database_migration_stop_path = None
         self._database_migration_started_monotonic = None
         self._database_migration_status = self._empty_migration_status()
+
+    @staticmethod
+    def _empty_report_status():
+        return {
+            "is_working": "wait",
+            "job_type": "summary_report",
+            "started_at": "",
+            "finished_at": "",
+            "elapsed_seconds": 0,
+            "message": "상태 요약을 준비하고 있습니다.",
+            "result": None,
+            "error": "",
+            "cached": False,
+        }
 
     @staticmethod
     def _empty_orphan_cleanup_status():
@@ -444,6 +462,8 @@ class BookOasisMateService:
             self._cover_issue_cache_key = None
             self._cover_issue_cache = None
             self._gap_cache = {}
+            if self._report_status.get("is_working") != "run":
+                self._report_status = self._empty_report_status()
             if self._library_statistics_status.get("is_working") != "run":
                 self._library_statistics_status = self._empty_library_statistics_status()
         self._debug("상태 요약 캐시 초기화")
@@ -646,11 +666,18 @@ class BookOasisMateService:
                 self._debug("상태 요약 캐시 사용", age_seconds=round(time.monotonic() - self._cached_at, 1))
                 return self._cached_report
 
+        with self._report_build_lock:
+            with self._lock:
+                fresh = self._cached_report is not None and time.monotonic() - self._cached_at <= ttl
+                if not force and fresh and fingerprint == self._settings_fingerprint:
+                    self._debug("상태 요약 캐시 사용", age_seconds=round(time.monotonic() - self._cached_at, 1))
+                    return self._cached_report
             self._debug("상태 요약 생성 시작", force=str(bool(force)).lower())
             report = self.engine(settings).build_report()
-            self._cached_report = report
-            self._cached_at = time.monotonic()
-            self._settings_fingerprint = fingerprint
+            with self._lock:
+                self._cached_report = report
+                self._cached_at = time.monotonic()
+                self._settings_fingerprint = fingerprint
             self._debug(
                 "상태 요약 생성 완료",
                 status=report.get("status"),
@@ -659,6 +686,107 @@ class BookOasisMateService:
                 duration_ms=self._duration_ms(started),
             )
             return report
+
+    def report_refresh_status(self):
+        with self._lock:
+            status = copy.deepcopy(self._report_status)
+            if (
+                status.get("is_working") == "run"
+                and self._report_started_monotonic is not None
+            ):
+                status["elapsed_seconds"] = round(
+                    time.monotonic() - self._report_started_monotonic,
+                    1,
+                )
+            return status
+
+    def _run_report_refresh(self, force):
+        try:
+            report = self.report(force=force)
+            with self._lock:
+                self._report_status.update(
+                    {
+                        "is_working": "done",
+                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "elapsed_seconds": round(
+                            time.monotonic() - self._report_started_monotonic,
+                            1,
+                        ),
+                        "message": "상태 요약 갱신을 완료했습니다.",
+                        "result": report,
+                        "error": "",
+                        "cached": False,
+                    }
+                )
+        except Exception as error:
+            self.P.logger.error(f"BookOasis Mate 상태 요약 갱신 오류: {error}")
+            with self._lock:
+                self._report_status.update(
+                    {
+                        "is_working": "fail",
+                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "elapsed_seconds": round(
+                            time.monotonic() - self._report_started_monotonic,
+                            1,
+                        ),
+                        "message": "상태 요약 갱신에 실패했습니다.",
+                        "error": str(error),
+                    }
+                )
+        finally:
+            with self._lock:
+                self._report_thread = None
+
+    def start_report_refresh(self, force=False):
+        settings = self.settings()
+        fingerprint = tuple(sorted((key, str(value)) for key, value in settings.items()))
+        ttl = settings["cache_seconds"]
+        with self._lock:
+            if self._report_status.get("is_working") == "run":
+                return {
+                    "started": False,
+                    "status": self.report_refresh_status(),
+                }
+            cached_report = copy.deepcopy(self._cached_report)
+            fresh = (
+                cached_report is not None
+                and time.monotonic() - self._cached_at <= ttl
+                and fingerprint == self._settings_fingerprint
+            )
+            if not force and fresh:
+                status = self._empty_report_status()
+                status.update(
+                    {
+                        "is_working": "done",
+                        "message": "캐시된 상태 요약을 표시합니다.",
+                        "result": cached_report,
+                        "cached": True,
+                    }
+                )
+                self._report_status = status
+                return {"started": False, "status": copy.deepcopy(status)}
+
+            status = self._empty_report_status()
+            status.update(
+                {
+                    "is_working": "run",
+                    "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                    "message": "BookOasis DB 상태를 백그라운드에서 집계하고 있습니다.",
+                    "result": cached_report,
+                    "cached": cached_report is not None,
+                }
+            )
+            self._report_status = status
+            self._report_started_monotonic = time.monotonic()
+            thread = threading.Thread(
+                target=self._run_report_refresh,
+                args=(bool(force),),
+                name="bookoasis-mate-summary-report",
+                daemon=True,
+            )
+            self._report_thread = thread
+            thread.start()
+            return {"started": True, "status": copy.deepcopy(status)}
 
     def run_and_record(self, trigger="manual"):
         started = time.monotonic()

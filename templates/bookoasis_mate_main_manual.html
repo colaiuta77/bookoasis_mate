@@ -21,7 +21,7 @@
   <h5>상태 요약</h5>
   <ul>
     <li><strong>설명</strong> — 일반·성인 활성 도서의 정상·점검 필요 비율과 메타데이터·페이지 수·파일 크기 미기록, 오디오북·트랙 상태와 최근 스캔 상태를 한 화면에 집계합니다.</li>
-    <li><strong>동작 방식</strong> — BookOasis DB를 읽기 전용으로 조회합니다. <strong>검사 실행 및 기록</strong>을 누르면 최신 값을 다시 계산해 검사 이력에 저장합니다. 수동 DB 무결성 검사는 SQLite에 <code>PRAGMA quick_check</code>, MariaDB에 <code>CHECK TABLE ... QUICK</code>을 실행합니다.</li>
+    <li><strong>동작 방식</strong> — BookOasis DB를 읽기 전용으로 조회합니다. 화면 진입 시 캐시가 있으면 먼저 표시하고 오래되었거나 없으면 백그라운드에서 갱신합니다. <strong>검사 실행 및 기록</strong>을 누르면 최신 값을 다시 계산해 검사 이력에 저장합니다. 수동 DB 무결성 검사는 SQLite에 <code>PRAGMA quick_check</code>, MariaDB에 <code>CHECK TABLE ... QUICK</code>을 실행합니다.</li>
     <li><strong>오디오북 점검 필요</strong> — 활성 오디오북 중 포스터·저자·출판사·소개가 비었거나 트랙 수가 0 이하인 항목을 중복 없이 집계합니다. 트랙 파일 크기 미기록은 별도 참고값이며 점검 필요 수에는 포함하지 않습니다.</li>
   </ul>
 

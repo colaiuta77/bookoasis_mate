@@ -77,6 +77,16 @@ class ModuleMain(PluginModuleBase):
         try:
             if command == "report":
                 return jsonify({"ret": "success", "data": self.service.report()})
+            if command == "report_start":
+                data = self.service.start_report_refresh(
+                    force=req.form.get("force") == "true",
+                )
+                return jsonify({"ret": "success", "data": data})
+            if command == "report_status":
+                return jsonify({
+                    "ret": "success",
+                    "data": self.service.report_refresh_status(),
+                })
             if command == "run_scan":
                 return jsonify({"ret": "success", "msg": "검사를 완료했습니다.", "data": self.service.run_and_record("manual")})
             if command == "statistics_catalog":

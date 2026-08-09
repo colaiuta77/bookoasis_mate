@@ -77,6 +77,8 @@ class ConnectionProxy:
         self._connection = connection
         self.target = target
         self.engine = target.engine
+        self._tables_cache = None
+        self._columns_cache = {}
 
     def execute(self, sql, params=()):
         if self.engine == "sqlite":
@@ -124,6 +126,8 @@ class ConnectionProxy:
         self._connection.close()
 
     def tables(self):
+        if self._tables_cache is not None:
+            return set(self._tables_cache)
         if self.engine == "sqlite":
             rows = self.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
@@ -134,19 +138,23 @@ class ConnectionProxy:
                 "WHERE table_schema = ?",
                 (self.target.database,),
             ).fetchall()
-        return {str(row["name"]) for row in rows}
+        self._tables_cache = {str(row["name"]) for row in rows}
+        return set(self._tables_cache)
 
     def columns(self, table):
         safe_table = validate_identifier(table)
+        if safe_table in self._columns_cache:
+            return set(self._columns_cache[safe_table])
         if self.engine == "sqlite":
             rows = self.execute(f'PRAGMA table_info("{safe_table}")').fetchall()
-            return {str(row["name"]) for row in rows}
-        rows = self.execute(
-            "SELECT column_name AS name FROM information_schema.columns "
-            "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
-            (self.target.database, safe_table),
-        ).fetchall()
-        return {str(row["name"]) for row in rows}
+        else:
+            rows = self.execute(
+                "SELECT column_name AS name FROM information_schema.columns "
+                "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+                (self.target.database, safe_table),
+            ).fetchall()
+        self._columns_cache[safe_table] = {str(row["name"]) for row in rows}
+        return set(self._columns_cache[safe_table])
 
     def database_size(self):
         if self.engine == "sqlite":
