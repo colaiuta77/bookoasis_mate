@@ -38,12 +38,31 @@ function doctorFormatCount(value, unit) {
   return Number(value || 0).toLocaleString('ko-KR') + (unit || '');
 }
 
-function doctorMetricGroup(title, stats) {
-  var group = bookoasisMateText('section', 'doctor-overview-group', '');
-  group.appendChild(bookoasisMateText('h5', '', title));
+function doctorSummaryKpi(label, value, note, tone, icon) {
+  var card = bookoasisMateText('article', 'doctor-summary-kpi doctor-summary-kpi-' + tone, '');
+  var heading = bookoasisMateText('div', 'doctor-summary-kpi-heading', '');
+  heading.appendChild(bookoasisMateText('span', 'doctor-summary-kpi-icon', icon));
+  heading.appendChild(bookoasisMateText('span', '', label));
+  card.appendChild(heading);
+  card.appendChild(bookoasisMateText('strong', '', value));
+  if (note) card.appendChild(bookoasisMateText('small', '', note));
+  return card;
+}
+
+function doctorMetricGroup(title, stats, meta) {
+  meta = meta || {};
+  var tone = meta.tone || 'neutral';
+  var group = bookoasisMateText('article', 'doctor-summary-diagnostic doctor-summary-diagnostic-' + tone, '');
+  var heading = bookoasisMateText('div', 'doctor-summary-diagnostic-heading', '');
+  var titleWrap = bookoasisMateText('div', 'doctor-summary-diagnostic-title', '');
+  titleWrap.appendChild(bookoasisMateText('span', 'doctor-summary-diagnostic-icon', meta.icon || '·'));
+  titleWrap.appendChild(bookoasisMateText('h5', '', title));
+  heading.appendChild(titleWrap);
+  if (meta.badge) heading.appendChild(bookoasisMateText('span', 'doctor-summary-diagnostic-badge', meta.badge));
+  group.appendChild(heading);
   (stats || []).forEach(function(stat) {
     var row = bookoasisMateText('div', 'doctor-overview-stat', '');
-    row.appendChild(bookoasisMateText('span', '', stat.label));
+    row.appendChild(bookoasisMateText('span', 'doctor-overview-stat-label', stat.label));
     row.appendChild(bookoasisMateText('span', stat.tone ? 'doctor-overview-stat-' + stat.tone : '', stat.value));
     group.appendChild(row);
   });
@@ -56,7 +75,30 @@ function doctorSummaryOverview(totals, scanner, audiobook, staleDays) {
   var healthyBooks = Number(totals.healthy_books || 0);
   var healthPercent = Math.max(0, Math.min(100, Number(totals.health_percent || 0)));
   var problemPercent = totalBooks ? (problemBooks / totalBooks * 100).toFixed(1) + '%' : '0%';
-  var card = bookoasisMateText('div', 'doctor-card doctor-overview-card', '');
+  var totalAudiobooks = Number(audiobook.total_audiobooks || 0);
+  var problemAudiobooks = Number(audiobook.problem_audiobooks || 0);
+  var scanFailures = Number(scanner.recent_failed_tasks || 0);
+  var dashboard = bookoasisMateText('section', 'doctor-summary-dashboard', '');
+
+  var kpis = bookoasisMateText('div', 'doctor-summary-kpis', '');
+  kpis.appendChild(doctorSummaryKpi('전체 도서', doctorFormatCount(totalBooks, '권'), '활성 도서 기준', 'primary', '책'));
+  kpis.appendChild(doctorSummaryKpi('정상 도서', doctorFormatCount(healthyBooks, '권'), healthPercent + '%', 'healthy', '정'));
+  kpis.appendChild(doctorSummaryKpi('점검 필요', doctorFormatCount(problemBooks, '권'), problemPercent, problemBooks ? 'warning' : 'healthy', '점'));
+  if (totalAudiobooks) {
+    kpis.appendChild(doctorSummaryKpi('오디오북', doctorFormatCount(totalAudiobooks, '개'), '점검 필요 ' + doctorFormatCount(problemAudiobooks, '개'), problemAudiobooks ? 'warning' : 'healthy', '음'));
+  }
+  kpis.appendChild(doctorSummaryKpi('최근 스캔 실패', doctorFormatCount(scanFailures, '건'), '대기 ' + doctorFormatCount(scanner.pending_tasks, '건') + ' · 실행 ' + doctorFormatCount(scanner.running_tasks, '건'), scanFailures ? 'danger' : 'healthy', '스'));
+  dashboard.appendChild(kpis);
+
+  var content = bookoasisMateText('div', 'doctor-summary-content', '');
+  var healthCard = bookoasisMateText('article', 'doctor-card doctor-summary-health-card', '');
+  var healthHeading = bookoasisMateText('div', 'doctor-summary-card-heading', '');
+  var healthTitle = bookoasisMateText('div', '', '');
+  healthTitle.appendChild(bookoasisMateText('h4', '', '라이브러리 건강도'));
+  healthTitle.appendChild(bookoasisMateText('span', 'doctor-muted', '문제 도서 중복 제거 기준'));
+  healthHeading.appendChild(healthTitle);
+  healthHeading.appendChild(bookoasisMateText('strong', 'doctor-summary-health-score', healthPercent + '%'));
+  healthCard.appendChild(healthHeading);
 
   var chartArea = bookoasisMateText('div', 'doctor-overview-chart-area', '');
   var donut = bookoasisMateText('div', 'doctor-overview-chart-wrap', '');
@@ -82,35 +124,36 @@ function doctorSummaryOverview(totals, scanner, audiobook, staleDays) {
     legend.appendChild(row);
   });
   chartArea.appendChild(legend);
-  card.appendChild(chartArea);
+  healthCard.appendChild(chartArea);
+  content.appendChild(healthCard);
 
-  var groups = bookoasisMateText('div', 'doctor-overview-groups', '');
+  var groups = bookoasisMateText('div', 'doctor-summary-diagnostics', '');
   groups.appendChild(doctorMetricGroup('문제 도서', [
     {label:'점검 필요', value:doctorFormatCount(problemBooks, '권'), tone:problemBooks ? 'warning' : 'healthy'},
     {label:'중복 ISBN 후보', value:doctorFormatCount(totals.duplicate_isbn, '권')},
     {label:'ISBN 누락', value:doctorFormatCount(totals.isbn, '권')}
-  ]));
+  ], {icon:'문', badge:doctorFormatCount(problemBooks, '권'), tone:problemBooks ? 'warning' : 'healthy'}));
   groups.appendChild(doctorMetricGroup('메타데이터 누락', [
     {label:'표지 없음', value:doctorFormatCount(totals.cover, '권')},
     {label:'원격 표지 추출 제한', value:doctorFormatCount(totals.remote_cover_limited, '권')},
     {label:'저자 없음', value:doctorFormatCount(totals.author, '권')},
     {label:'출판사 없음', value:doctorFormatCount(totals.publisher, '권')},
     {label:'소개 없음', value:doctorFormatCount(totals.summary, '권')}
-  ]));
+  ], {icon:'메', badge:'항목별', tone:'purple'}));
   groups.appendChild(doctorMetricGroup('파일 및 페이지', [
     {label:'페이지 수 미기록', value:doctorFormatCount(totals.pages, '권')},
     {label:'원격 페이지 분석 제한', value:doctorFormatCount(totals.remote_page_limited, '권')},
     {label:'파일 크기 미기록', value:doctorFormatCount(totals.file_size, '권')},
     {label:'페이지 수 기록', value:doctorFormatCount(Math.max(0, totalBooks - Number(totals.pages || 0) - Number(totals.remote_page_limited || 0)), '권')},
     {label:'파일 크기 기록', value:doctorFormatCount(Math.max(0, totalBooks - Number(totals.file_size || 0)), '권')}
-  ]));
+  ], {icon:'파', badge:'기록 상태', tone:'blue'}));
   groups.appendChild(doctorMetricGroup('스캔 상태', [
     {label:'최근 작업 실패', value:doctorFormatCount(scanner.recent_failed_tasks, '건'), tone:Number(scanner.recent_failed_tasks || 0) ? 'warning' : 'healthy'},
     {label:'대기 작업', value:doctorFormatCount(scanner.pending_tasks, '건')},
     {label:'실행 작업', value:doctorFormatCount(scanner.running_tasks, '건')},
     {label:'장기 미스캔', value:doctorFormatCount(scanner.stale_libraries, '개')}
-  ]));
-  if (Number(audiobook.total_audiobooks || 0)) {
+  ], {icon:'스', badge:scanFailures ? doctorFormatCount(scanFailures, '건 실패') : '정상', tone:scanFailures ? 'danger' : 'healthy'}));
+  if (totalAudiobooks) {
     groups.appendChild(doctorMetricGroup('오디오북', [
       {label:'전체 오디오북', value:doctorFormatCount(audiobook.total_audiobooks, '개')},
       {label:'점검 필요', value:doctorFormatCount(audiobook.problem_audiobooks, '개'), tone:Number(audiobook.problem_audiobooks || 0) ? 'warning' : 'healthy'},
@@ -121,15 +164,21 @@ function doctorSummaryOverview(totals, scanner, audiobook, staleDays) {
       {label:'전체 트랙', value:doctorFormatCount(audiobook.total_tracks, '개')},
       {label:'트랙 수 미기록', value:doctorFormatCount(audiobook.tracks, '개')},
       {label:'트랙 크기 미기록 (참고)', value:doctorFormatCount(audiobook.track_file_size_missing, '개')}
-    ]));
+    ], {icon:'음', badge:problemAudiobooks ? doctorFormatCount(problemAudiobooks, '개 점검') : '정상', tone:problemAudiobooks ? 'warning' : 'healthy'}));
   }
-  card.appendChild(groups);
-  card.appendChild(bookoasisMateText(
-    'div',
-    'doctor-overview-note',
+  content.appendChild(groups);
+  dashboard.appendChild(content);
+
+  var details = document.createElement('details');
+  details.className = 'doctor-summary-notes';
+  details.appendChild(bookoasisMateText('summary', '', '판정 기준과 집계 범위'));
+  details.appendChild(bookoasisMateText(
+    'p',
+    '',
     '활성 도서 기준입니다. 오디오북 점검 필요는 포스터·저자·출판사·소개·트랙 수 미기록 중 하나 이상인 오디오북을 중복 없이 집계합니다. 트랙 크기 미기록은 별도 참고값입니다. 원격 ZIP/CBZ의 내부 표지·페이지 분석 제한은 점검 필요에서 제외합니다. 문제 유형은 서로 중복될 수 있습니다. 스캔 실패는 최근 7일 · 장기 미스캔은 ' + staleDays + '일 기준입니다.'
   ));
-  return card;
+  dashboard.appendChild(details);
+  return dashboard;
 }
 
 function doctorRenderHealthChart(totals) {
