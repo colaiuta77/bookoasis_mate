@@ -84,14 +84,28 @@ function sqlLoadPresets() {
   bookoasisMateAjax('sql', 'presets', {}, function(ret) {
     if (ret.ret !== 'success') return;
     sqlPresets = ret.data || [];
-    var select = document.getElementById('sql_preset');
-    sqlPresets.forEach(function(item, index) {
-      var option = document.createElement('option');
-      option.value = String(index);
-      option.textContent = item.name;
-      select.appendChild(option);
-    });
+    sqlRefreshPresetOptions();
   }, null, {global:false});
+}
+
+function sqlRefreshPresetOptions() {
+  var dbType = document.getElementById('sql_db_type').value;
+  var select = document.getElementById('sql_preset');
+  bookoasisMateClear(select);
+  var direct = document.createElement('option');
+  direct.value = '';
+  direct.textContent = '직접 입력';
+  select.appendChild(direct);
+  sqlPresets.forEach(function(item) {
+    var dbTypes = item.db_types || ['general', 'adult'];
+    if (dbTypes.indexOf(dbType) === -1) return;
+    var option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = item.name;
+    select.appendChild(option);
+  });
+  document.getElementById('sql_preset_description').textContent =
+    '프리셋을 선택하거나 읽기 전용 SQL을 직접 입력하세요.';
 }
 
 function sqlApplyPreset() {
@@ -101,23 +115,15 @@ function sqlApplyPreset() {
     description.textContent = '프리셋을 선택하거나 읽기 전용 SQL을 직접 입력하세요.';
     return;
   }
-  var preset = sqlPresets[Number(value)];
+  var preset = sqlPresets.find(function(item) { return item.id === value; });
   if (!preset) return;
   document.getElementById('sql_query').value = preset.sql || '';
   description.textContent = preset.description || '';
 }
 
 function sqlUpdateDatabaseMode() {
-  var audiobook = document.getElementById('sql_db_type').value === 'audiobook';
-  var preset = document.getElementById('sql_preset');
-  preset.disabled = audiobook;
-  if (audiobook) {
-    preset.value = '';
-    document.getElementById('sql_preset_description').textContent =
-      '오디오북 DB는 audiobooks·audiobook_tracks·audiobook_progress 테이블을 직접 조회하세요.';
-  } else {
-    sqlApplyPreset();
-  }
+  sqlRefreshPresetOptions();
+  document.getElementById('sql_query').value = '';
 }
 
 function sqlRenderResult(data) {

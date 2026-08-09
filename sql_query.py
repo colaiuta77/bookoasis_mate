@@ -209,6 +209,75 @@ WHERE COALESCE(b.is_deleted, 0) = 0
   AND (COALESCE(b.total_pages, 0) <= 0 OR COALESCE(b.file_size, 0) <= 0)
 ORDER BY l.name, b.title""",
     },
+    {
+        "id": "recent_audiobook_progress_diagnosis",
+        "name": "최근 오디오북 재생 기록 사용자·권한 진단",
+        "description": "최근 재생 기록이 사용자와 오디오북 보관함 권한에 정상 연결되는지 확인합니다.",
+        "db_types": ["audiobook"],
+        "sql": """SELECT
+    p.id AS progress_id,
+    p.user_id,
+    u.username,
+    u.has_audiobook_access,
+    a.id AS audiobook_id,
+    a.title,
+    l.name AS library_name,
+    p.current_track_id,
+    p.current_time,
+    p.total_progress_pct,
+    p.is_completed,
+    p.last_listened_at,
+    CASE
+        WHEN u.id IS NULL THEN 'USER_MISSING'
+        WHEN COALESCE(u.has_audiobook_access, 0) != 1 THEN 'AUDIOBOOK_ACCESS_DENIED'
+        WHEN perm.id IS NULL THEN 'PERMISSION_MISSING'
+        WHEN COALESCE(perm.has_access, 0) != 1 THEN 'ACCESS_DENIED'
+        ELSE 'OK'
+    END AS diagnosis
+FROM audiobook_progress p
+JOIN audiobooks a ON a.id = p.audiobook_id
+LEFT JOIN libraries l ON l.id = a.library_id
+LEFT JOIN users u ON u.id = p.user_id
+LEFT JOIN user_category_permissions perm
+    ON perm.user_id = p.user_id
+   AND perm.library_id = a.library_id
+ORDER BY p.last_listened_at DESC""",
+    },
+    {
+        "id": "orphan_audiobook_progress_users",
+        "name": "존재하지 않는 사용자 오디오북 재생 기록",
+        "description": "users에 없는 user_id를 참조하는 오디오북 재생 기록을 사용자별로 집계합니다.",
+        "db_types": ["audiobook"],
+        "sql": """SELECT
+    p.user_id,
+    COUNT(*) AS progress_count,
+    MAX(p.last_listened_at) AS latest_listened_at
+FROM audiobook_progress p
+LEFT JOIN users u ON u.id = p.user_id
+WHERE u.id IS NULL
+GROUP BY p.user_id
+ORDER BY progress_count DESC, p.user_id""",
+    },
+    {
+        "id": "audiobook_library_counts",
+        "name": "오디오북 보관함별 항목 수와 트랙 수",
+        "description": "보관함별 활성·삭제 오디오북 수와 실제 트랙 수를 확인합니다.",
+        "db_types": ["audiobook"],
+        "sql": """SELECT
+    l.id AS library_id,
+    l.name AS library_name,
+    l.physical_path,
+    l.scan_status,
+    l.last_scanned_at,
+    COUNT(DISTINCT CASE WHEN COALESCE(a.is_deleted, 0) = 0 THEN a.id END) AS active_audiobooks,
+    COUNT(DISTINCT CASE WHEN COALESCE(a.is_deleted, 0) != 0 THEN a.id END) AS deleted_audiobooks,
+    COUNT(DISTINCT t.id) AS track_count
+FROM libraries l
+LEFT JOIN audiobooks a ON a.library_id = l.id
+LEFT JOIN audiobook_tracks t ON t.audiobook_id = a.id
+GROUP BY l.id, l.name, l.physical_path, l.scan_status, l.last_scanned_at
+ORDER BY l.id""",
+    },
 ]
 
 
@@ -319,7 +388,12 @@ class ReadOnlySqlTool:
 
     @staticmethod
     def presets():
-        return [dict(item) for item in SQL_PRESETS]
+        presets = []
+        for item in SQL_PRESETS:
+            preset = dict(item)
+            preset.setdefault("db_types", ["general", "adult"])
+            presets.append(preset)
+        return presets
 
     def _target(self, db_type):
         db_key = str(db_type or "general").strip().lower()
@@ -445,7 +519,12 @@ class ReadOnlySqlTool:
             raise ValueError("민감 설정을 포함하는 settings 테이블은 조회할 수 없습니다.")
         if re.search(r"\b(from|join)\s+`?users`?\b", sanitized):
             select_part = sanitized.split("from", 1)[0]
-            if "*" in select_part:
+            select_without_count = re.sub(
+                r"\bcount\s*\(\s*\*\s*\)",
+                "",
+                select_part,
+            )
+            if "*" in select_without_count:
                 raise ValueError("users 테이블은 필요한 비민감 컬럼만 명시해 주세요.")
 
     def _execute_mariadb(self, db_key, target, query, row_limit, timeout):

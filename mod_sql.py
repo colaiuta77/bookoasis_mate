@@ -22,13 +22,17 @@ class ModuleSql(PluginModuleBase):
         del page, req
         P.logger.debug("[BookOasisMate] 읽기 전용 SQL 도구 메뉴 열기")
         arg = P.ModelSetting.to_dict()
-        arg["adult_enabled"] = P.bookoasis_mate_service.settings().get(
+        settings = P.bookoasis_mate_service.settings()
+        arg["adult_enabled"] = settings.get(
             "adult_enabled", False
         )
-        arg["audiobook_enabled"] = bool(
-            P.bookoasis_mate_service.settings().get("audiobook_db_path")
+        arg["database_engine"] = (
+            P.bookoasis_mate_service.engine().database_adapter.public_info()
         )
-        arg["database_engine"] = P.bookoasis_mate_service.engine().database_adapter.public_info()
+        arg["audiobook_enabled"] = (
+            arg["database_engine"].get("resolved_engine") == "mariadb"
+            or bool(settings.get("audiobook_db_path"))
+        )
         return render_template(f"{P.package_name}_{self.name}.html", arg=arg)
 
     def process_ajax(self, command, req):
