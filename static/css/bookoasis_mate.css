@@ -10,9 +10,10 @@
 .doctor-overview-chart-area { display:flex; flex-direction:column; align-items:center; gap:12px; }
 .doctor-overview-chart-wrap { position:relative; width:154px; height:154px; }
 .doctor-overview-chart-wrap canvas { position:absolute; inset:0; width:100% !important; height:100% !important; }
-.doctor-overview-center { position:absolute; inset:20px; display:flex; flex-direction:column; align-items:center; justify-content:center; border-radius:50%; background:#fff; text-align:center; box-shadow:inset 0 0 0 1px rgba(127,127,127,.08); }
+.doctor-overview-center { position:absolute; inset:20px; display:flex; flex-direction:column; align-items:center; justify-content:center; border-radius:50%; background:#fff; text-align:center; box-shadow:inset 0 0 0 1px rgba(127,127,127,.08); pointer-events:none; }
 .doctor-overview-center strong { font-size:1.35rem; line-height:1.2; }
 .doctor-overview-center span { margin-top:3px; color:#6c757d; font-size:.76rem; }
+.doctor-chart-tooltip { position:absolute; z-index:10000; display:none; max-width:calc(100vw - 16px); padding:6px 9px; border-radius:4px; background:rgba(0,0,0,.82); color:#fff; box-shadow:0 2px 8px rgba(0,0,0,.24); font-size:.78rem; line-height:1.35; white-space:nowrap; pointer-events:none; }
 .doctor-overview-legend { width:100%; max-width:210px; }
 .doctor-overview-legend-row { display:grid; grid-template-columns:9px minmax(0,1fr) auto; gap:7px; align-items:center; padding:3px 0; color:#6c757d; font-size:.77rem; }
 .doctor-overview-dot { width:8px; height:8px; border-radius:50%; }

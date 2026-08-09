@@ -31,6 +31,7 @@
 
 <script>
 var doctorHealthChart = null;
+var doctorHealthTooltip = null;
 var doctorReportPollTimer = null;
 
 function doctorFormatCount(value, unit) {
@@ -136,6 +137,7 @@ function doctorRenderHealthChart(totals) {
     doctorHealthChart.destroy();
     doctorHealthChart = null;
   }
+  doctorRemoveHealthTooltip();
   var canvas = document.getElementById('doctor_health_chart');
   if (!canvas || typeof Chart === 'undefined') return;
   var total = Number(totals.total_books || 0);
@@ -161,18 +163,56 @@ function doctorRenderHealthChart(totals) {
       plugins: {
         legend: {display: false},
         tooltip: {
-          enabled: hasData,
-          callbacks: {
-            label: function(context) {
-              var value = Number(context.raw || 0);
-              var percent = total ? (value / total * 100).toFixed(1) : '0.0';
-              return ' ' + context.label + ' ' + doctorFormatCount(value, '권') + ' · ' + percent + '%';
-            }
+          enabled: false,
+          external: function(context) {
+            doctorRenderHealthTooltip(context, total, hasData);
           }
         }
       }
     }
   });
+}
+
+function doctorRemoveHealthTooltip() {
+  if (doctorHealthTooltip && doctorHealthTooltip.parentNode) {
+    doctorHealthTooltip.parentNode.removeChild(doctorHealthTooltip);
+  }
+  doctorHealthTooltip = null;
+}
+
+function doctorRenderHealthTooltip(context, total, hasData) {
+  var tooltip = context.tooltip;
+  if (!hasData || !tooltip || tooltip.opacity === 0 || !tooltip.dataPoints || !tooltip.dataPoints.length) {
+    if (doctorHealthTooltip) doctorHealthTooltip.style.display = 'none';
+    return;
+  }
+  if (!doctorHealthTooltip) {
+    doctorHealthTooltip = document.createElement('div');
+    doctorHealthTooltip.className = 'doctor-chart-tooltip';
+    doctorHealthTooltip.setAttribute('role', 'status');
+    document.body.appendChild(doctorHealthTooltip);
+  }
+
+  var point = tooltip.dataPoints[0];
+  var value = Number(point.raw || 0);
+  var percent = total ? (value / total * 100).toFixed(1) : '0.0';
+  doctorHealthTooltip.textContent = point.label + ' ' + doctorFormatCount(value, '권') + ' · ' + percent + '%';
+  doctorHealthTooltip.style.display = 'block';
+
+  var canvasRect = context.chart.canvas.getBoundingClientRect();
+  var tooltipWidth = doctorHealthTooltip.offsetWidth;
+  var tooltipHeight = doctorHealthTooltip.offsetHeight;
+  var pageLeft = window.pageXOffset || document.documentElement.scrollLeft || 0;
+  var pageTop = window.pageYOffset || document.documentElement.scrollTop || 0;
+  var viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+  var minLeft = pageLeft + 8;
+  var maxLeft = Math.max(minLeft, pageLeft + viewportWidth - tooltipWidth - 8);
+  var left = pageLeft + canvasRect.left + tooltip.caretX - tooltipWidth / 2;
+  var top = pageTop + canvasRect.top + tooltip.caretY - tooltipHeight - 10;
+  if (top < pageTop + 8) top = pageTop + canvasRect.top + tooltip.caretY + 10;
+
+  doctorHealthTooltip.style.left = Math.max(minLeft, Math.min(maxLeft, left)) + 'px';
+  doctorHealthTooltip.style.top = top + 'px';
 }
 
 function renderReport(report) {
@@ -304,6 +344,7 @@ $(document).ready(function() { loadReport(false); });
 window.addEventListener('beforeunload', function() {
   doctorClearReportPoll();
   if (doctorHealthChart) doctorHealthChart.destroy();
+  doctorRemoveHealthTooltip();
 });
 </script>
 {% endblock %}
