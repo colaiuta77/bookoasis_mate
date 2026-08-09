@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .bookoasis_client import BookOasisClient
+from .bookoasis_db import BookOasisDatabaseAdapter
 from .bookoasis_logs import list_log_files, read_lazy_progress, read_log_tail
 from .bookoasis_package_import import BookOasisPackageImportEngine
 from .category_migration import (
@@ -21,6 +22,10 @@ from .category_migration import (
     parse_paths,
 )
 from .kavita_migration import KavitaMigrationEngine, parse_name_list
+from .library_statistics import (
+    LibraryStatisticsCancelled,
+    LibraryStatisticsEngine,
+)
 from .mate_engine import BookOasisMateEngine, _as_bool, _as_int
 from .font_manager import CustomFontManager
 
@@ -125,6 +130,10 @@ class BookOasisMateService:
     def __init__(self, plugin):
         self.P = plugin
         self._lock = threading.RLock()
+        self._report_build_lock = threading.Lock()
+        self._report_thread = None
+        self._report_started_monotonic = None
+        self._report_status = self._empty_report_status()
         self._cached_report = None
         self._cached_at = 0.0
         self._settings_fingerprint = None
@@ -147,6 +156,10 @@ class BookOasisMateService:
         self._cover_inspection_status_path = None
         self._cover_inspection_stop_path = None
         self._cover_inspection_status = self._empty_cover_inspection_status()
+        self._library_statistics_thread = None
+        self._library_statistics_stop = threading.Event()
+        self._library_statistics_started_monotonic = None
+        self._library_statistics_status = self._empty_library_statistics_status()
         self._migration_stop = threading.Event()
         self._migration_process = None
         self._migration_status_path = None
@@ -159,6 +172,20 @@ class BookOasisMateService:
         self._database_migration_stop_path = None
         self._database_migration_started_monotonic = None
         self._database_migration_status = self._empty_migration_status()
+
+    @staticmethod
+    def _empty_report_status():
+        return {
+            "is_working": "wait",
+            "job_type": "summary_report",
+            "started_at": "",
+            "finished_at": "",
+            "elapsed_seconds": 0,
+            "message": "상태 요약을 준비하고 있습니다.",
+            "result": None,
+            "error": "",
+            "cached": False,
+        }
 
     @staticmethod
     def _empty_orphan_cleanup_status():
@@ -250,6 +277,27 @@ class BookOasisMateService:
             "error": "",
         }
 
+    @staticmethod
+    def _empty_library_statistics_status():
+        return {
+            "is_working": "wait",
+            "job_type": "library_statistics",
+            "db_type": "general",
+            "library_id": "",
+            "library_name": "전체 보관함",
+            "stage": "",
+            "current": 0,
+            "total": 100,
+            "progress_percent": 0,
+            "started_at": "",
+            "finished_at": "",
+            "elapsed_seconds": 0,
+            "message": "분석 조건을 선택하고 분석 버튼을 눌러 주세요.",
+            "result": None,
+            "error": "",
+            "stopped": False,
+        }
+
     def _debug(self, event, **fields):
         details = []
         for key, value in fields.items():
@@ -265,11 +313,26 @@ class BookOasisMateService:
     def settings(self):
         model = self.P.ModelSetting
         values = {
+            "db_engine": model.get("db_engine") or "sqlite",
             "bookoasis_root_path": model.get("bookoasis_root_path"),
             "general_db_path": model.get("general_db_path"),
             "adult_enabled": model.get_bool("adult_enabled"),
             "adult_db_path": model.get("adult_db_path"),
             "audiobook_db_path": model.get("audiobook_db_path"),
+            "mariadb_host": model.get("mariadb_host"),
+            "mariadb_port": _as_int(model.get("mariadb_port"), 3306, 1, 65535),
+            "mariadb_user": model.get("mariadb_user"),
+            "mariadb_password": model.get("mariadb_password"),
+            "mariadb_database_prefix": model.get("mariadb_database_prefix") or "media_",
+            "mariadb_connect_timeout": _as_int(
+                model.get("mariadb_connect_timeout"), 10, 1, 60
+            ),
+            "mariadb_read_timeout": _as_int(
+                model.get("mariadb_read_timeout"), 30, 1, 600
+            ),
+            "mariadb_write_timeout": _as_int(
+                model.get("mariadb_write_timeout"), 30, 1, 600
+            ),
             "bookoasis_url": model.get("bookoasis_url"),
             "bookoasis_username": model.get("bookoasis_username"),
             "bookoasis_password": model.get("bookoasis_password"),
@@ -301,11 +364,26 @@ class BookOasisMateService:
     @staticmethod
     def settings_from_mapping(values):
         settings = {
+            "db_engine": str(values.get("db_engine") or "sqlite").strip().lower(),
             "bookoasis_root_path": str(values.get("bookoasis_root_path") or "").strip(),
             "general_db_path": values.get("general_db_path"),
             "adult_enabled": _as_bool(values.get("adult_enabled"), False),
             "adult_db_path": values.get("adult_db_path"),
             "audiobook_db_path": values.get("audiobook_db_path"),
+            "mariadb_host": values.get("mariadb_host"),
+            "mariadb_port": _as_int(values.get("mariadb_port"), 3306, 1, 65535),
+            "mariadb_user": values.get("mariadb_user"),
+            "mariadb_password": values.get("mariadb_password"),
+            "mariadb_database_prefix": values.get("mariadb_database_prefix") or "media_",
+            "mariadb_connect_timeout": _as_int(
+                values.get("mariadb_connect_timeout"), 10, 1, 60
+            ),
+            "mariadb_read_timeout": _as_int(
+                values.get("mariadb_read_timeout"), 30, 1, 600
+            ),
+            "mariadb_write_timeout": _as_int(
+                values.get("mariadb_write_timeout"), 30, 1, 600
+            ),
             "bookoasis_url": values.get("bookoasis_url"),
             "bookoasis_username": values.get("bookoasis_username"),
             "bookoasis_password": values.get("bookoasis_password"),
@@ -339,6 +417,9 @@ class BookOasisMateService:
 
     def engine(self, settings=None):
         return BookOasisMateEngine(settings or self.settings())
+
+    def database_engine_info(self, settings=None):
+        return self.engine(settings).database_adapter.public_info()
 
     def admin_client(self, settings=None):
         settings = settings or self.settings()
@@ -381,7 +462,198 @@ class BookOasisMateService:
             self._cover_issue_cache_key = None
             self._cover_issue_cache = None
             self._gap_cache = {}
+            if self._report_status.get("is_working") != "run":
+                self._report_status = self._empty_report_status()
+            if self._library_statistics_status.get("is_working") != "run":
+                self._library_statistics_status = self._empty_library_statistics_status()
         self._debug("상태 요약 캐시 초기화")
+
+    def library_statistics_catalog(self, db_type="general"):
+        started = time.monotonic()
+        data = LibraryStatisticsEngine(self.settings()).catalog(db_type)
+        self._debug(
+            "라이브러리 통계 보관함 조회 완료",
+            db_type=db_type,
+            libraries=len(data.get("libraries", [])),
+            duration_ms=self._duration_ms(started),
+        )
+        return data
+
+    def library_statistics_status(self):
+        with self._lock:
+            status = copy.deepcopy(self._library_statistics_status)
+            if (
+                status.get("is_working") == "run"
+                and self._library_statistics_started_monotonic is not None
+            ):
+                status["elapsed_seconds"] = round(
+                    time.monotonic() - self._library_statistics_started_monotonic,
+                    1,
+                )
+            return status
+
+    def _library_statistics_progress(self, stage, current, total, message):
+        with self._lock:
+            status = self._library_statistics_status
+            if status.get("is_working") != "run":
+                return
+            status["stage"] = str(stage or "")
+            status["current"] = int(current or 0)
+            status["total"] = max(1, int(total or 100))
+            status["progress_percent"] = max(
+                0,
+                min(100, round(status["current"] / status["total"] * 100)),
+            )
+            status["message"] = str(message or "")
+
+    def _run_library_statistics(self, settings, db_type, library_id):
+        try:
+            result = LibraryStatisticsEngine(settings).analyze(
+                db_type=db_type,
+                library_id=library_id,
+                on_progress=self._library_statistics_progress,
+                should_stop=self._library_statistics_stop.is_set,
+            )
+            with self._lock:
+                status = self._library_statistics_status
+                status.update(
+                    {
+                        "is_working": "done",
+                        "stage": "complete",
+                        "current": 100,
+                        "total": 100,
+                        "progress_percent": 100,
+                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "elapsed_seconds": round(
+                            time.monotonic() - self._library_statistics_started_monotonic,
+                            1,
+                        ),
+                        "message": "라이브러리 통계 분석을 완료했습니다.",
+                        "result": result,
+                        "error": "",
+                    }
+                )
+            self._debug(
+                "라이브러리 통계 분석 완료",
+                db_type=db_type,
+                library_id=library_id or "all",
+                total_items=result.get("summary", {}).get("total_items", 0),
+                duration_ms=result.get("duration_ms", 0),
+            )
+        except LibraryStatisticsCancelled as error:
+            with self._lock:
+                self._library_statistics_status.update(
+                    {
+                        "is_working": "stopped",
+                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "elapsed_seconds": round(
+                            time.monotonic() - self._library_statistics_started_monotonic,
+                            1,
+                        ),
+                        "message": str(error),
+                        "stopped": True,
+                    }
+                )
+            self._debug(
+                "라이브러리 통계 분석 중지",
+                db_type=db_type,
+                library_id=library_id or "all",
+            )
+        except Exception as error:
+            self.P.logger.error(f"BookOasis Mate 라이브러리 통계 오류: {error}")
+            with self._lock:
+                self._library_statistics_status.update(
+                    {
+                        "is_working": "fail",
+                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "elapsed_seconds": round(
+                            time.monotonic() - self._library_statistics_started_monotonic,
+                            1,
+                        ),
+                        "message": "라이브러리 통계 분석에 실패했습니다.",
+                        "error": str(error),
+                    }
+                )
+        finally:
+            with self._lock:
+                self._library_statistics_thread = None
+
+    def start_library_statistics(self, db_type="general", library_id=None):
+        db_type = str(db_type or "general").strip().lower()
+        selected_library_id = str(library_id or "").strip()
+        with self._lock:
+            if self._library_statistics_status.get("is_working") == "run":
+                return {
+                    "started": False,
+                    "message": "라이브러리 통계 분석이 이미 실행 중입니다.",
+                    "status": copy.deepcopy(self._library_statistics_status),
+                }
+        catalog = self.library_statistics_catalog(db_type)
+        library_name = "전체 보관함"
+        if selected_library_id:
+            library = next(
+                (
+                    item
+                    for item in catalog.get("libraries", [])
+                    if str(item.get("id")) == selected_library_id
+                ),
+                None,
+            )
+            if library is None:
+                raise ValueError("선택한 보관함을 찾을 수 없습니다.")
+            library_name = str(library.get("name") or f"보관함 {selected_library_id}")
+        initial = self._empty_library_statistics_status()
+        initial.update(
+            {
+                "is_working": "run",
+                "db_type": db_type,
+                "library_id": selected_library_id,
+                "library_name": library_name,
+                "stage": "prepare",
+                "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "message": "라이브러리 통계 분석을 준비하고 있습니다.",
+            }
+        )
+        self._library_statistics_stop.clear()
+        with self._lock:
+            self._library_statistics_status = initial
+            self._library_statistics_started_monotonic = time.monotonic()
+            thread = threading.Thread(
+                target=self._run_library_statistics,
+                args=(self.settings(), db_type, selected_library_id or None),
+                name="bookoasis-mate-library-statistics",
+                daemon=True,
+            )
+            self._library_statistics_thread = thread
+            thread.start()
+        self._debug(
+            "라이브러리 통계 백그라운드 분석 시작",
+            db_type=db_type,
+            library_id=selected_library_id or "all",
+        )
+        return {
+            "started": True,
+            "message": "라이브러리 통계 분석을 시작했습니다.",
+            "status": copy.deepcopy(initial),
+        }
+
+    def stop_library_statistics(self):
+        current = self.library_statistics_status()
+        if current.get("is_working") != "run":
+            return {
+                "requested": False,
+                "message": "실행 중인 라이브러리 통계 분석이 없습니다.",
+                "status": current,
+            }
+        self._library_statistics_stop.set()
+        with self._lock:
+            self._library_statistics_status["message"] = "현재 데이터 묶음 처리 후 중지합니다."
+        self._debug("라이브러리 통계 분석 중지 요청")
+        return {
+            "requested": True,
+            "message": "라이브러리 통계 분석 중지를 요청했습니다.",
+            "status": self.library_statistics_status(),
+        }
 
     def report(self, force=False):
         started = time.monotonic()
@@ -394,11 +666,18 @@ class BookOasisMateService:
                 self._debug("상태 요약 캐시 사용", age_seconds=round(time.monotonic() - self._cached_at, 1))
                 return self._cached_report
 
+        with self._report_build_lock:
+            with self._lock:
+                fresh = self._cached_report is not None and time.monotonic() - self._cached_at <= ttl
+                if not force and fresh and fingerprint == self._settings_fingerprint:
+                    self._debug("상태 요약 캐시 사용", age_seconds=round(time.monotonic() - self._cached_at, 1))
+                    return self._cached_report
             self._debug("상태 요약 생성 시작", force=str(bool(force)).lower())
             report = self.engine(settings).build_report()
-            self._cached_report = report
-            self._cached_at = time.monotonic()
-            self._settings_fingerprint = fingerprint
+            with self._lock:
+                self._cached_report = report
+                self._cached_at = time.monotonic()
+                self._settings_fingerprint = fingerprint
             self._debug(
                 "상태 요약 생성 완료",
                 status=report.get("status"),
@@ -407,6 +686,107 @@ class BookOasisMateService:
                 duration_ms=self._duration_ms(started),
             )
             return report
+
+    def report_refresh_status(self):
+        with self._lock:
+            status = copy.deepcopy(self._report_status)
+            if (
+                status.get("is_working") == "run"
+                and self._report_started_monotonic is not None
+            ):
+                status["elapsed_seconds"] = round(
+                    time.monotonic() - self._report_started_monotonic,
+                    1,
+                )
+            return status
+
+    def _run_report_refresh(self, force):
+        try:
+            report = self.report(force=force)
+            with self._lock:
+                self._report_status.update(
+                    {
+                        "is_working": "done",
+                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "elapsed_seconds": round(
+                            time.monotonic() - self._report_started_monotonic,
+                            1,
+                        ),
+                        "message": "상태 요약 갱신을 완료했습니다.",
+                        "result": report,
+                        "error": "",
+                        "cached": False,
+                    }
+                )
+        except Exception as error:
+            self.P.logger.error(f"BookOasis Mate 상태 요약 갱신 오류: {error}")
+            with self._lock:
+                self._report_status.update(
+                    {
+                        "is_working": "fail",
+                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "elapsed_seconds": round(
+                            time.monotonic() - self._report_started_monotonic,
+                            1,
+                        ),
+                        "message": "상태 요약 갱신에 실패했습니다.",
+                        "error": str(error),
+                    }
+                )
+        finally:
+            with self._lock:
+                self._report_thread = None
+
+    def start_report_refresh(self, force=False):
+        settings = self.settings()
+        fingerprint = tuple(sorted((key, str(value)) for key, value in settings.items()))
+        ttl = settings["cache_seconds"]
+        with self._lock:
+            if self._report_status.get("is_working") == "run":
+                return {
+                    "started": False,
+                    "status": self.report_refresh_status(),
+                }
+            cached_report = copy.deepcopy(self._cached_report)
+            fresh = (
+                cached_report is not None
+                and time.monotonic() - self._cached_at <= ttl
+                and fingerprint == self._settings_fingerprint
+            )
+            if not force and fresh:
+                status = self._empty_report_status()
+                status.update(
+                    {
+                        "is_working": "done",
+                        "message": "캐시된 상태 요약을 표시합니다.",
+                        "result": cached_report,
+                        "cached": True,
+                    }
+                )
+                self._report_status = status
+                return {"started": False, "status": copy.deepcopy(status)}
+
+            status = self._empty_report_status()
+            status.update(
+                {
+                    "is_working": "run",
+                    "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                    "message": "BookOasis DB 상태를 백그라운드에서 집계하고 있습니다.",
+                    "result": cached_report,
+                    "cached": cached_report is not None,
+                }
+            )
+            self._report_status = status
+            self._report_started_monotonic = time.monotonic()
+            thread = threading.Thread(
+                target=self._run_report_refresh,
+                args=(bool(force),),
+                name="bookoasis-mate-summary-report",
+                daemon=True,
+            )
+            self._report_thread = thread
+            thread.start()
+            return {"started": True, "status": copy.deepcopy(status)}
 
     def run_and_record(self, trigger="manual"):
         started = time.monotonic()
@@ -912,10 +1292,14 @@ class BookOasisMateService:
             if normalized_db_type == "adult"
             else settings.get("general_db_path")
         )
+        database_info = BookOasisDatabaseAdapter(settings).public_info()
         cache_key = (
             normalized_db_type,
             normalized_library_id,
             normalized_search,
+            str(database_info.get("resolved_engine") or ""),
+            str(database_info.get("host") or ""),
+            str(database_info.get("database_prefix") or ""),
             str(target_path or ""),
         )
 
@@ -996,11 +1380,16 @@ class BookOasisMateService:
         }[mode]
         file_mode = mode != "missing"
         search = str(search or "").strip()
+        adapter = BookOasisDatabaseAdapter(settings)
+        database_info = adapter.public_info()
         cache_key = (
             db_type,
             str(library_id or ""),
             mode,
             search,
+            str(database_info.get("resolved_engine") or ""),
+            str(database_info.get("host") or ""),
+            str(database_info.get("database_prefix") or ""),
             str(settings.get("general_db_path") or ""),
             str(settings.get("adult_db_path") or ""),
             str(settings.get("cover_root_path") or ""),
@@ -1117,15 +1506,11 @@ class BookOasisMateService:
 
     def _cover_inspection_paths(self, settings=None):
         settings = settings or self.settings()
-        db_path = str(
-            settings.get("general_db_path")
-            or settings.get("adult_db_path")
-            or ""
-        ).strip()
-        if not db_path:
+        state_root = self._maintenance_state_root(settings)
+        if state_root is None:
             return None
         paths = self._maintenance_worker_paths(
-            Path(db_path).expanduser().resolve().parent / ".bookoasis_mate_jobs",
+            state_root,
             "cover_inspection",
         )
         paths["result"] = paths["status"].with_name(
@@ -1144,7 +1529,7 @@ class BookOasisMateService:
             if numeric_library_id < 1:
                 raise ValueError("보관함 ID가 올바르지 않습니다.")
             selected_library_id = str(numeric_library_id)
-        db_path = Path(str(target.path or "")).expanduser()
+        db_path = Path(str(target.path or "")).expanduser() if target.path else None
 
         def file_signature(path):
             try:
@@ -1157,9 +1542,11 @@ class BookOasisMateService:
             "db_type": target.db_type,
             "library_id": selected_library_id,
             "search": str(search or "").strip(),
-            "db_path": str(db_path.resolve()),
-            "db_signature": file_signature(db_path),
-            "wal_signature": file_signature(Path(f"{db_path}-wal")),
+            "db_engine": target.engine,
+            "database": target.database,
+            "db_path": str(db_path.resolve()) if db_path is not None else "",
+            "db_signature": file_signature(db_path) if db_path is not None else [0, 0],
+            "wal_signature": file_signature(Path(f"{db_path}-wal")) if db_path is not None else [0, 0],
             "cover_root_path": str(settings.get("cover_root_path") or ""),
             "cover_min_width": int(settings["cover_min_width"]),
             "cover_min_height": int(settings["cover_min_height"]),
@@ -1289,9 +1676,19 @@ class BookOasisMateService:
             }
         )
         safe_setting_keys = (
+            "db_engine",
             "general_db_path",
             "adult_db_path",
+            "audiobook_db_path",
             "adult_enabled",
+            "mariadb_host",
+            "mariadb_port",
+            "mariadb_user",
+            "mariadb_password",
+            "mariadb_database_prefix",
+            "mariadb_connect_timeout",
+            "mariadb_read_timeout",
+            "mariadb_write_timeout",
             "bookoasis_url",
             "cover_root_path",
             "cover_min_width",
@@ -1313,6 +1710,7 @@ class BookOasisMateService:
             paths,
             worker_config,
             initial_status,
+            sensitive_config=True,
         )
         with self._lock:
             self._cover_inspection_process = process
@@ -1409,6 +1807,31 @@ class BookOasisMateService:
             "log": root / f"{prefix}_worker.log",
         }
 
+    def _maintenance_state_root(self, settings=None):
+        settings = settings or self.settings()
+        if self.engine(settings).database_adapter.engine == "sqlite":
+            db_path = str(
+                settings.get("general_db_path")
+                or settings.get("adult_db_path")
+                or ""
+            ).strip()
+            if db_path:
+                return (
+                    Path(db_path).expanduser().resolve().parent
+                    / ".bookoasis_mate_jobs"
+                )
+        for candidate in (
+            settings.get("cover_root_path"),
+            settings.get("bookoasis_root_path"),
+            Path(str(settings.get("general_db_path") or "")).parent
+            if str(settings.get("general_db_path") or "").strip()
+            else "",
+        ):
+            value = str(candidate or "").strip()
+            if value:
+                return Path(value).expanduser().resolve() / ".bookoasis_mate_jobs"
+        return None
+
     @staticmethod
     def _worker_pid_alive(pid):
         if os.name == "nt":
@@ -1487,11 +1910,11 @@ class BookOasisMateService:
 
     def _batch_rescan_paths(self, settings=None):
         settings = settings or self.settings()
-        db_path = str(settings.get("general_db_path") or "").strip()
-        if not db_path:
+        state_root = self._maintenance_state_root(settings)
+        if state_root is None:
             return None
         return self._maintenance_worker_paths(
-            Path(db_path).expanduser().resolve().parent / ".bookoasis_mate_jobs",
+            state_root,
             "batch_book_rescan",
         )
 
@@ -1604,7 +2027,23 @@ class BookOasisMateService:
             "job_type": "batch_book_rescan",
             "delete_config_after_read": True,
             "db_type": db_type,
-            "db_path": str(target.path or ""),
+            "db_settings": {
+                key: settings.get(key)
+                for key in (
+                    "db_engine",
+                    "general_db_path",
+                    "adult_db_path",
+                    "audiobook_db_path",
+                    "mariadb_host",
+                    "mariadb_port",
+                    "mariadb_user",
+                    "mariadb_password",
+                    "mariadb_database_prefix",
+                    "mariadb_connect_timeout",
+                    "mariadb_read_timeout",
+                    "mariadb_write_timeout",
+                )
+            },
             "book_ids": book_ids,
             "source": source,
             "source_label": source_label,
@@ -1751,10 +2190,21 @@ class BookOasisMateService:
         paths = self._orphan_cleanup_paths(root)
         worker_config = {
             "job_type": "orphan_cleanup",
+            "delete_config_after_read": True,
             "settings": {
+                "db_engine": settings.get("db_engine"),
                 "general_db_path": settings.get("general_db_path"),
                 "adult_db_path": settings.get("adult_db_path"),
+                "audiobook_db_path": settings.get("audiobook_db_path"),
                 "adult_enabled": settings.get("adult_enabled"),
+                "mariadb_host": settings.get("mariadb_host"),
+                "mariadb_port": settings.get("mariadb_port"),
+                "mariadb_user": settings.get("mariadb_user"),
+                "mariadb_password": settings.get("mariadb_password"),
+                "mariadb_database_prefix": settings.get("mariadb_database_prefix"),
+                "mariadb_connect_timeout": settings.get("mariadb_connect_timeout"),
+                "mariadb_read_timeout": settings.get("mariadb_read_timeout"),
+                "mariadb_write_timeout": settings.get("mariadb_write_timeout"),
                 "cover_root_path": settings.get("cover_root_path"),
             },
             "db_type": db_type,
@@ -1768,6 +2218,7 @@ class BookOasisMateService:
                 paths,
                 worker_config,
                 self._orphan_cleanup_status,
+                sensitive_config=True,
             )
         except Exception as error:
             with self._lock:
@@ -1868,11 +2319,12 @@ class BookOasisMateService:
             settings.get("cover_root_path"),
             should_stop=self._migration_stop.is_set,
             on_progress=on_progress,
+            database_settings=settings,
         )
 
     def migration_libraries(self, db_type="general"):
         target = self.engine().get_target(db_type)
-        data = CategoryMigrationEngine.libraries(target.path)
+        data = self._migration_engine().list_libraries(target.path, db_type)
         self._debug("이관 카테고리 목록 조회", db_type=db_type, count=len(data))
         return data
 
@@ -1893,7 +2345,11 @@ class BookOasisMateService:
         self._debug(
             "이관 패키지 검사 완료",
             db_type=data.get("db_type"),
-            books=data.get("books_count", 0),
+            media_count=(
+                data.get("audiobooks_count", 0)
+                if data.get("media_kind") == "audiobook"
+                else data.get("books_count", 0)
+            ),
             covers=data.get("covers_count", 0),
             roots=data.get("root_paths_count", 0),
         )
@@ -1998,15 +2454,27 @@ class BookOasisMateService:
         worker_config = {
             **config,
             "job_type": "category_migration",
+            "delete_config_after_read": True,
             "cover_root_path": settings.get("cover_root_path"),
             "target_general_db": settings.get("general_db_path"),
             "target_adult_db": settings.get("adult_db_path"),
+            "target_audiobook_db": settings.get("audiobook_db_path"),
+            "db_engine": settings.get("db_engine"),
+            "mariadb_host": settings.get("mariadb_host"),
+            "mariadb_port": settings.get("mariadb_port"),
+            "mariadb_user": settings.get("mariadb_user"),
+            "mariadb_password": settings.get("mariadb_password"),
+            "mariadb_database_prefix": settings.get("mariadb_database_prefix"),
+            "mariadb_connect_timeout": settings.get("mariadb_connect_timeout"),
+            "mariadb_read_timeout": settings.get("mariadb_read_timeout"),
+            "mariadb_write_timeout": settings.get("mariadb_write_timeout"),
         }
         try:
             process = self._launch_maintenance_worker(
                 paths,
                 worker_config,
                 self._migration_status,
+                sensitive_config=True,
             )
         except Exception as error:
             with self._lock:
@@ -2168,6 +2636,8 @@ class BookOasisMateService:
                 target.path,
                 settings.get("cover_root_path"),
                 config["work_dir"],
+                database_settings=settings,
+                target_db_type=config["target_db_type"],
                 **common,
             )
         if config["source_type"] == "bookoasis":
@@ -2180,6 +2650,7 @@ class BookOasisMateService:
                     settings.get("bookoasis_url"),
                     settings.get("api_timeout", 30),
                 ).health(),
+                database_settings=settings,
                 **common,
             )
         raise ValueError("지원하지 않는 이관 원본 유형입니다.")
@@ -2364,11 +2835,22 @@ class BookOasisMateService:
             paths["stop"].unlink()
         worker_config = {
             **config,
+            "delete_config_after_read": True,
             "target_general_db": settings.get("general_db_path"),
             "target_adult_db": settings.get("adult_db_path"),
+            "target_audiobook_db": settings.get("audiobook_db_path"),
             "target_cover_root": settings.get("cover_root_path"),
             "bookoasis_url": settings.get("bookoasis_url"),
             "api_timeout": settings.get("api_timeout", 30),
+            "db_engine": settings.get("db_engine"),
+            "mariadb_host": settings.get("mariadb_host"),
+            "mariadb_port": settings.get("mariadb_port"),
+            "mariadb_user": settings.get("mariadb_user"),
+            "mariadb_password": settings.get("mariadb_password"),
+            "mariadb_database_prefix": settings.get("mariadb_database_prefix"),
+            "mariadb_connect_timeout": settings.get("mariadb_connect_timeout"),
+            "mariadb_read_timeout": settings.get("mariadb_read_timeout"),
+            "mariadb_write_timeout": settings.get("mariadb_write_timeout"),
         }
         self._database_migration_status_path = paths["status"]
         self._database_migration_stop_path = paths["stop"]
@@ -2376,6 +2858,8 @@ class BookOasisMateService:
             paths["config"],
             worker_config,
         )
+        if os.name != "nt":
+            os.chmod(paths["config"], 0o600)
         self._write_database_migration_json(
             paths["status"],
             self._database_migration_status,

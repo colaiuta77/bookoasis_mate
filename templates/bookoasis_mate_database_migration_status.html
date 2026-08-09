@@ -69,8 +69,8 @@ function databaseMigrationResult(data, root) {
   root.append($('<div>').append($('<strong>').text(result.dry_run ? 'Dry Run 결과' : '실제 이관 결과')));
   if (result.source_type === 'bookoasis') {
     root.append($('<div>').addClass('mt-1').text(
-      'BookOasis 패키지 · DB 2개 · 보관함 ' + Number(result.libraries_count || 0).toLocaleString() + '개 · ' +
-      '도서 ' + Number(result.books_count || 0).toLocaleString() + '권 · 표지 파일 ' +
+      'BookOasis 패키지 · DB ' + Number(result.database_count || (result.databases || []).length || 2).toLocaleString() + '개 · 보관함 ' + Number(result.libraries_count || 0).toLocaleString() + '개 · ' +
+      '도서 ' + Number(result.books_count || 0).toLocaleString() + '권 · 오디오북 ' + Number(result.audiobooks_count || 0).toLocaleString() + '개 · 표지 파일 ' +
       Number(result.cover_files_count || 0).toLocaleString() + '개'
     ));
     root.append($('<div>').addClass((result.path_collision_count || result.missing_cover_count) ? 'text-danger mt-1' : 'doctor-muted mt-1').text(
@@ -86,14 +86,17 @@ function databaseMigrationResult(data, root) {
     ));
     (result.databases || []).forEach(function(item) {
       root.append($('<div>').addClass('doctor-muted mt-1').text(
-        (item.db_type === 'adult' ? '성인 DB' : '일반 DB') + ' · 스키마 버전 ' +
-        Number(item.user_version || 0).toLocaleString() + ' · 도서 ' +
-        Number(item.books_count || 0).toLocaleString() + '권'
+        (item.db_type === 'audiobook' ? '오디오북 DB' : (item.db_type === 'adult' ? '성인 DB' : '일반 DB')) + ' · 스키마 버전 ' +
+        Number(item.user_version || 0).toLocaleString() + ' · 항목 ' +
+        (item.db_type === 'audiobook'
+          ? Number(item.audiobooks_count || 0).toLocaleString() + '개'
+          : Number(item.books_count || 0).toLocaleString() + '권')
       ));
     });
     var backups = result.database_backups || {};
     if (backups.general) root.append($('<div>').addClass('mt-1').text('일반 DB 백업 · ' + backups.general));
     if (backups.adult) root.append($('<div>').addClass('mt-1').text('성인 DB 백업 · ' + backups.adult));
+    if (backups.audiobook) root.append($('<div>').addClass('mt-1').text('오디오북 DB 백업 · ' + backups.audiobook));
     if (result.cover_backup_path) root.append($('<div>').addClass('mt-1').text('기존 표지 백업 · ' + result.cover_backup_path));
   } else {
     root.append($('<div>').addClass('mt-1').text(
@@ -184,7 +187,7 @@ $('#database_migration_start_btn').click(function(e) {
   e.preventDefault();
   var exporting = databaseMigrationSource === 'bookoasis' && databaseMigrationPackageAction === 'export';
   var message = exporting
-    ? '현재 일반·성인 DB와 전체 표지를 이관 작업 디렉터리로 내보내시겠습니까?\n\n정확한 시점의 패키지가 필요하면 스캐너와 메타데이터 변경 작업을 먼저 중지하세요.'
+    ? '현재 일반·성인·오디오북 DB와 전체 표지를 이관 작업 디렉터리로 내보내시겠습니까?\n\n정확한 시점의 패키지가 필요하면 스캐너와 메타데이터 변경 작업을 먼저 중지하세요.'
     : '저장된 설정으로 통DB 이관을 시작하시겠습니까?\n\nBookOasis 패키지 실제 가져오기라면 BookOasis 컨테이너와 모든 스캐너를 완전히 중지한 상태여야 합니다.';
   if (!confirm(message)) return;
   $('#database_migration_start_btn').prop('disabled', true);

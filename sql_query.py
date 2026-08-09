@@ -1,8 +1,14 @@
-# BookOasis SQLite 데이터베이스에 제한된 읽기 전용 SQL 진단 기능을 제공합니다.
+# BookOasis SQLite와 MariaDB에 제한된 읽기 전용 SQL 진단 기능을 제공합니다.
 import re
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
+
+try:
+    from .bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
+except ImportError:
+    from bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
 
 
 SENSITIVE_COLUMNS = {
@@ -42,6 +48,12 @@ DENIED_AUTHORIZER_ACTIONS = {
     )
     if (value := getattr(sqlite3, name, None)) is not None
 }
+
+
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 SQL_PRESETS = [
     {
@@ -197,6 +209,75 @@ WHERE COALESCE(b.is_deleted, 0) = 0
   AND (COALESCE(b.total_pages, 0) <= 0 OR COALESCE(b.file_size, 0) <= 0)
 ORDER BY l.name, b.title""",
     },
+    {
+        "id": "recent_audiobook_progress_diagnosis",
+        "name": "최근 오디오북 재생 기록 사용자·권한 진단",
+        "description": "최근 재생 기록이 사용자와 오디오북 보관함 권한에 정상 연결되는지 확인합니다.",
+        "db_types": ["audiobook"],
+        "sql": """SELECT
+    p.id AS progress_id,
+    p.user_id,
+    u.username,
+    u.has_audiobook_access,
+    a.id AS audiobook_id,
+    a.title,
+    l.name AS library_name,
+    p.current_track_id,
+    p.current_time,
+    p.total_progress_pct,
+    p.is_completed,
+    p.last_listened_at,
+    CASE
+        WHEN u.id IS NULL THEN 'USER_MISSING'
+        WHEN COALESCE(u.has_audiobook_access, 0) != 1 THEN 'AUDIOBOOK_ACCESS_DENIED'
+        WHEN perm.id IS NULL THEN 'PERMISSION_MISSING'
+        WHEN COALESCE(perm.has_access, 0) != 1 THEN 'ACCESS_DENIED'
+        ELSE 'OK'
+    END AS diagnosis
+FROM audiobook_progress p
+JOIN audiobooks a ON a.id = p.audiobook_id
+LEFT JOIN libraries l ON l.id = a.library_id
+LEFT JOIN users u ON u.id = p.user_id
+LEFT JOIN user_category_permissions perm
+    ON perm.user_id = p.user_id
+   AND perm.library_id = a.library_id
+ORDER BY p.last_listened_at DESC""",
+    },
+    {
+        "id": "orphan_audiobook_progress_users",
+        "name": "존재하지 않는 사용자 오디오북 재생 기록",
+        "description": "users에 없는 user_id를 참조하는 오디오북 재생 기록을 사용자별로 집계합니다.",
+        "db_types": ["audiobook"],
+        "sql": """SELECT
+    p.user_id,
+    COUNT(*) AS progress_count,
+    MAX(p.last_listened_at) AS latest_listened_at
+FROM audiobook_progress p
+LEFT JOIN users u ON u.id = p.user_id
+WHERE u.id IS NULL
+GROUP BY p.user_id
+ORDER BY progress_count DESC, p.user_id""",
+    },
+    {
+        "id": "audiobook_library_counts",
+        "name": "오디오북 보관함별 항목 수와 트랙 수",
+        "description": "보관함별 활성·삭제 오디오북 수와 실제 트랙 수를 확인합니다.",
+        "db_types": ["audiobook"],
+        "sql": """SELECT
+    l.id AS library_id,
+    l.name AS library_name,
+    l.physical_path,
+    l.scan_status,
+    l.last_scanned_at,
+    COUNT(DISTINCT CASE WHEN COALESCE(a.is_deleted, 0) = 0 THEN a.id END) AS active_audiobooks,
+    COUNT(DISTINCT CASE WHEN COALESCE(a.is_deleted, 0) != 0 THEN a.id END) AS deleted_audiobooks,
+    COUNT(DISTINCT t.id) AS track_count
+FROM libraries l
+LEFT JOIN audiobooks a ON a.library_id = l.id
+LEFT JOIN audiobook_tracks t ON t.audiobook_id = a.id
+GROUP BY l.id, l.name, l.physical_path, l.scan_status, l.last_scanned_at
+ORDER BY l.id""",
+    },
 ]
 
 
@@ -265,7 +346,7 @@ def validate_read_only_sql(sql):
     if not (
         re.match(r"^SELECT\b", upper)
         or re.match(r"^WITH\b", upper)
-        or re.match(r"^EXPLAIN\s+QUERY\s+PLAN\s+(SELECT|WITH)\b", upper)
+        or re.match(r"^EXPLAIN(?:\s+QUERY\s+PLAN)?\s+(SELECT|WITH)\b", upper)
     ):
         raise ValueError("SELECT, WITH, EXPLAIN QUERY PLAN만 실행할 수 있습니다.")
 
@@ -282,21 +363,51 @@ class ReadOnlySqlTool:
     DEFAULT_TIMEOUT_SECONDS = 3.0
     MAX_TIMEOUT_SECONDS = 10.0
 
-    def __init__(self, database_paths):
-        self.database_paths = dict(database_paths or {})
+    def __init__(self, settings):
+        self.settings = dict(settings or {})
+        if not any(
+            key in self.settings
+            for key in (
+                "db_engine",
+                "general_db_path",
+                "adult_db_path",
+                "audiobook_db_path",
+                "mariadb_host",
+            )
+        ):
+            legacy_paths = dict(self.settings)
+            self.settings = {
+                "db_engine": "sqlite",
+                "general_db_path": legacy_paths.get("general", ""),
+                "adult_db_path": legacy_paths.get("adult", ""),
+                "audiobook_db_path": legacy_paths.get("audiobook", ""),
+                "adult_enabled": bool(legacy_paths.get("adult")),
+                "audiobook_enabled": bool(legacy_paths.get("audiobook")),
+            }
+        self.database_adapter = BookOasisDatabaseAdapter(self.settings)
 
     @staticmethod
     def presets():
-        return [dict(item) for item in SQL_PRESETS]
+        presets = []
+        for item in SQL_PRESETS:
+            preset = dict(item)
+            preset.setdefault("db_types", ["general", "adult"])
+            presets.append(preset)
+        return presets
 
-    def _path(self, db_type):
+    def _target(self, db_type):
         db_key = str(db_type or "general").strip().lower()
-        if db_key not in self.database_paths:
+        if db_key == "adult" and not _as_bool(self.settings.get("adult_enabled")):
             raise ValueError(f"활성화되지 않은 DB 유형입니다: {db_key}")
-        path = Path(str(self.database_paths[db_key] or "")).expanduser()
-        if not path.is_file():
-            raise FileNotFoundError(f"DB 파일을 찾을 수 없습니다: {path}")
-        return db_key, path
+        if db_key == "audiobook" and not _as_bool(
+            self.settings.get("audiobook_enabled", True)
+        ):
+            raise ValueError(f"활성화되지 않은 DB 유형입니다: {db_key}")
+        if db_key not in {"general", "adult", "audiobook"}:
+            raise ValueError(f"활성화되지 않은 DB 유형입니다: {db_key}")
+        path = self.settings.get(f"{db_key}_db_path")
+        target = self.database_adapter.target(db_key, db_key, path)
+        return db_key, target
 
     @staticmethod
     def _display_value(value):
@@ -327,7 +438,7 @@ class ReadOnlySqlTool:
 
     def execute(self, db_type, sql, max_rows=None, timeout_seconds=None):
         query = validate_read_only_sql(sql)
-        db_key, path = self._path(db_type)
+        db_key, target = self._target(db_type)
         try:
             row_limit = int(max_rows or self.DEFAULT_MAX_ROWS)
         except (TypeError, ValueError):
@@ -339,6 +450,16 @@ class ReadOnlySqlTool:
             timeout = self.DEFAULT_TIMEOUT_SECONDS
         timeout = max(0.001, min(timeout, self.MAX_TIMEOUT_SECONDS))
 
+        if target.engine == "mariadb":
+            return self._execute_mariadb(
+                db_key, target, query, row_limit, timeout
+            )
+        return self._execute_sqlite(db_key, target, query, row_limit, timeout)
+
+    def _execute_sqlite(self, db_key, target, query, row_limit, timeout):
+        path = Path(target.path).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"DB 파일을 찾을 수 없습니다: {path}")
         started = time.monotonic()
         deadline = started + timeout
         state = {"sensitive": ""}
@@ -377,6 +498,86 @@ class ReadOnlySqlTool:
 
         return {
             "db_type": db_key,
+            "engine": "sqlite",
+            "database": "",
+            "columns": columns,
+            "rows": rows,
+            "row_count": len(rows),
+            "truncated": truncated,
+            "max_rows": row_limit,
+            "elapsed_ms": round((time.monotonic() - started) * 1000),
+        }
+
+    @staticmethod
+    def _guard_mariadb_sensitive(query):
+        sanitized = _strip_literals_and_comments(query).lower()
+        if re.search(r"\b(password_hash|load_file|sleep|benchmark)\b", sanitized):
+            raise ValueError("민감 컬럼 또는 위험한 MariaDB 함수를 조회할 수 없습니다.")
+        if re.search(r"\b(information_schema|performance_schema|mysql|sys)\s*\.", sanitized):
+            raise ValueError("선택한 BookOasis DB 밖의 스키마는 조회할 수 없습니다.")
+        if re.search(r"\b(from|join)\s+`?settings`?\b", sanitized):
+            raise ValueError("민감 설정을 포함하는 settings 테이블은 조회할 수 없습니다.")
+        if re.search(r"\b(from|join)\s+`?users`?\b", sanitized):
+            select_part = sanitized.split("from", 1)[0]
+            select_without_count = re.sub(
+                r"\bcount\s*\(\s*\*\s*\)",
+                "",
+                select_part,
+            )
+            if "*" in select_without_count:
+                raise ValueError("users 테이블은 필요한 비민감 컬럼만 명시해 주세요.")
+
+    def _execute_mariadb(self, db_key, target, query, row_limit, timeout):
+        self._guard_mariadb_sensitive(query)
+        query = re.sub(
+            r"^\s*EXPLAIN\s+QUERY\s+PLAN\s+",
+            "EXPLAIN ",
+            query,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        started = time.monotonic()
+        try:
+            with closing(self.database_adapter.connect(target)) as connection:
+                connection.execute(
+                    "SET SESSION max_statement_time = ?", (float(timeout),)
+                ).close()
+                cursor = connection.execute(query)
+                try:
+                    if cursor.description is None:
+                        raise ValueError(
+                            "결과 행을 반환하는 조회 SQL만 실행할 수 있습니다."
+                        )
+                    columns = [str(item[0]) for item in cursor.description]
+                    fetched = cursor.fetchmany(row_limit + 1)
+                finally:
+                    cursor.close()
+        except BookOasisDatabaseError as error:
+            message = str(error)
+            if (
+                "max_statement_time" in message.lower()
+                or "query execution was interrupted" in message.lower()
+            ):
+                raise TimeoutError(
+                    f"SQL 실행 제한 시간 {timeout:g}초를 초과했습니다."
+                ) from error
+            raise
+        except Exception as error:
+            message = str(error)
+            if "max_statement_time" in message.lower() or "query execution was interrupted" in message.lower():
+                raise TimeoutError(
+                    f"SQL 실행 제한 시간 {timeout:g}초를 초과했습니다."
+                ) from error
+            raise ValueError(f"SQL 실행 오류: {message}") from error
+        truncated = len(fetched) > row_limit
+        rows = [
+            [self._display_value(row.get(column)) for column in columns]
+            for row in fetched[:row_limit]
+        ]
+        return {
+            "db_type": db_key,
+            "engine": "mariadb",
+            "database": target.database,
             "columns": columns,
             "rows": rows,
             "row_count": len(rows),

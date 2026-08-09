@@ -13,11 +13,20 @@ class ModuleMain(PluginModuleBase):
     def __init__(self, plugin):
         super().__init__(plugin, name="main", first_menu="dashboard", scheduler_desc="BookOasis 라이브러리 자동 진단")
         self.db_default = {
+            "db_engine": "sqlite",
             "bookoasis_root_path": "",
             "general_db_path": "/bookoasis-db/media_general.db",
             "adult_enabled": "False",
             "adult_db_path": "/bookoasis-db/media_adult.db",
             "audiobook_db_path": "/bookoasis-db/media_audiobook.db",
+            "mariadb_host": "",
+            "mariadb_port": "3306",
+            "mariadb_user": "",
+            "mariadb_password": "",
+            "mariadb_database_prefix": "media_",
+            "mariadb_connect_timeout": "10",
+            "mariadb_read_timeout": "30",
+            "mariadb_write_timeout": "30",
             "bookoasis_url": "http://127.0.0.1:5930",
             "bookoasis_username": "admin",
             "bookoasis_password": "",
@@ -46,7 +55,7 @@ class ModuleMain(PluginModuleBase):
         return P.bookoasis_mate_service
 
     def process_menu(self, page, req):
-        page = page if page in {"dashboard", "issues", "scanner", "logs", "gaps", "covers", "orphan_covers", "history", "manual"} else "dashboard"
+        page = page if page in {"dashboard", "statistics", "issues", "scanner", "logs", "gaps", "covers", "orphan_covers", "history", "manual"} else "dashboard"
         P.logger.debug(f"[BookOasisMate] 메인 메뉴 열기 page={page}")
         arg = P.ModelSetting.to_dict()
         arg["page"] = page
@@ -68,8 +77,45 @@ class ModuleMain(PluginModuleBase):
         try:
             if command == "report":
                 return jsonify({"ret": "success", "data": self.service.report()})
+            if command == "report_start":
+                data = self.service.start_report_refresh(
+                    force=req.form.get("force") == "true",
+                )
+                return jsonify({"ret": "success", "data": data})
+            if command == "report_status":
+                return jsonify({
+                    "ret": "success",
+                    "data": self.service.report_refresh_status(),
+                })
             if command == "run_scan":
                 return jsonify({"ret": "success", "msg": "검사를 완료했습니다.", "data": self.service.run_and_record("manual")})
+            if command == "statistics_catalog":
+                data = self.service.library_statistics_catalog(
+                    req.form.get("db_type", "general")
+                )
+                return jsonify({"ret": "success", "data": data})
+            if command == "statistics_start":
+                data = self.service.start_library_statistics(
+                    db_type=req.form.get("db_type", "general"),
+                    library_id=req.form.get("library_id"),
+                )
+                return jsonify({
+                    "ret": "success" if data.get("started") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
+            if command == "statistics_status":
+                return jsonify({
+                    "ret": "success",
+                    "data": self.service.library_statistics_status(),
+                })
+            if command == "statistics_stop":
+                data = self.service.stop_library_statistics()
+                return jsonify({
+                    "ret": "success" if data.get("requested") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
             if command == "quick_check":
                 data = self.service.quick_check(req.form.get("db_type", "general"))
                 return jsonify({

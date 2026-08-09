@@ -1,0 +1,6 @@
+<!-- 선택한 DB 엔진에 맞는 이관 패키지와 필수 도구를 안내합니다. -->
+{% if arg.get('database_engine', {}).get('resolved_engine') == 'mariadb' %}
+<div class="alert alert-info">
+  현재 DB 엔진은 MariaDB입니다. 카테고리 이관은 공식 2.0 데이터 패키지를 사용하고, 통DB 이관은 <code>mariadb-dump</code>와 <code>mariadb</code> 클라이언트로 논리 백업·복원합니다. SQLite 통DB 패키지와 MariaDB 통DB 패키지는 서로 교차 적용할 수 없습니다.
+</div>
+{% endif %}

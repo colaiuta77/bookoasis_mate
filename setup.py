@@ -16,6 +16,7 @@ setting = {
                 "name": "라이브러리 진단",
                 "list": [
                     {"uri": "dashboard", "name": "상태 요약"},
+                    {"uri": "statistics", "name": "라이브러리 통계"},
                     {"uri": "scanner", "name": "스캔 상태"},
                     {"uri": "issues", "name": "문제 도서"},
                     {"uri": "gaps", "name": "시리즈 누락"},
@@ -54,6 +55,8 @@ setting = {
                 ],
             },
             {"uri": "sql", "name": "SQL 도구"},
+            {"uri": "font", "name": "커스텀 폰트"},
+            {"uri": "manual", "name": "매뉴얼"},
             {"uri": "log", "name": "로그"},
         ],
     },
@@ -86,7 +89,9 @@ except Exception as error:
 from .mod_main import ModuleMain
 from .mod_database_migration import ModuleDatabaseMigration
 from .mod_gdrive_scan import ModuleGDriveScan
+from .mod_font import ModuleFont
 from .mod_migration import ModuleMigration
+from .mod_manual import ModuleManual
 from .mod_sql import ModuleSql
 from .mod_setting import ModuleSetting
 
@@ -98,6 +103,8 @@ P.set_module_list(
         ModuleGDriveScan,
         ModuleSql,
         ModuleSetting,
+        ModuleFont,
+        ModuleManual,
     ]
 )
 logger = P.logger

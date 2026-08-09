@@ -13,12 +13,15 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 try:
+    from .bookoasis_db import resolve_engine
     from .kavita_migration import parse_mapping_lines
 except ImportError:
+    from bookoasis_db import resolve_engine
     from kavita_migration import parse_mapping_lines
 
 
-DB_MEMBERS = {"db/media_general.db", "db/media_adult.db"}
+DB_MEMBERS_REQUIRED = {"db/media_general.db", "db/media_adult.db"}
+DB_MEMBERS_ALLOWED = DB_MEMBERS_REQUIRED | {"db/media_audiobook.db"}
 MAX_ARCHIVE_MEMBERS = 1_000_000
 MAX_ARCHIVE_UNCOMPRESSED = 2 * 1024**4
 COPY_CHUNK_SIZE = 1024 * 1024
@@ -142,16 +145,36 @@ class BookOasisPackageImportEngine:
         health_check=None,
         should_stop=None,
         on_progress=None,
+        database_settings=None,
     ):
         self.work_root = self._required_directory(work_dir, "이관 작업 디렉터리")
+        self.database_settings = dict(database_settings or {})
         self.target_databases = {
             "general": self._path(target_general_db),
             "adult": self._path(target_adult_db),
+            "audiobook": self._path(
+                self.database_settings.get("audiobook_db_path")
+                or self.database_settings.get("target_audiobook_db")
+            ) if self.database_settings else None,
         }
         self.target_cover_root = self._path(target_cover_root)
         self.health_check = health_check or (lambda: {"success": False})
         self.should_stop = should_stop or (lambda: False)
         self.on_progress = on_progress
+        self.mariadb_engine = None
+        if self.database_settings and resolve_engine(self.database_settings) == "mariadb":
+            try:
+                from .mariadb_package import MariaDBPackageEngine
+            except ImportError:
+                from mariadb_package import MariaDBPackageEngine
+            self.mariadb_engine = MariaDBPackageEngine(
+                self.work_root,
+                self.target_cover_root,
+                self.database_settings,
+                health_check=self.health_check,
+                should_stop=self.should_stop,
+                on_progress=self.on_progress,
+            )
 
     @staticmethod
     def _path(value):
@@ -413,11 +436,13 @@ class BookOasisPackageImportEngine:
             raise FileExistsError(
                 "같은 이름의 BookOasis 내보내기 패키지가 이미 있습니다."
             )
-        for db_type, source in self.target_databases.items():
-            if source is None or not source.is_file():
-                raise FileNotFoundError(
-                    f"내보낼 BookOasis {db_type} DB 파일을 찾을 수 없습니다."
-                )
+        if self.mariadb_engine is None:
+            for db_type in ("general", "adult"):
+                source = self.target_databases[db_type]
+                if source is None or not source.is_file():
+                    raise FileNotFoundError(
+                        f"내보낼 BookOasis {db_type} DB 파일을 찾을 수 없습니다."
+                    )
         total_cover_files, cover_source_size = self._cover_export_stats()
         stage = Path(
             tempfile.mkdtemp(
@@ -430,15 +455,55 @@ class BookOasisPackageImportEngine:
         database_published = False
         covers_published = False
         try:
+            if self.mariadb_engine is not None:
+                manifest = self.mariadb_engine.export_database_archive(
+                    temporary_database
+                )
+                self._write_cover_archive(
+                    temporary_covers,
+                    total_cover_files,
+                )
+                if total_cover_files == 0:
+                    self._progress(
+                        "export_covers",
+                        1,
+                        1,
+                        "빈 표지 패키지를 저장했습니다.",
+                    )
+                self._check_stop()
+                os.replace(str(temporary_database), str(final_database))
+                database_published = True
+                os.replace(str(temporary_covers), str(final_covers))
+                covers_published = True
+                return {
+                    "source_type": "bookoasis",
+                    "package_action": "export",
+                    "package_engine": "mariadb",
+                    "package_version": manifest.get("version"),
+                    "dry_run": False,
+                    "database_package_path": str(final_database),
+                    "database_package_size": final_database.stat().st_size,
+                    "cover_package_path": str(final_covers),
+                    "cover_package_size": final_covers.stat().st_size,
+                    "database_count": len(manifest.get("databases") or []),
+                    "cover_files_count": total_cover_files,
+                    "cover_source_size": cover_source_size,
+                }
             database_root = stage / "db"
             database_root.mkdir(parents=True)
-            for index, db_type in enumerate(("general", "adult"), start=1):
+            export_db_types = ["general", "adult"]
+            if (
+                self.target_databases.get("audiobook") is not None
+                and self.target_databases["audiobook"].is_file()
+            ):
+                export_db_types.append("audiobook")
+            for index, db_type in enumerate(export_db_types, start=1):
                 self._check_stop()
                 destination = database_root / f"media_{db_type}.db"
                 self._progress(
                     "export_databases",
                     index - 1,
-                    2,
+                    len(export_db_types),
                     f"{db_type} DB를 SQLite backup API로 복사하고 있습니다.",
                 )
                 self._backup_database_to(
@@ -450,7 +515,7 @@ class BookOasisPackageImportEngine:
                 self._progress(
                     "export_databases",
                     index,
-                    2,
+                    len(export_db_types),
                     f"{db_type} DB 백업을 완료했습니다.",
                 )
             with open_gzip_tar_writer(
@@ -486,7 +551,7 @@ class BookOasisPackageImportEngine:
                 "database_package_size": final_database.stat().st_size,
                 "cover_package_path": str(final_covers),
                 "cover_package_size": final_covers.stat().st_size,
-                "database_count": 2,
+                "database_count": len(export_db_types),
                 "cover_files_count": total_cover_files,
                 "cover_source_size": cover_source_size,
             }
@@ -514,7 +579,7 @@ class BookOasisPackageImportEngine:
                     if not member.isdir() and not member.isfile():
                         raise ValueError(f"지원하지 않는 압축 항목입니다: {name}")
                     if member.isfile():
-                        if kind == "database" and name not in DB_MEMBERS:
+                        if kind == "database" and name not in DB_MEMBERS_ALLOWED:
                             raise ValueError(f"DB 패키지에 허용되지 않은 파일이 있습니다: {name}")
                         if kind == "covers":
                             if not name.startswith("covers/"):
@@ -548,7 +613,7 @@ class BookOasisPackageImportEngine:
         except (tarfile.TarError, EOFError, OSError) as error:
             raise ValueError(f"tar.gz 패키지를 읽을 수 없습니다: {error}") from error
         if kind == "database":
-            missing = sorted(DB_MEMBERS - regular_names)
+            missing = sorted(DB_MEMBERS_REQUIRED - regular_names)
             if missing:
                 raise ValueError("DB 패키지 필수 파일이 없습니다: " + ", ".join(missing))
         return {
@@ -616,9 +681,10 @@ class BookOasisPackageImportEngine:
                     + ", ".join(quick_check[:10])
                 )
             tables = self._tables(connection)
-            if not {"libraries", "books"}.issubset(tables):
+            item_table = "audiobooks" if db_type == "audiobook" else "books"
+            if not {"libraries", item_table}.issubset(tables):
                 raise RuntimeError(
-                    f"{db_type} DB에 libraries 또는 books 테이블이 없습니다."
+                    f"{db_type} DB에 libraries 또는 {item_table} 테이블이 없습니다."
                 )
             libraries = [
                 {
@@ -632,22 +698,26 @@ class BookOasisPackageImportEngine:
                     )
                 )
             ]
-            books_count = int(
-                connection.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+            items_count = int(
+                connection.execute(
+                    f"SELECT COUNT(*) FROM `{item_table}`"
+                ).fetchone()[0]
             )
-            cover_references = {
-                str(row["cover_image"] or "").replace("\\", "/").lstrip("/")
-                for row in self._iter_rows(
-                    connection.execute(
-                        """
-                        SELECT DISTINCT cover_image
-                        FROM books
-                        WHERE COALESCE(cover_image, '') != ''
-                        """
+            cover_references = set()
+            if db_type != "audiobook":
+                cover_references = {
+                    str(row["cover_image"] or "").replace("\\", "/").lstrip("/")
+                    for row in self._iter_rows(
+                        connection.execute(
+                            """
+                            SELECT DISTINCT cover_image
+                            FROM books
+                            WHERE COALESCE(cover_image, '') != ''
+                            """
+                        )
                     )
-                )
-                if row["cover_image"]
-            }
+                    if row["cover_image"]
+                }
             users_count = (
                 int(connection.execute("SELECT COUNT(*) FROM users").fetchone()[0])
                 if "users" in tables
@@ -656,10 +726,19 @@ class BookOasisPackageImportEngine:
             progress_count = (
                 int(
                     connection.execute(
-                        "SELECT COUNT(*) FROM user_progress"
+                        "SELECT COUNT(*) FROM "
+                        + (
+                            "audiobook_progress"
+                            if db_type == "audiobook"
+                            else "user_progress"
+                        )
                     ).fetchone()[0]
                 )
-                if "user_progress" in tables
+                if (
+                    "audiobook_progress"
+                    if db_type == "audiobook"
+                    else "user_progress"
+                ) in tables
                 else 0
             )
             return {
@@ -669,7 +748,8 @@ class BookOasisPackageImportEngine:
                 ),
                 "libraries": libraries,
                 "libraries_count": len(libraries),
-                "books_count": books_count,
+                "books_count": items_count if db_type != "audiobook" else 0,
+                "audiobooks_count": items_count if db_type == "audiobook" else 0,
                 "users_count": users_count,
                 "progress_count": progress_count,
                 "cover_references": cover_references,
@@ -678,7 +758,12 @@ class BookOasisPackageImportEngine:
             connection.close()
 
     @staticmethod
-    def _mapping_preview(database_path, mappings):
+    def _mapping_preview(database_path, mappings, db_type="general"):
+        if db_type == "audiobook":
+            return BookOasisPackageImportEngine._audiobook_mapping_preview(
+                database_path,
+                mappings,
+            )
         connection = BookOasisPackageImportEngine._connect(
             database_path, readonly=False
         )
@@ -776,6 +861,49 @@ class BookOasisPackageImportEngine:
         finally:
             connection.close()
 
+    @staticmethod
+    def _audiobook_mapping_preview(database_path, mappings):
+        connection = BookOasisPackageImportEngine._connect(
+            database_path,
+            readonly=True,
+        )
+        try:
+            changed_items = 0
+            mapped_paths = {}
+            collisions = []
+            for row in BookOasisPackageImportEngine._iter_rows(
+                connection.execute("SELECT id, folder_path FROM audiobooks ORDER BY id")
+            ):
+                old_path = str(row["folder_path"] or "")
+                new_path = apply_media_mappings(old_path, mappings)
+                if new_path != old_path:
+                    changed_items += 1
+                if new_path in mapped_paths and len(collisions) < 100:
+                    collisions.append(
+                        {
+                            "path": new_path,
+                            "book_ids": [mapped_paths[new_path], int(row["id"])],
+                        }
+                    )
+                else:
+                    mapped_paths[new_path] = int(row["id"])
+            changed_libraries = 0
+            for row in BookOasisPackageImportEngine._iter_rows(
+                connection.execute("SELECT physical_path FROM libraries")
+            ):
+                old_value = str(row["physical_path"] or "")
+                if replace_library_mappings(old_value, mappings) != old_value:
+                    changed_libraries += 1
+            return {
+                "changed_libraries_count": changed_libraries,
+                "changed_books_count": changed_items,
+                "changed_covers_count": 0,
+                "path_collisions": collisions,
+                "path_collision_count": len(collisions),
+            }
+        finally:
+            connection.close()
+
     def _inspect_staged_databases(self, stage, database_package, mappings):
         databases = []
         references = set()
@@ -784,13 +912,14 @@ class BookOasisPackageImportEngine:
         changed_covers = 0
         collision_count = 0
         collisions = []
-        for db_type, filename in (
-            ("general", "media_general.db"),
-            ("adult", "media_adult.db"),
-        ):
+        database_types = ["general", "adult"]
+        if "db/media_audiobook.db" in database_package.get("regular_names", set()):
+            database_types.append("audiobook")
+        for db_type in database_types:
+            filename = f"media_{db_type}.db"
             db_path = stage / "db" / filename
             data = self._inspect_database(db_path, db_type)
-            mapping = self._mapping_preview(db_path, mappings)
+            mapping = self._mapping_preview(db_path, mappings, db_type)
             data.update(mapping)
             databases.append(data)
             references.update(data.pop("cover_references"))
@@ -823,10 +952,14 @@ class BookOasisPackageImportEngine:
                 if key not in {"regular_names", "cover_names", "fingerprint"}
             },
             "databases": databases,
+            "database_count": len(databases),
             "libraries_count": sum(
                 item["libraries_count"] for item in databases
             ),
             "books_count": sum(item["books_count"] for item in databases),
+            "audiobooks_count": sum(
+                item.get("audiobooks_count", 0) for item in databases
+            ),
             "users_count": sum(item["users_count"] for item in databases),
             "progress_count": sum(item["progress_count"] for item in databases),
             "cover_references_count": len(references),
@@ -866,6 +999,11 @@ class BookOasisPackageImportEngine:
             shutil.rmtree(str(stage), ignore_errors=True)
 
     def inspect_database_package(self, db_archive, path_mappings=""):
+        if self.mariadb_engine is not None:
+            return self.mariadb_engine.preview(
+                self._work_file(db_archive, "DB 패키지"),
+                path_mappings,
+            )
         result, _ = self._inspect_database_package(db_archive, path_mappings)
         return result
 
@@ -899,6 +1037,30 @@ class BookOasisPackageImportEngine:
         return result
 
     def inspect(self, db_archive, cover_archive, path_mappings=""):
+        if self.mariadb_engine is not None:
+            result = self.mariadb_engine.preview(
+                self._work_file(db_archive, "DB 패키지"),
+                path_mappings,
+            )
+            cover_package = self._inspect_archive(
+                self._work_file(cover_archive, "표지 패키지"),
+                "covers",
+            )
+            result.update(
+                {
+                    "inspection_scope": "full",
+                    "cover_package": {
+                        key: value
+                        for key, value in cover_package.items()
+                        if key not in {"regular_names", "cover_names", "fingerprint"}
+                    },
+                    "cover_files_count": len(cover_package["cover_names"]),
+                    "cover_validation_note": (
+                        "표지 참조의 최종 대조는 MariaDB 복원 후 확인합니다."
+                    ),
+                }
+            )
+            return result
         result, references = self._inspect_database_package(
             db_archive, path_mappings
         )
@@ -911,7 +1073,18 @@ class BookOasisPackageImportEngine:
             cover_package,
         )
 
-    def _transform_database(self, database_path, cover_root, mappings):
+    def _transform_database(
+        self,
+        database_path,
+        cover_root,
+        mappings,
+        db_type="general",
+    ):
+        if db_type == "audiobook":
+            return self._transform_audiobook_database(
+                database_path,
+                mappings,
+            )
         connection = self._connect(database_path, readonly=False)
         moved_files = []
         changed_books = 0
@@ -1053,6 +1226,61 @@ class BookOasisPackageImportEngine:
             "changed_covers_count": changed_covers,
         }
 
+    def _transform_audiobook_database(self, database_path, mappings):
+        connection = self._connect(database_path, readonly=False)
+        changed_items = 0
+        changed_libraries = 0
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            mapped_paths = set()
+            updates = []
+            for row in self._iter_rows(
+                connection.execute("SELECT id, folder_path, poster FROM audiobooks ORDER BY id")
+            ):
+                old_path = str(row["folder_path"] or "")
+                new_path = apply_media_mappings(old_path, mappings)
+                if new_path in mapped_paths:
+                    raise ValueError(
+                        f"변경 후 오디오북 경로 충돌이 있습니다: {new_path}"
+                    )
+                mapped_paths.add(new_path)
+                old_poster = str(row["poster"] or "")
+                new_poster = (
+                    old_poster
+                    if old_poster.startswith(("http://", "https://"))
+                    else apply_media_mappings(old_poster, mappings)
+                )
+                if new_path != old_path or new_poster != old_poster:
+                    updates.append((new_path, new_poster, int(row["id"])))
+            if updates:
+                connection.executemany(
+                    "UPDATE audiobooks SET folder_path=?, poster=? WHERE id=?",
+                    updates,
+                )
+                changed_items = len(updates)
+            for row in self._iter_rows(
+                connection.execute("SELECT id, physical_path FROM libraries")
+            ):
+                old_value = str(row["physical_path"] or "")
+                new_value = replace_library_mappings(old_value, mappings)
+                if new_value != old_value:
+                    connection.execute(
+                        "UPDATE libraries SET physical_path=? WHERE id=?",
+                        (new_value, int(row["id"])),
+                    )
+                    changed_libraries += 1
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return {
+            "changed_libraries_count": changed_libraries,
+            "changed_books_count": changed_items,
+            "changed_covers_count": 0,
+        }
+
     def _backup_database(self, source_path, db_type):
         backup_dir = self.work_root / "backups"
         backup_dir.mkdir(parents=True, exist_ok=True)
@@ -1076,7 +1304,12 @@ class BookOasisPackageImportEngine:
             connection.close()
 
     def _activate(self, stage, backup=True):
-        for db_type, target in self.target_databases.items():
+        active_databases = {
+            db_type: target
+            for db_type, target in self.target_databases.items()
+            if (stage / "db" / f"media_{db_type}.db").is_file()
+        }
+        for db_type, target in active_databases.items():
             if target is None:
                 raise ValueError(
                     f"BookOasis {db_type} DB 대상 경로가 설정되지 않았습니다."
@@ -1093,7 +1326,7 @@ class BookOasisPackageImportEngine:
         token = uuid.uuid4().hex[:12]
         target_existed = {
             db_type: target.is_file()
-            for db_type, target in self.target_databases.items()
+            for db_type, target in active_databases.items()
         }
         cover_existed = self.target_cover_root.is_dir()
         incoming = {}
@@ -1118,7 +1351,7 @@ class BookOasisPackageImportEngine:
         cover_installed = False
         cover_moved = False
         try:
-            for db_type, target in self.target_databases.items():
+            for db_type, target in active_databases.items():
                 self._check_stop()
                 if target_existed[db_type]:
                     self._checkpoint_database(target)
@@ -1146,7 +1379,7 @@ class BookOasisPackageImportEngine:
                 raise OSError("표지 패키지를 적용할 디스크 여유 공간이 부족합니다.")
             shutil.copytree(str(stage / "covers"), str(incoming_cover))
 
-            for db_type, target in self.target_databases.items():
+            for db_type, target in active_databases.items():
                 if target_existed[db_type]:
                     for suffix in ("-wal", "-shm"):
                         sidecar = Path(str(target) + suffix)
@@ -1170,11 +1403,11 @@ class BookOasisPackageImportEngine:
             if cover_moved and cover_backup and cover_backup.exists():
                 os.replace(str(cover_backup), str(self.target_cover_root))
             for db_type in reversed(installed_databases):
-                target = self.target_databases[db_type]
+                target = active_databases[db_type]
                 if target.exists():
                     target.unlink()
             for db_type in reversed(moved_databases):
-                target = self.target_databases[db_type]
+                target = active_databases[db_type]
                 if rollback[db_type].exists():
                     os.replace(str(rollback[db_type]), str(target))
             for sidecar, saved in reversed(sidecar_rollback):
@@ -1214,6 +1447,24 @@ class BookOasisPackageImportEngine:
         dry_run=True,
         confirm_stopped=False,
     ):
+        if self.mariadb_engine is not None:
+            db_path = self._work_file(db_archive, "DB 패키지")
+            cover_path = self._work_file(cover_archive, "표지 패키지")
+            return self.mariadb_engine.migrate(
+                db_path,
+                cover_path,
+                path_mappings,
+                backup,
+                dry_run,
+                confirm_stopped,
+                inspect_cover=lambda path: self._inspect_archive(path, "covers"),
+                extract_cover=lambda path, target, metadata: self._extract_archive(
+                    path,
+                    target,
+                    "covers",
+                    metadata,
+                ),
+            )
         if not dry_run and not confirm_stopped:
             raise ValueError("BookOasis 중지 확인 옵션을 켜 주세요.")
         health = (self.health_check() or {}) if not dry_run else {}
@@ -1254,12 +1505,16 @@ class BookOasisPackageImportEngine:
                 "changed_books_count": 0,
                 "changed_covers_count": 0,
             }
-            for db_type in ("general", "adult"):
+            imported_db_types = ["general", "adult"]
+            if (stage / "db" / "media_audiobook.db").is_file():
+                imported_db_types.append("audiobook")
+            for db_type in imported_db_types:
                 self._check_stop()
                 result = self._transform_database(
                     stage / "db" / f"media_{db_type}.db",
                     stage / "covers",
                     mappings,
+                    db_type,
                 )
                 for key in transformed:
                     transformed[key] += result[key]
@@ -1281,7 +1536,7 @@ class BookOasisPackageImportEngine:
             self._progress("activate", 1, 1, "BookOasis 패키지 적용을 완료했습니다.")
             preview.update(activation)
             preview["dry_run"] = False
-            preview["imported_databases"] = ["general", "adult"]
+            preview["imported_databases"] = imported_db_types
             return preview
         finally:
             shutil.rmtree(str(stage), ignore_errors=True)

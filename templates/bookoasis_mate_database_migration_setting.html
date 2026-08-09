@@ -1,6 +1,7 @@
 {# Kavita 또는 BookOasis 원본을 선택해 통DB 이관을 설정하고 미리봅니다. #}
 {% extends "base.html" %}
 {% block content %}
+{% include "bookoasis_mate_database_engine_notice.html" %}
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
@@ -24,7 +25,7 @@
 
   <div id="kavita_source_fields" class="doctor-section doctor-card">
     <h4>Kavita → BookOasis 설정</h4>
-    <p class="doctor-muted">Kavita의 도서 메타데이터와 선택한 사용자 진행률을 BookOasis로 이관합니다.</p>
+    <p class="doctor-muted">Kavita의 도서·메타데이터·표지와 선택한 사용자 진행률을 BookOasis 일반 또는 성인 DB로 이관합니다. 대상 DB 엔진은 SQLite와 MariaDB를 모두 지원합니다.</p>
     <div id="kavita_target_database_field" class="form-group row">
       <label class="col-sm-3 col-form-label">BookOasis 대상 DB</label>
       <div class="col-sm-9">
@@ -68,7 +69,7 @@
     {{ macros.setting_checkbox('kavita_import_covers', 'Kavita 표지 이관', value=arg.get('kavita_import_covers', 'True'), desc=['유효한 표지만 WebP로 변환합니다.']) }}
     {{ macros.setting_checkbox('kavita_import_progress', '독서 진행률 이관', value=arg.get('kavita_import_progress', 'False'), desc=['명시적으로 매핑한 사용자만 반영합니다.']) }}
     {{ macros.setting_checkbox('kavita_lock_metadata', '이관 메타데이터 잠금', value=arg.get('kavita_lock_metadata', 'True'), desc=['스캐너가 이관 메타데이터를 덮어쓰지 않도록 잠급니다.']) }}
-    {{ macros.setting_checkbox('kavita_backup_before_import', '실행 전 DB 백업', value=arg.get('kavita_backup_before_import', 'True'), desc=['실제 이관 전에 SQLite backup API로 백업합니다.']) }}
+    {{ macros.setting_checkbox('kavita_backup_before_import', '실행 전 DB 백업', value=arg.get('kavita_backup_before_import', 'True'), desc=['실제 이관 전에 SQLite는 backup API, MariaDB는 mariadb-dump로 선택한 일반 또는 성인 DB를 백업합니다.', 'MariaDB 백업에는 FF 컨테이너에서 실행 가능한 mariadb-dump 또는 mysqldump가 필요합니다.']) }}
     {{ macros.setting_checkbox('kavita_dry_run', 'Kavita Dry Run', value=arg.get('kavita_dry_run', 'True'), desc=['DB와 표지를 변경하지 않고 신규 생성·기존 갱신 예정 수를 계산합니다.']) }}
     <div class="text-right"><button type="button" id="database_migration_kavita_inspect_btn" class="btn btn-outline-info btn-sm database-migration-inspect-btn">DB 검사·자동 설정</button></div>
   </div>
@@ -84,12 +85,12 @@
     </div>
     <div id="bookoasis_export_panel" class="doctor-section doctor-card">
       <h4>내보내기 설정</h4>
-      <p class="doctor-muted">현재 일반·성인 DB와 전체 표지를 공유 가능한 두 개의 패키지로 저장합니다.</p>
+      <p class="doctor-muted">현재 일반·성인·오디오북 DB와 전체 표지를 공유 가능한 두 개의 패키지로 저장합니다.</p>
       <div class="form-group row mb-0">
         <label class="col-sm-3 col-form-label">패키지 이름</label>
         <div class="col-sm-9">
           <input type="text" id="bookoasis_export_name" name="bookoasis_export_name" class="form-control form-control-sm" value="{{ arg.get('bookoasis_export_name', 'dist_books') }}" placeholder="dist_books">
-          <small class="form-text text-muted">이관 작업 디렉터리에 `db_이름_날짜.tar.gz`와 `covers_이름_날짜.tar.gz`를 생성합니다. 일반·성인 DB는 SQLite backup API로 복사합니다.</small>
+          <small class="form-text text-muted">이관 작업 디렉터리에 `db_이름_날짜.tar.gz`와 `covers_이름_날짜.tar.gz`를 생성합니다. SQLite는 존재하는 일반·성인·오디오북 DB를 backup API로 복사하고, MariaDB는 3개 DB의 논리 백업을 생성합니다.</small>
         </div>
       </div>
       <div class="alert alert-info mt-3 mb-0">DB와 표지의 시점을 정확히 맞추려면 스캐너와 메타데이터 변경 작업을 멈춘 상태에서 내보내세요.</div>
@@ -97,7 +98,7 @@
     <div id="bookoasis_import_panel" class="doctor-section doctor-card">
       <h4>가져오기 설정</h4>
       <p class="doctor-muted">공유받은 DB와 표지 패키지를 검사하고 현재 BookOasis 설치에 교체 적용합니다.</p>
-      <div class="alert alert-warning">현재 일반·성인 DB와 전체 표지 디렉터리를 공유 패키지 세트로 교체합니다. 기존 DB와 병합하지 않으며 사용자·진행률도 공유 DB 내용으로 바뀝니다.</div>
+      <div class="alert alert-warning">패키지에 포함된 일반·성인·오디오북 DB와 전체 표지 디렉터리를 공유 패키지 세트로 교체합니다. 기존 DB와 병합하지 않으며 사용자·진행률도 공유 DB 내용으로 바뀝니다.</div>
       <input type="hidden" id="bookoasis_db_package_path" name="bookoasis_db_package_path" value="{{ arg.get('bookoasis_db_package_path', '') }}">
       <input type="hidden" id="bookoasis_cover_package_path" name="bookoasis_cover_package_path" value="{{ arg.get('bookoasis_cover_package_path', '') }}">
       <div class="form-group row">
@@ -136,7 +137,7 @@
           </div>
         </div>
       </div>
-      {{ macros.setting_checkbox('bookoasis_backup_before_import', '실행 전 DB 백업', value=arg.get('bookoasis_backup_before_import', 'True'), desc=['현재 일반·성인 DB를 SQLite backup API로 백업합니다.', '현재 표지 디렉터리는 같은 상위 경로에 별도 백업 디렉터리로 보존합니다.']) }}
+      {{ macros.setting_checkbox('bookoasis_backup_before_import', '실행 전 DB 백업', value=arg.get('bookoasis_backup_before_import', 'True'), desc=['SQLite는 패키지에 포함된 일반·성인·오디오북 DB 중 현재 존재하는 대상 DB를 backup API로 백업합니다.', 'MariaDB는 일반·성인·오디오북 3개 DB를 mariadb-dump 논리 백업으로 저장하며 실제 가져오기에서는 반드시 켜야 합니다.', '현재 표지 디렉터리는 같은 상위 경로에 별도 백업 디렉터리로 보존합니다.']) }}
       {{ macros.setting_checkbox('bookoasis_package_dry_run', 'BookOasis 패키지 Dry Run', value=arg.get('bookoasis_package_dry_run', 'True'), desc=['임시 DB와 임시 표지에서 압축 해제·경로 변경·무결성 검사를 끝까지 실행하되 현재 설치에는 적용하지 않습니다.']) }}
       <div class="alert alert-danger mt-3 mb-0">Dry Run을 끈 실제 가져오기는 상태 화면에서 매번 BookOasis 중지 여부를 확인해야 시작됩니다. 상태 API가 healthy로 응답하면 적용을 차단합니다.</div>
     </div>
@@ -357,7 +358,7 @@ function databaseMigrationRenderKavita(data, root) {
     }
   }
   root.append($('<div>').append($('<strong>').text(
-    '도서 ' + Number(data.books_count || 0).toLocaleString() + '권 · ' +
+    '도서 ' + Number(data.books_count || 0).toLocaleString() + '권 · 오디오북 ' + Number(data.audiobooks_count || 0).toLocaleString() + '개 · ' +
     '기존 도서 갱신 ' + Number(data.matched_books_count || 0).toLocaleString() + '권 · ' +
     '신규 도서 생성 ' + Number(data.new_books_count || 0).toLocaleString() + '권'
   )));
@@ -403,7 +404,7 @@ function databaseMigrationRenderKavita(data, root) {
 function databaseMigrationRenderBookOasis(data, root) {
   var databaseOnly = data.inspection_scope === 'database';
   root.append($('<div>').append($('<strong>').text(
-    'DB 2개 · 보관함 ' + Number(data.libraries_count || 0).toLocaleString() + '개 · ' +
+    'DB ' + Number(data.database_count || (data.databases || []).length || 2).toLocaleString() + '개 · 보관함 ' + Number(data.libraries_count || 0).toLocaleString() + '개 · ' +
     '도서 ' + Number(data.books_count || 0).toLocaleString() + '권 · ' +
     (databaseOnly
       ? 'DB 표지 참조 ' + Number(data.cover_references_count || 0).toLocaleString() + '건'
@@ -421,12 +422,19 @@ function databaseMigrationRenderBookOasis(data, root) {
     Number(data.changed_books_count || 0).toLocaleString() + '권'
   ));
   (data.databases || []).forEach(function(item) {
+    var dbLabel = item.db_type === 'audiobook' ? '오디오북 DB' : (item.db_type === 'adult' ? '성인 DB' : '일반 DB');
+    var mediaCount = item.db_type === 'audiobook'
+      ? Number(item.audiobooks_count || 0).toLocaleString() + '개'
+      : Number(item.books_count || 0).toLocaleString() + '권';
     root.append($('<div>').addClass('mt-2').text(
-      (item.db_type === 'adult' ? '성인 DB' : '일반 DB') + ' · 보관함 ' +
-      Number(item.libraries_count || 0).toLocaleString() + '개 · 도서 ' +
-      Number(item.books_count || 0).toLocaleString() + '권 · quick_check ok'
+      dbLabel + ' · 보관함 ' + Number(item.libraries_count || 0).toLocaleString() +
+      '개 · 항목 ' + mediaCount + ' · ' +
+      (data.package_engine === 'mariadb' ? 'SHA-256 ok' : 'quick_check ok')
     ));
   });
+  if (data.validation_note) {
+    root.append($('<div>').addClass('text-info mt-2').text(data.validation_note));
+  }
   if ((data.source_paths || []).length) {
     root.append($('<div>').addClass('doctor-muted mt-2').text('공유 DB 원본 경로'));
     (data.source_paths || []).forEach(function(path) {

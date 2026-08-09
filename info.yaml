@@ -1,8 +1,8 @@
 title: "BookOasis Mate"
-version: "1.2.0"
+version: "1.6.0"
 package_name: "bookoasis_mate"
 developer: "colaiuta77"
-description: "BookOasis 라이브러리 진단, 표지 관리, 카테고리·통DB 안전 이관을 제공하는 FlaskFarm 플러그인"
+description: "BookOasis SQLite·MariaDB 라이브러리 진단, 표지 관리와 안전 이관을 제공하는 FlaskFarm 플러그인"
 home: "https://github.com/colaiuta77/bookoasis_mate"
 more: "https://raw.githubusercontent.com/colaiuta77/bookoasis_mate/main/README.md"
 

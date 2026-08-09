@@ -1,71 +1,139 @@
+{# BookOasis 연결·DB·진단 설정을 기능별 탭으로 제공합니다. #}
 {% extends "base.html" %}
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 {{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['connection_test_btn', '연결 테스트']]) }}
+
+<ul class="nav nav-tabs doctor-setting-tabs" role="tablist">
+  <li class="nav-item"><a class="nav-link active" id="setting-basic-tab" data-toggle="tab" href="#setting-basic" role="tab">기본 연결</a></li>
+  <li class="nav-item"><a class="nav-link" id="setting-database-tab" data-toggle="tab" href="#setting-database" role="tab">DB 연결</a></li>
+  <li class="nav-item"><a class="nav-link" id="setting-diagnosis-tab" data-toggle="tab" href="#setting-diagnosis" role="tab">진단 정책</a></li>
+</ul>
+
 <form id="setting">
-  <h4>BookOasis 연결</h4>
-  {{ macros.setting_input_text('bookoasis_url', 'BookOasis URL', value=arg['bookoasis_url'], desc=['상태 API와 표지 URL에 사용합니다.', '예: http://172.17.0.1:5930', 'Reverse proxy 사용 시 예: https://yourdomain.com']) }}
-  {{ macros.setting_input_text('bookoasis_username', 'BookOasis 관리자 계정', value=arg['bookoasis_username'], desc=['개별 도서 재스캔과 메타데이터 검색·적용에 사용합니다.']) }}
-  {{ macros.setting_input_text('bookoasis_password', 'BookOasis 관리자 비밀번호', value=arg['bookoasis_password'], type='password', desc=['서버 측 관리자 세션 생성에만 사용하며 로그나 API 응답에 표시하지 않습니다.']) }}
-  {{ macros.setting_input_text('webhook_token', '스캔 웹훅 토큰', value=arg['webhook_token'], desc=['BookOasis 설치 시 .env에 설정한 WEBHOOK_TOKEN과 같은 값을 입력합니다.', '보관함 전체 재스캔 요청에만 사용합니다.']) }}
-  {{ macros.setting_input_int('api_timeout', 'API 연결 제한 시간(초)', value=arg['api_timeout'], desc=['1~30초', '너무 짧으면 API 연결이 실패할 수 있습니다. 기본값 30초']) }}
-  {{ macros.setting_input_text_and_buttons('bookoasis_root_path', 'BookOasis 기본 경로', [['select_bookoasis_root_path_btn', '경로 선택']], value=arg.get('bookoasis_root_path', ''), desc=['FlaskFarm 컨테이너에서 보이는 BookOasis 설치 루트입니다.', '선택하면 db, logs, covers 경로를 자동으로 채웁니다.']) }}
-  {{ macros.setting_input_text_and_buttons('general_db_path', '일반 DB 파일', [['general_db_size_btn', '크기 확인'], ['general_db_libraries_btn', '섹션 확인']], value=arg['general_db_path'], desc=['<기본 경로>/db/media_general.db로 자동 설정됩니다.']) }}
-  {{ macros.setting_checkbox('adult_enabled', '성인 DB 검사', value=arg['adult_enabled'], desc=['성인 DB를 함께 진단합니다.']) }}
-  <div id="adult_enabled_div" class="collapse">
-    {{ macros.setting_input_text_and_buttons('adult_db_path', '성인 DB 파일', [['adult_db_size_btn', '크기 확인'], ['adult_db_libraries_btn', '섹션 확인']], value=arg['adult_db_path'], desc=['<기본 경로>/db/media_adult.db로 자동 설정됩니다.']) }}
-  </div>
-  {{ macros.setting_input_text_and_buttons('audiobook_db_path', '오디오북 DB 파일', [['audiobook_db_size_btn', '크기 확인'], ['audiobook_db_libraries_btn', '섹션 확인']], value=arg.get('audiobook_db_path', ''), desc=['<기본 경로>/db/media_audiobook.db로 자동 설정됩니다.']) }}
-  {{ macros.setting_input_text('bookoasis_log_dir', 'BookOasis 로그 디렉터리', value=arg['bookoasis_log_dir'], desc=['<기본 경로>/logs로 자동 설정됩니다.']) }}
-  {{ macros.m_hr() }}
-  <h4>커스텀 폰트</h4>
-  {{ macros.setting_input_text_and_buttons('custom_font_dir', '폰트 업로드 디렉터리', [['select_custom_font_dir_btn', '경로 선택']], value=arg.get('custom_font_dir', ''), desc=['FlaskFarm 컨테이너에서 쓰기 가능한 마운트 경로를 지정합니다.', '같은 호스트 경로를 BookOasis 컨테이너의 /app/static/fonts/custom에 매핑해야 합니다.']) }}
-  <div class="doctor-font-upload">
-    <input id="custom_font_files" type="file" accept=".ttf,.otf,.woff,.woff2" multiple hidden>
-    <div id="custom_font_dropzone" class="doctor-font-dropzone" tabindex="0" role="button">
-      TTF·OTF·WOFF·WOFF2 파일을 여기에 놓거나 클릭해 선택하세요.
-      <small>파일당 최대 30MB · 같은 이름은 덮어쓰지 않음</small>
+  <div class="tab-content doctor-setting-content">
+    <div class="tab-pane fade show active" id="setting-basic" role="tabpanel" aria-labelledby="setting-basic-tab">
+      <div class="doctor-section doctor-card">
+        <h4>BookOasis API 연결</h4>
+        <p class="doctor-muted">상태 확인, 관리자 기능과 보관함 스캔 요청에 사용할 연결 정보를 입력합니다.</p>
+        {{ macros.setting_input_text('bookoasis_url', 'BookOasis URL', value=arg['bookoasis_url'], desc=['상태 API와 표지 URL에 사용합니다.', '예: http://172.17.0.1:5930', 'Reverse proxy 사용 시 예: https://yourdomain.com']) }}
+        {{ macros.setting_input_text('bookoasis_username', 'BookOasis 관리자 계정', value=arg['bookoasis_username'], desc=['개별 도서 재스캔과 메타데이터 검색·적용에 사용합니다.']) }}
+        {{ macros.setting_input_text('bookoasis_password', 'BookOasis 관리자 비밀번호', value=arg['bookoasis_password'], type='password', desc=['서버 측 관리자 세션 생성에만 사용하며 로그나 API 응답에 표시하지 않습니다.']) }}
+        {{ macros.setting_input_text('webhook_token', '스캔 웹훅 토큰', value=arg['webhook_token'], desc=['BookOasis 설치 시 .env에 설정한 WEBHOOK_TOKEN과 같은 값을 입력합니다.', '보관함 전체 재스캔 요청에만 사용합니다.']) }}
+        {{ macros.setting_input_int('api_timeout', 'API 연결 제한 시간(초)', value=arg['api_timeout'], desc=['1~30초', '너무 짧으면 API 연결이 실패할 수 있습니다. 기본값 30초']) }}
+      </div>
     </div>
-    <div class="doctor-toolbar mb-0">
-      <button id="custom_font_upload_btn" type="button" class="btn btn-sm btn-primary">선택한 폰트 업로드</button>
-      <button id="custom_font_refresh_btn" type="button" class="btn btn-sm btn-outline-secondary">목록 새로고침</button>
-      <span id="custom_font_selection" class="doctor-muted">선택한 파일 없음</span>
+
+    <div class="tab-pane fade" id="setting-database" role="tabpanel" aria-labelledby="setting-database-tab">
+      <div class="doctor-section doctor-card">
+        <h4>DB 엔진과 기본 경로</h4>
+        <div class="form-group row">
+          <label class="col-sm-3 col-form-label">DB 엔진</label>
+          <div class="col-sm-9">
+            <select id="db_engine" name="db_engine" class="form-control">
+              <option value="sqlite" {% if arg.get('db_engine', 'sqlite') == 'sqlite' %}selected{% endif %}>SQLite</option>
+              <option value="mariadb" {% if arg.get('db_engine') == 'mariadb' %}selected{% endif %}>MariaDB</option>
+              <option value="auto" {% if arg.get('db_engine') == 'auto' %}selected{% endif %}>자동 감지</option>
+            </select>
+            <small class="form-text text-muted">자동 감지는 FF의 DB_ENGINE·DBMS 환경변수와 MariaDB 설정을 순서대로 확인합니다. MariaDB 연결 실패 시 SQLite로 자동 폴백하지 않습니다.</small>
+          </div>
+        </div>
+        {{ macros.setting_input_text_and_buttons('bookoasis_root_path', 'BookOasis 기본 경로', [['select_bookoasis_root_path_btn', '경로 선택']], value=arg.get('bookoasis_root_path', ''), desc=['FF 컨테이너에서 보이는 BookOasis 설치 루트입니다.', '선택하면 db, logs, covers 경로를 자동으로 채웁니다.']) }}
+        {{ macros.setting_input_text('bookoasis_log_dir', 'BookOasis 로그 디렉터리', value=arg['bookoasis_log_dir'], desc=['<기본 경로>/logs로 자동 설정됩니다.']) }}
+        {{ macros.setting_checkbox('adult_enabled', '성인 DB 검사', value=arg['adult_enabled'], desc=['성인 DB를 함께 진단합니다.']) }}
+      </div>
+
+      <div id="sqlite_database_settings" class="doctor-section doctor-card">
+        <h4>SQLite 파일</h4>
+        {{ macros.setting_input_text('general_db_path', '일반 DB 파일', value=arg['general_db_path'], desc=['<기본 경로>/db/media_general.db로 자동 설정됩니다.']) }}
+        <div id="adult_enabled_div" class="collapse">
+          {{ macros.setting_input_text('adult_db_path', '성인 DB 파일', value=arg['adult_db_path'], desc=['<기본 경로>/db/media_adult.db로 자동 설정됩니다.']) }}
+        </div>
+        {{ macros.setting_input_text('audiobook_db_path', '오디오북 DB 파일', value=arg.get('audiobook_db_path', ''), desc=['<기본 경로>/db/media_audiobook.db로 자동 설정됩니다.']) }}
+      </div>
+
+      <div id="mariadb_database_settings" class="doctor-section doctor-card">
+        <h4>MariaDB 연결</h4>
+        {{ macros.setting_input_text('mariadb_host', 'MariaDB 호스트', value=arg.get('mariadb_host', ''), desc=['FF 컨테이너에서 접근 가능한 MariaDB 호스트 또는 IP입니다.', '예: 172.17.0.1']) }}
+        {{ macros.setting_input_int('mariadb_port', 'MariaDB 포트', value=arg.get('mariadb_port', '3306'), desc=['기본값 3306']) }}
+        {{ macros.setting_input_text('mariadb_user', 'MariaDB 사용자', value=arg.get('mariadb_user', ''), desc=['진단만 사용할 때는 media_general·media_adult·media_audiobook 읽기 권한이 필요합니다.', '카테고리·Kavita·통DB 실제 이관에는 대상 DB 쓰기와 논리 백업·복원 권한이 필요하므로 BookOasis와 같은 수준의 계정을 권장합니다.']) }}
+        {{ macros.setting_input_text('mariadb_password', 'MariaDB 비밀번호', value=arg.get('mariadb_password', ''), type='password', desc=['로그나 연결 결과에 표시하지 않습니다.']) }}
+        {{ macros.setting_input_text('mariadb_database_prefix', 'DB 이름 접두어', value=arg.get('mariadb_database_prefix', 'media_'), desc=['기본값 media_ · 실제 DB 이름은 media_general 같은 형식입니다.']) }}
+        {{ macros.setting_input_int('mariadb_connect_timeout', 'MariaDB 연결 제한 시간(초)', value=arg.get('mariadb_connect_timeout', '10'), desc=['1~60초']) }}
+        {{ macros.setting_input_int('mariadb_read_timeout', 'MariaDB 읽기 제한 시간(초)', value=arg.get('mariadb_read_timeout', '30'), desc=['1~600초']) }}
+        {{ macros.setting_input_int('mariadb_write_timeout', 'MariaDB 쓰기 제한 시간(초)', value=arg.get('mariadb_write_timeout', '30'), desc=['카테고리·Kavita·통DB 실제 이관의 MariaDB 쓰기 작업에 적용합니다.', '1~600초 · 기본값 30']) }}
+        <p class="doctor-muted mb-0">MariaDB에 필요한 PyMySQL과 클라이언트 설치 방법은 최상단 <strong>매뉴얼</strong> 메뉴에서 확인할 수 있습니다.</p>
+      </div>
+
+      <div class="doctor-section doctor-card">
+        <div class="doctor-section-heading">
+          <div><h4>DB 정보와 보관함</h4><p class="doctor-muted mb-0">선택한 엔진에서 DB 크기·식별 정보와 등록된 보관함을 확인합니다.</p></div>
+        </div>
+        <div class="doctor-db-action-grid">
+          <div class="doctor-db-action-card">
+            <div><span class="doctor-db-kind">일반</span><strong>일반 DB</strong><small>media_general</small></div>
+            <div class="doctor-db-action-buttons"><button id="general_db_size_btn" type="button" class="btn btn-sm btn-outline-primary">DB 정보</button><button id="general_db_libraries_btn" type="button" class="btn btn-sm btn-outline-secondary">보관함 확인</button></div>
+          </div>
+          <div class="doctor-db-action-card">
+            <div><span class="doctor-db-kind doctor-db-kind-adult">성인</span><strong>성인 DB</strong><small>media_adult</small></div>
+            <div class="doctor-db-action-buttons"><button id="adult_db_size_btn" type="button" class="btn btn-sm btn-outline-primary">DB 정보</button><button id="adult_db_libraries_btn" type="button" class="btn btn-sm btn-outline-secondary">보관함 확인</button></div>
+          </div>
+          <div class="doctor-db-action-card">
+            <div><span class="doctor-db-kind doctor-db-kind-audio">오디오</span><strong>오디오북 DB</strong><small>media_audiobook</small></div>
+            <div class="doctor-db-action-buttons"><button id="audiobook_db_size_btn" type="button" class="btn btn-sm btn-outline-primary">DB 정보</button><button id="audiobook_db_libraries_btn" type="button" class="btn btn-sm btn-outline-secondary">보관함 확인</button></div>
+          </div>
+        </div>
+      </div>
     </div>
-    <div id="custom_font_list" class="doctor-font-list doctor-muted">설정한 경로의 폰트를 확인하세요.</div>
-    <p class="doctor-muted mb-0">마운트 추가·변경 후 BookOasis Docker 컨테이너 재시작은 사용자가 직접 해야 합니다. 기존 마운트에 파일만 추가한 경우 BookOasis가 목록을 다시 조회합니다.</p>
+
+    <div class="tab-pane fade" id="setting-diagnosis" role="tabpanel" aria-labelledby="setting-diagnosis-tab">
+      <div class="doctor-section doctor-card">
+        <h4>표지 검사</h4>
+        {{ macros.setting_checkbox('cover_root_custom', '커스텀 표지 경로', value=arg.get('cover_root_custom', 'False'), desc=['기본 경로가 아닌 커스텀 경로 사용 시 체크합니다.']) }}
+        {{ macros.setting_input_text_and_buttons('cover_root_path', '표지 디렉터리', [['select_cover_root_path_btn', '경로 선택']], value=arg['cover_root_path'], desc=['기본값은 <기본 경로>/covers로 자동 설정됩니다.', '커스텀 표지 경로를 체크하면 직접 입력하거나 경로를 선택할 수 있습니다.']) }}
+        {{ macros.setting_input_int('cover_min_width', '최소 표지 너비', value=arg['cover_min_width'], desc=['이 값보다 작으면 저해상도로 표시합니다.']) }}
+        {{ macros.setting_input_int('cover_min_height', '최소 표지 높이', value=arg['cover_min_height'], desc=['이 값보다 작으면 저해상도로 표시합니다.']) }}
+        {{ macros.setting_input_int('cover_min_file_size_kb', '최소 표지 파일 크기(KB)', value=arg['cover_min_file_size_kb'], desc=['이 값보다 작으면 파일 크기 작음으로 표시합니다.', '0이면 검사하지 않습니다.']) }}
+        {{ macros.setting_input_int('cover_min_aspect_percent', '최소 짧은 변 비율(%)', value=arg['cover_min_aspect_percent'], desc=['짧은 변 ÷ 긴 변이 이 값보다 작으면 비정상 비율로 표시합니다.', '0이면 검사하지 않습니다.']) }}
+      </div>
+
+      <div class="doctor-section doctor-card">
+        <h4>검사 정책</h4>
+        {{ macros.setting_checkbox('check_missing_isbn', 'ISBN 누락 검사', value=arg['check_missing_isbn'], desc=['만화·웹툰은 ISBN이 없는 경우가 많아 기본값은 꺼져 있습니다.']) }}
+        {{ macros.setting_input_int('stale_days', '장기 미스캔 기준일', value=arg['stale_days'], desc=['1~3650일']) }}
+        {{ macros.setting_input_int('page_size', '문제 도서 페이지 크기', value=arg['page_size'], desc=['10~200권']) }}
+        {{ macros.setting_input_int('cache_seconds', '상태 요약 캐시(초)', value=arg['cache_seconds'], desc=['0이면 캐시하지 않습니다.']) }}
+        {{ macros.setting_input_int('history_limit', '검사 이력 표시 수', value=arg['history_limit'], desc=['10~1000건']) }}
+      </div>
+
+      <div class="doctor-section doctor-card">
+        <h4>자동 검사</h4>
+        {{ macros.setting_checkbox('main_auto_start', '자동 검사 사용', value=arg['main_auto_start'], desc=['FF 시작 시 스케줄러에 등록합니다.']) }}
+        {{ macros.setting_input_text('main_interval', '자동 검사 주기', value=arg['main_interval'], desc=['분 단위 숫자 또는 Cron 표현식을 입력합니다.']) }}
+      </div>
+    </div>
   </div>
-  {{ macros.m_hr() }}
-  <h4>표지 검사</h4>
-  {{ macros.setting_checkbox('cover_root_custom', '커스텀 표지 경로', value=arg.get('cover_root_custom', 'False'), desc=['기본 경로가 아닌 커스텀 경로 사용 시 체크합니다.']) }}
-  {{ macros.setting_input_text_and_buttons('cover_root_path', '표지 디렉터리', [['select_cover_root_path_btn', '경로 선택']], value=arg['cover_root_path'], desc=['기본값은 <기본 경로>/covers로 자동 설정됩니다.', '커스텀 표지 경로를 체크하면 직접 입력하거나 경로를 선택할 수 있습니다.']) }}
-  {{ macros.setting_input_int('cover_min_width', '최소 표지 너비', value=arg['cover_min_width'], desc=['이 값보다 작으면 저해상도로 표시합니다.']) }}
-  {{ macros.setting_input_int('cover_min_height', '최소 표지 높이', value=arg['cover_min_height'], desc=['이 값보다 작으면 저해상도로 표시합니다.']) }}
-  {{ macros.setting_input_int('cover_min_file_size_kb', '최소 표지 파일 크기(KB)', value=arg['cover_min_file_size_kb'], desc=['이 값보다 작으면 파일 크기 작음으로 표시합니다.', '0이면 검사하지 않습니다.']) }}
-  {{ macros.setting_input_int('cover_min_aspect_percent', '최소 짧은 변 비율(%)', value=arg['cover_min_aspect_percent'], desc=['짧은 변 ÷ 긴 변이 이 값보다 작으면 비정상 비율로 표시합니다.', '0이면 검사하지 않습니다.']) }}
-  {{ macros.m_hr() }}
-  <h4>검사 정책</h4>
-  {{ macros.setting_checkbox('check_missing_isbn', 'ISBN 누락 검사', value=arg['check_missing_isbn'], desc=['만화·웹툰은 ISBN이 없는 경우가 많아 기본값은 꺼져 있습니다.']) }}
-  {{ macros.setting_input_int('stale_days', '장기 미스캔 기준일', value=arg['stale_days'], desc=['1~3650일']) }}
-  {{ macros.setting_input_int('page_size', '문제 도서 페이지 크기', value=arg['page_size'], desc=['10~200권']) }}
-  {{ macros.setting_input_int('cache_seconds', '상태 요약 캐시(초)', value=arg['cache_seconds'], desc=['0이면 캐시하지 않습니다.']) }}
-  {{ macros.setting_input_int('history_limit', '검사 이력 표시 수', value=arg['history_limit'], desc=['10~1000건']) }}
-  {{ macros.m_hr() }}
-  <h4>자동 검사</h4>
-  {{ macros.setting_checkbox('main_auto_start', '자동 검사 사용', value=arg['main_auto_start'], desc=['FlaskFarm 시작 시 스케줄러에 등록합니다.']) }}
-  {{ macros.setting_input_text('main_interval', '자동 검사 주기', value=arg['main_interval'], desc=['분 단위 숫자 또는 Cron 표현식을 입력합니다.']) }}
 </form>
 
 <script>
 $(function() {
   use_collapse('adult_enabled');
   $('#general_db_path,#adult_db_path,#audiobook_db_path,#bookoasis_log_dir').prop('readonly', true);
+  updateDatabaseEngineMode();
   updateCoverRootMode();
   updateBookOasisDerivedPaths();
 });
 $('#adult_enabled').change(function() { use_collapse('adult_enabled'); });
 $('#cover_root_custom').change(updateCoverRootMode);
+$('#db_engine').change(updateDatabaseEngineMode);
+
+function updateDatabaseEngineMode() {
+  var engine = $('#db_engine').val();
+  $('#mariadb_database_settings').toggle(engine === 'mariadb' || engine === 'auto');
+  $('#sqlite_database_settings').toggle(engine !== 'mariadb');
+}
 
 function currentSettings() {
   updateBookOasisDerivedPaths();
@@ -86,9 +154,7 @@ function updateBookOasisDerivedPaths() {
   $('#adult_db_path').val(bookoasisRootJoin(root, 'db/media_adult.db'));
   $('#audiobook_db_path').val(bookoasisRootJoin(root, 'db/media_audiobook.db'));
   $('#bookoasis_log_dir').val(bookoasisRootJoin(root, 'logs'));
-  if (!$('#cover_root_custom').is(':checked')) {
-    $('#cover_root_path').val(bookoasisRootJoin(root, 'covers'));
-  }
+  if (!$('#cover_root_custom').is(':checked')) $('#cover_root_path').val(bookoasisRootJoin(root, 'covers'));
 }
 
 function updateCoverRootMode() {
@@ -107,7 +173,6 @@ $("body").on('click', '#select_bookoasis_root_path_btn', function(e) {
     updateBookOasisDerivedPaths();
   });
 });
-
 $('#bookoasis_root_path').on('input change', updateBookOasisDerivedPaths);
 
 $("body").on('click', '#select_cover_root_path_btn', function(e) {
@@ -120,15 +185,16 @@ $("body").on('click', '#select_cover_root_path_btn', function(e) {
   });
 });
 
-$("body").on('click', '#select_custom_font_dir_btn', function(e) {
-  e.preventDefault();
-  var input = $('#custom_font_dir');
-  globalSelectLocalFolder('커스텀 폰트 폴더 선택', input.val().trim() || '/', function(result) {
-    if (typeof result !== 'string' || !result.trim()) return;
-    input.val(result.trim());
-    loadCustomFonts();
-  });
-});
+function databaseSummaryHtml(db, label) {
+  var identity = db.engine === 'mariadb' ? db.database : db.path;
+  var engine = String(db.engine || 'sqlite').toUpperCase();
+  return '<div class="doctor-db-modal-summary">' +
+    '<div><span>DB</span><strong>' + bookoasisMateEscape(label) + '</strong></div>' +
+    '<div><span>엔진</span><strong>' + bookoasisMateEscape(engine) + '</strong></div>' +
+    '<div><span>크기</span><strong>' + bookoasisMateEscape(bookoasisMateBytes(db.file_size)) + '</strong></div>' +
+    '<div><span>보관함</span><strong>' + Number((db.libraries || []).length).toLocaleString() + '개</strong></div>' +
+    '</div><div class="doctor-db-modal-identity doctor-path">' + bookoasisMateEscape(identity || 'DB 식별 정보 없음') + '</div>';
+}
 
 function showDatabaseDetails(dbType, view) {
   var data = currentSettings() + '&db_type=' + encodeURIComponent(dbType);
@@ -137,22 +203,18 @@ function showDatabaseDetails(dbType, view) {
     var db = ret.data;
     var labels = {general:'일반 DB', adult:'성인 DB', audiobook:'오디오북 DB'};
     var label = labels[dbType] || dbType;
-    if (view === 'size') {
-      var sizeHtml =
-        '<p><strong>' + bookoasisMateEscape(label) + '</strong></p>' +
-        '<p class="doctor-path">' + bookoasisMateEscape(db.path || '') + '</p>' +
-        '<p>' + bookoasisMateEscape(bookoasisMateBytes(db.file_size) + ' (' + Number(db.file_size || 0).toLocaleString() + ' bytes)') + '</p>';
-      showModal(sizeHtml, 'DB 파일 크기', false);
-      return;
+    var body = databaseSummaryHtml(db, label);
+    if (view === 'libraries') {
+      var rows = (db.libraries || []).map(function(item) {
+        return '<tr><td>' + Number(item.id || 0).toLocaleString() + '</td><td>' + bookoasisMateEscape(item.name || '') + '</td></tr>';
+      }).join('');
+      body += rows
+        ? '<div class="doctor-table-wrap doctor-db-modal-table"><table class="table table-sm doctor-table doctor-db-section-table"><thead><tr><th>라이브러리 ID</th><th>명칭</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+        : '<div class="doctor-empty doctor-db-modal-empty">등록된 보관함이 없습니다.</div>';
+    } else {
+      body += '<p class="doctor-muted doctor-db-modal-note">정확한 크기는 선택한 DB 엔진에서 조회한 전체 DB 크기입니다.</p>';
     }
-    var rows = (db.libraries || []).map(function(item) {
-      return '<tr><td>' + Number(item.id || 0).toLocaleString() + '</td><td>' +
-        bookoasisMateEscape(item.name || '') + '</td></tr>';
-    }).join('');
-    var body = rows
-      ? '<div class="doctor-table-wrap"><table class="table table-sm doctor-table doctor-db-section-table"><thead><tr><th>라이브러리 ID</th><th>명칭</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
-      : '<p>등록된 보관함 섹션이 없습니다.</p>';
-    showModal(body, label + ' 보관함 섹션 ' + Number((db.libraries || []).length).toLocaleString() + '개', false);
+    showModal(body, view === 'libraries' ? label + ' 보관함' : label + ' 정보', false);
   });
 }
 
@@ -160,103 +222,10 @@ $("body").on('click', '#general_db_size_btn,#adult_db_size_btn,#audiobook_db_siz
   e.preventDefault();
   showDatabaseDetails(this.id.indexOf('audiobook_') === 0 ? 'audiobook' : (this.id.indexOf('adult_') === 0 ? 'adult' : 'general'), 'size');
 });
-
 $("body").on('click', '#general_db_libraries_btn,#adult_db_libraries_btn,#audiobook_db_libraries_btn', function(e) {
   e.preventDefault();
   showDatabaseDetails(this.id.indexOf('audiobook_') === 0 ? 'audiobook' : (this.id.indexOf('adult_') === 0 ? 'adult' : 'general'), 'libraries');
 });
-
-function setCustomFontFiles(files) {
-  var input = document.getElementById('custom_font_files');
-  if (typeof DataTransfer !== 'undefined') {
-    var transfer = new DataTransfer();
-    Array.prototype.forEach.call(files || [], function(file) { transfer.items.add(file); });
-    input.files = transfer.files;
-  }
-  document.getElementById('custom_font_selection').textContent =
-    input.files.length ? input.files.length + '개 파일 선택' : '선택한 파일 없음';
-}
-
-function renderCustomFonts(data) {
-  var items = (data && data.items) || [];
-  var root = document.getElementById('custom_font_list');
-  bookoasisMateClear(root);
-  if (!items.length) {
-    root.textContent = '등록된 커스텀 폰트가 없습니다.';
-    return;
-  }
-  items.forEach(function(item) {
-    var row = bookoasisMateText('div', 'doctor-font-row', '');
-    row.appendChild(bookoasisMateText('strong', '', item.name));
-    row.appendChild(bookoasisMateText('span', 'doctor-muted', bookoasisMateBytes(item.size) + ' · ' + item.modified_at));
-    root.appendChild(row);
-  });
-}
-
-function loadCustomFonts() {
-  if (!$('#custom_font_dir').val().trim()) {
-    renderCustomFonts({items:[]});
-    return;
-  }
-  bookoasisMateAjax('setting', 'font_list', currentSettings(), function(ret) {
-    if (ret.data) renderCustomFonts(ret.data);
-  }, null, {global:false, silent:true});
-}
-
-function uploadCustomFonts() {
-  var input = document.getElementById('custom_font_files');
-  if (!input.files.length) {
-    notify('업로드할 폰트 파일을 선택해 주세요.', 'warning');
-    return;
-  }
-  var formData = new FormData();
-  new URLSearchParams(currentSettings()).forEach(function(value, key) {
-    formData.append(key, value);
-  });
-  Array.prototype.forEach.call(input.files, function(file) { formData.append('files', file); });
-  $.ajax({
-    url:'/' + PACKAGE_NAME + '/ajax/setting/font_upload',
-    type:'POST',
-    data:formData,
-    processData:false,
-    contentType:false,
-    dataType:'json',
-    success:function(ret) {
-      notify(ret.msg || '폰트 업로드 요청을 처리했습니다.', ret.ret || 'success');
-      if (ret.data) {
-        if ((ret.data.rejected || []).length) {
-          var rejected = ret.data.rejected.map(function(item) {
-            return bookoasisMateEscape(item.name || '이름 없음') + ' · ' + bookoasisMateEscape(item.reason || '거부됨');
-          }).join('<br>');
-          showModal(rejected, '업로드하지 못한 폰트', false);
-        }
-        input.value = '';
-        setCustomFontFiles([]);
-        loadCustomFonts();
-      }
-    },
-    error:function(xhr) {
-      var message = xhr.responseJSON && xhr.responseJSON.msg ? xhr.responseJSON.msg : '폰트 업로드에 실패했습니다.';
-      notify(message, 'danger');
-    }
-  });
-}
-
-$('#custom_font_dropzone').on('click keydown', function(event) {
-  if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
-  event.preventDefault();
-  document.getElementById('custom_font_files').click();
-}).on('dragover', function(event) {
-  event.preventDefault();
-  this.classList.add('is-dragover');
-}).on('dragleave drop', function(event) {
-  event.preventDefault();
-  this.classList.remove('is-dragover');
-  if (event.type === 'drop') setCustomFontFiles(event.originalEvent.dataTransfer.files);
-});
-$('#custom_font_files').on('change', function() { setCustomFontFiles(this.files); });
-$('#custom_font_upload_btn').on('click', uploadCustomFonts);
-$('#custom_font_refresh_btn').on('click', loadCustomFonts);
 
 $('#setting_save_btn').click(function(e) {
   e.preventDefault();
@@ -270,15 +239,16 @@ $('#connection_test_btn').click(function(e) {
   bookoasisMateAjax('setting', 'connection_test', currentSettings(), function(ret) {
     if (!ret.data) return;
     var lines = [];
-    (ret.data.databases || []).forEach(function(db) { lines.push(bookoasisMateEscape(db.label + ' DB: ' + (db.connected ? '연결 성공' : db.error))); });
+    (ret.data.databases || []).forEach(function(db) {
+      var identity = db.engine === 'mariadb' ? db.database : db.path;
+      lines.push(bookoasisMateEscape(db.label + ' DB [' + (db.engine || 'sqlite') + ' · ' + (identity || '-') + ']: ' + (db.connected ? '연결 성공' : db.error)));
+    });
     lines.push(bookoasisMateEscape('상태 API: ' + (ret.data.api.success ? '연결 성공' : ret.data.api.message)));
     lines.push(bookoasisMateEscape('관리자 API: ' + (ret.data.admin_api.success ? '로그인 성공' : ret.data.admin_api.message)));
     lines.push(bookoasisMateEscape('로그 디렉터리: ' + (!ret.data.log_root.configured ? '미설정' : (ret.data.log_root.readable ? '읽기 가능 · ' + ret.data.log_root.files.length + '개 파일' : ret.data.log_root.error))));
     lines.push(bookoasisMateEscape('표지 디렉터리: ' + (!ret.data.cover_root.configured ? '미설정' : (ret.data.cover_root.readable ? '읽기 가능' : '찾을 수 없음'))));
-    lines.push(bookoasisMateEscape('커스텀 폰트 디렉터리: ' + (!ret.data.font_root.configured ? '미설정' : (ret.data.font_root.writable ? '쓰기 가능' : '찾을 수 없거나 쓰기 불가'))));
     showModal(lines.join('<br>'), 'BookOasis 연결 테스트', false);
   });
 });
-$(document).ready(loadCustomFonts);
 </script>
 {% endblock %}

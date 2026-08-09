@@ -6,6 +6,7 @@ import traceback
 from flask import jsonify, render_template
 
 from .setup import *
+from .bookoasis_db import BookOasisDatabaseError
 from .sql_query import ReadOnlySqlTool
 
 
@@ -15,21 +16,22 @@ class ModuleSql(PluginModuleBase):
 
     def _tool(self):
         settings = P.bookoasis_mate_service.settings()
-        paths = {"general": settings.get("general_db_path")}
-        if settings.get("adult_enabled"):
-            paths["adult"] = settings.get("adult_db_path")
-        paths["audiobook"] = settings.get("audiobook_db_path")
-        return ReadOnlySqlTool(paths)
+        return ReadOnlySqlTool(settings)
 
     def process_menu(self, page, req):
         del page, req
         P.logger.debug("[BookOasisMate] 읽기 전용 SQL 도구 메뉴 열기")
         arg = P.ModelSetting.to_dict()
-        arg["adult_enabled"] = P.bookoasis_mate_service.settings().get(
+        settings = P.bookoasis_mate_service.settings()
+        arg["adult_enabled"] = settings.get(
             "adult_enabled", False
         )
-        arg["audiobook_enabled"] = bool(
-            P.bookoasis_mate_service.settings().get("audiobook_db_path")
+        arg["database_engine"] = (
+            P.bookoasis_mate_service.engine().database_adapter.public_info()
+        )
+        arg["audiobook_enabled"] = (
+            arg["database_engine"].get("resolved_engine") == "mariadb"
+            or bool(settings.get("audiobook_db_path"))
         )
         return render_template(f"{P.package_name}_{self.name}.html", arg=arg)
 
@@ -60,7 +62,12 @@ class ModuleSql(PluginModuleBase):
                     }
                 )
             return jsonify({"ret": "warning", "msg": "지원하지 않는 요청입니다."}), 400
-        except (ValueError, FileNotFoundError, TimeoutError) as error:
+        except (
+            ValueError,
+            FileNotFoundError,
+            TimeoutError,
+            BookOasisDatabaseError,
+        ) as error:
             return jsonify({"ret": "warning", "msg": str(error)}), 400
         except Exception as error:
             P.logger.error(f"BookOasis Mate SQL 도구 오류: {error}")
