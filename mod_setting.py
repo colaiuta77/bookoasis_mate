@@ -4,6 +4,7 @@ import traceback
 
 from flask import jsonify, render_template
 
+from .bookoasis_env import EnvFileError, read_env_file, save_env_file
 from .setup import *
 
 
@@ -37,6 +38,29 @@ class ModuleSetting(PluginModuleBase):
         P.logger.debug(f"[BookOasisMate] 설정 AJAX 시작 command={safe_command} db_type={db_type}")
         try:
             values = req.form.to_dict()
+            if command == "env_load":
+                data = read_env_file(self.service.settings().get("bookoasis_root_path"))
+                return jsonify({
+                    "ret": "success",
+                    "msg": (
+                        "BookOasis .env 파일을 불러왔습니다."
+                        if data["exists"]
+                        else "BookOasis .env 파일이 없어 새 파일로 편집합니다."
+                    ),
+                    "data": data,
+                })
+            if command == "env_save":
+                if req.form.get("confirm_save") != "true":
+                    return jsonify({"ret": "warning", "msg": "저장 확인이 필요합니다."}), 400
+                data = save_env_file(
+                    self.service.settings().get("bookoasis_root_path"),
+                    req.form.get("env_content", ""),
+                )
+                return jsonify({
+                    "ret": "success",
+                    "msg": "BookOasis .env 파일을 저장했습니다. BookOasis를 직접 재시작해 주세요.",
+                    "data": data,
+                })
             settings = self.service.settings_from_mapping(values) if values else self.service.settings()
             if command == "connection_test":
                 data = self.service.connection_test(settings)
@@ -60,6 +84,8 @@ class ModuleSetting(PluginModuleBase):
                     "data": data,
                 })
             return jsonify({"ret": "warning", "msg": "지원하지 않는 요청입니다."}), 400
+        except EnvFileError as error:
+            return jsonify({"ret": "warning", "msg": str(error)}), 400
         except Exception as error:
             P.logger.error(f"BookOasis Mate 설정 요청 오류: {error}")
             P.logger.error(traceback.format_exc())

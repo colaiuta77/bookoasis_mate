@@ -10,6 +10,7 @@
   <li class="nav-item"><a class="nav-link active" id="setting-basic-tab" data-toggle="tab" href="#setting-basic" role="tab">기본 연결</a></li>
   <li class="nav-item"><a class="nav-link" id="setting-database-tab" data-toggle="tab" href="#setting-database" role="tab">DB 연결</a></li>
   <li class="nav-item"><a class="nav-link" id="setting-diagnosis-tab" data-toggle="tab" href="#setting-diagnosis" role="tab">진단 정책</a></li>
+  <li class="nav-item"><a class="nav-link" id="setting-env-tab" data-toggle="tab" href="#setting-env" role="tab">환경 파일</a></li>
 </ul>
 
 <form id="setting">
@@ -114,6 +115,27 @@
         {{ macros.setting_input_text('main_interval', '자동 검사 주기', value=arg['main_interval'], desc=['분 단위 숫자 또는 Cron 표현식을 입력합니다.']) }}
       </div>
     </div>
+
+    <div class="tab-pane fade" id="setting-env" role="tabpanel" aria-labelledby="setting-env-tab">
+      <div class="doctor-section doctor-card">
+        <div class="doctor-section-heading">
+          <div>
+            <h4>BookOasis .env 편집</h4>
+            <p class="doctor-muted mb-0">설정 저장을 완료한 BookOasis 기본 경로 바로 아래 <code>.env</code> 파일만 편집합니다.</p>
+          </div>
+          <div class="doctor-cleanup-actions">
+            <button id="env_file_load_btn" type="button" class="btn btn-sm btn-outline-primary">파일 불러오기</button>
+            <button id="env_file_save_btn" type="button" class="btn btn-sm btn-primary" disabled>백업 후 저장</button>
+          </div>
+        </div>
+        <div class="alert alert-warning doctor-env-warning">
+          이 파일에는 DB 비밀번호와 API 토큰 등 민감한 값이 포함될 수 있습니다. 저장 전 기존 파일을 같은 디렉터리에 백업하며, 변경 적용을 위해 BookOasis를 사용자가 직접 재시작해야 합니다.
+        </div>
+        <div id="env_file_path" class="doctor-path doctor-env-path">BookOasis 기본 경로를 확인한 뒤 파일을 불러오세요.</div>
+        <textarea id="env_file_content" class="form-control doctor-env-editor" rows="24" spellcheck="false" autocomplete="off" disabled></textarea>
+        <div id="env_file_status" class="doctor-env-status doctor-muted" role="status" aria-live="polite">파일을 불러오기 전에는 저장할 수 없습니다.</div>
+      </div>
+    </div>
   </div>
 </form>
 
@@ -174,6 +196,7 @@ $("body").on('click', '#select_bookoasis_root_path_btn', function(e) {
   });
 });
 $('#bookoasis_root_path').on('input change', updateBookOasisDerivedPaths);
+$('#bookoasis_root_path').on('input change', resetEnvEditor);
 
 $("body").on('click', '#select_cover_root_path_btn', function(e) {
   e.preventDefault();
@@ -195,6 +218,89 @@ function databaseSummaryHtml(db, label) {
     '<div><span>보관함</span><strong>' + Number((db.libraries || []).length).toLocaleString() + '개</strong></div>' +
     '</div><div class="doctor-db-modal-identity doctor-path">' + bookoasisMateEscape(identity || 'DB 식별 정보 없음') + '</div>';
 }
+
+var envRequestRunning = false;
+var envLoadedPath = '';
+var envRequestStartedAt = 0;
+var envRequestTimer = null;
+
+function resetEnvEditor() {
+  envLoadedPath = '';
+  $('#env_file_content').val('').prop('disabled', true);
+  $('#env_file_save_btn').prop('disabled', true);
+  $('#env_file_path').text('BookOasis 기본 경로를 확인한 뒤 파일을 불러오세요.');
+  $('#env_file_status').removeClass('doctor-env-status-active').text('파일을 불러오기 전에는 저장할 수 없습니다.');
+}
+
+function setEnvRequestRunning(running, label) {
+  envRequestRunning = running;
+  clearInterval(envRequestTimer);
+  envRequestTimer = null;
+  $('#env_file_load_btn').prop('disabled', running);
+  $('#env_file_save_btn').prop('disabled', running || !envLoadedPath);
+  $('#env_file_content').prop('disabled', running || !envLoadedPath);
+  if (!running) {
+    $('#env_file_status').removeClass('doctor-env-status-active');
+    return;
+  }
+  envRequestStartedAt = Date.now();
+  var render = function() {
+    var seconds = Math.max(0, Math.floor((Date.now() - envRequestStartedAt) / 1000));
+    $('#env_file_status').addClass('doctor-env-status-active').text(label + ' · ' + seconds + '초');
+  };
+  render();
+  envRequestTimer = setInterval(render, 1000);
+}
+
+$('#env_file_load_btn').click(function(e) {
+  e.preventDefault();
+  if (envRequestRunning) return;
+  var root = String($('#bookoasis_root_path').val() || '').trim();
+  if (!root) {
+    notify('BookOasis 기본 경로를 먼저 입력해 주세요.', 'warning');
+    return;
+  }
+  envLoadedPath = '';
+  $('#env_file_content').val('').prop('disabled', true);
+  setEnvRequestRunning(true, '.env 파일을 불러오는 중');
+  var loaded = false;
+  bookoasisMateAjax('setting', 'env_load', {}, function(ret) {
+    if (ret.ret !== 'success' || !ret.data) return;
+    loaded = true;
+    envLoadedPath = ret.data.path || '';
+    $('#env_file_path').text(envLoadedPath + (ret.data.exists ? ' · ' + bookoasisMateBytes(ret.data.size || 0) : ' · 새 파일'));
+    $('#env_file_content').val(ret.data.content || '');
+  }, function() {
+    setEnvRequestRunning(false);
+    if (envLoadedPath) {
+      $('#env_file_status').removeClass('doctor-env-status-active').text('편집할 수 있습니다. 저장하면 기존 파일을 먼저 백업합니다.');
+    } else if (!loaded) {
+      $('#env_file_status').text('파일을 불러오지 못했습니다. 저장된 BookOasis 기본 경로와 접근 권한을 확인해 주세요.');
+    }
+  }, {global:false});
+});
+
+$('#env_file_save_btn').click(function(e) {
+  e.preventDefault();
+  if (envRequestRunning || !envLoadedPath) return;
+  if (!confirm('BookOasis .env 파일을 백업한 뒤 현재 내용으로 저장하시겠습니까?')) return;
+  setEnvRequestRunning(true, '.env 파일을 백업하고 저장하는 중');
+  var saved = false;
+  bookoasisMateAjax('setting', 'env_save', {
+    env_content:$('#env_file_content').val(),
+    confirm_save:'true'
+  }, function(ret) {
+    if (ret.ret !== 'success' || !ret.data) return;
+    saved = true;
+    envLoadedPath = ret.data.path || envLoadedPath;
+    var backup = ret.data.backup_path ? ' · 백업 ' + ret.data.backup_path : ' · 새 파일 생성';
+    $('#env_file_path').text(envLoadedPath + ' · ' + bookoasisMateBytes(ret.data.size || 0));
+    $('#env_file_status').removeClass('doctor-env-status-active').text('저장 완료' + backup + ' · BookOasis를 직접 재시작해 주세요.');
+  }, function() {
+    setEnvRequestRunning(false);
+    if (!saved) $('#env_file_status').text('저장하지 못했습니다. 파일 권한과 플러그인 로그를 확인해 주세요.');
+  }, {global:false});
+});
 
 function showDatabaseDetails(dbType, view) {
   var data = currentSettings() + '&db_type=' + encodeURIComponent(dbType);

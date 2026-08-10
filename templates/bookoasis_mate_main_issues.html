@@ -21,6 +21,7 @@
   </select>
   <input id="search" class="form-control form-control-sm" placeholder="제목·시리즈·저자 검색">
   <button id="search_btn" class="btn btn-sm btn-primary">조회</button>
+  <span id="issue_progress" class="doctor-query-status" role="status" aria-live="polite"></span>
   <span id="issue_count" class="doctor-muted"></span>
 </div>
 <p class="doctor-muted">도서 행을 클릭하면 BookOasis 상세 보기, 개별 도서 재스캔과 플러그인 메타데이터 검색 메뉴가 열립니다. 일괄 재스캔은 현재 필터의 전체 검색 결과를 별도 프로세스에서 순차 처리합니다.</p>
@@ -67,6 +68,33 @@ var issuePage = 1;
 var issuePages = 1;
 var issueLibrariesReady = false;
 var issueBatchRescan = null;
+var issueLoading = false;
+var issueLoadingStartedAt = 0;
+var issueLoadingTimer = null;
+function updateIssueControls() {
+  $('#db_type,#issue_library_id,#issue_type,#search,#search_btn').prop('disabled', issueLoading || !issueLibrariesReady);
+  $('#prev_btn').prop('disabled', issueLoading || issuePage <= 1);
+  $('#next_btn').prop('disabled', issueLoading || issuePage >= issuePages);
+}
+function setIssueLoading(loading, message) {
+  issueLoading = loading;
+  clearInterval(issueLoadingTimer);
+  issueLoadingTimer = null;
+  $('.doctor-table-wrap').toggleClass('doctor-results-loading', loading).attr('aria-busy', loading ? 'true' : 'false');
+  $('#search_btn').text(loading ? '조회 중' : '조회');
+  if (loading) {
+    issueLoadingStartedAt = Date.now();
+    var render = function() {
+      var seconds = Math.max(0, Math.floor((Date.now() - issueLoadingStartedAt) / 1000));
+      $('#issue_progress').addClass('doctor-query-status-active').text('문제 도서 조회 중 · ' + seconds + '초');
+    };
+    render();
+    issueLoadingTimer = setInterval(render, 1000);
+  } else {
+    $('#issue_progress').removeClass('doctor-query-status-active').text(message || '');
+  }
+  updateIssueControls();
+}
 function openIssueJson(event, item) {
   event.preventDefault();
   event.stopPropagation();
@@ -118,13 +146,21 @@ function renderIssues(data) {
   });
   issuePage = data.page; issuePages = Math.max(1, data.pages || 1);
   $('#page_info').text(issuePage + ' / ' + issuePages);
-  $('#prev_btn').prop('disabled', issuePage <= 1);
-  $('#next_btn').prop('disabled', issuePage >= issuePages);
+  updateIssueControls();
 }
 function loadIssues(page) {
+  if (issueLoading || !issueLibrariesReady) return;
+  var succeeded = false;
+  setIssueLoading(true);
   bookoasisMateAjax('main', 'issues', {db_type:$('#db_type').val(), library_id:$('#issue_library_id').val(), issue_type:$('#issue_type').val(), search:$('#search').val(), page:page}, function(ret) {
-    if (ret.ret === 'success') renderIssues(ret.data);
-  });
+    if (ret.ret === 'success') {
+      succeeded = true;
+      renderIssues(ret.data);
+    }
+  }, function() {
+    var seconds = Math.max(0, ((Date.now() - issueLoadingStartedAt) / 1000).toFixed(1));
+    setIssueLoading(false, (succeeded ? '조회 완료' : '조회 실패') + ' · ' + seconds + '초');
+  }, {global:false});
 }
 function loadIssueLibraries() {
   var dbType = $('#db_type').val();
@@ -139,14 +175,16 @@ function loadIssueLibraries() {
     });
     issueLibrariesReady = true;
     select.prop('disabled', false);
+    updateIssueControls();
     loadIssues(1);
   }, function(xhr, status) {
     if ($('#db_type').val() === dbType && status !== 'success') {
       issueLibrariesReady = true;
       select.empty().append($('<option>', {value:'', text:'전체 보관함'})).prop('disabled', false);
+      updateIssueControls();
       loadIssues(1);
     }
-  });
+  }, {global:false});
 }
 $('#search_btn').click(function(e) { e.preventDefault(); loadIssues(1); });
 $('#search').keydown(function(e) { if (e.key === 'Enter') { e.preventDefault(); loadIssues(1); } });

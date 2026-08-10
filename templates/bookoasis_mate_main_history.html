@@ -6,6 +6,7 @@
 <div class="doctor-toolbar">
   <button id="refresh_btn" class="btn btn-sm btn-secondary">새로고침</button>
   <button id="clear_btn" class="btn btn-sm btn-danger">이력 전체 삭제</button>
+  <span id="history_progress" class="doctor-query-status" role="status" aria-live="polite"></span>
 </div>
 <div class="doctor-table-wrap"><table class="table table-sm doctor-table">
   <thead><tr><th>실행 시각</th><th>실행 방식</th><th>상태</th><th>전체 도서</th><th>문제 도서</th><th>소요 시간</th></tr></thead>
@@ -14,9 +15,34 @@
 <div id="history_empty" class="doctor-empty" style="display:none">저장된 검사 이력이 없습니다.</div>
 
 <script>
+var historyLoading = false;
+var historyLoadingStartedAt = 0;
+var historyLoadingTimer = null;
+function setHistoryLoading(loading, message) {
+  historyLoading = loading;
+  clearInterval(historyLoadingTimer);
+  historyLoadingTimer = null;
+  $('#refresh_btn,#clear_btn').prop('disabled', loading);
+  $('.doctor-table-wrap').toggleClass('doctor-results-loading', loading).attr('aria-busy', loading ? 'true' : 'false');
+  if (loading) {
+    historyLoadingStartedAt = Date.now();
+    var render = function() {
+      var seconds = Math.max(0, Math.floor((Date.now() - historyLoadingStartedAt) / 1000));
+      $('#history_progress').addClass('doctor-query-status-active').text('검사 이력 조회 중 · ' + seconds + '초');
+    };
+    render();
+    historyLoadingTimer = setInterval(render, 1000);
+  } else {
+    $('#history_progress').removeClass('doctor-query-status-active').text(message || '');
+  }
+}
 function loadHistory() {
+  if (historyLoading) return;
+  var succeeded = false;
+  setHistoryLoading(true);
   bookoasisMateAjax('main', 'history', {}, function(ret) {
     if (ret.ret !== 'success') return;
+    succeeded = true;
     var body = document.getElementById('history_rows'); bookoasisMateClear(body);
     $('#history_empty').toggle(ret.data.length === 0);
     ret.data.forEach(function(item) {
@@ -29,11 +55,15 @@ function loadHistory() {
       row.appendChild(bookoasisMateText('td', '', (item.duration_ms || 0) + 'ms'));
       body.appendChild(row);
     });
-  });
+  }, function() {
+    var seconds = Math.max(0, ((Date.now() - historyLoadingStartedAt) / 1000).toFixed(1));
+    setHistoryLoading(false, (succeeded ? '조회 완료' : '조회 실패') + ' · ' + seconds + '초');
+  }, {global:false});
 }
 $('#refresh_btn').click(function(e) { e.preventDefault(); loadHistory(); });
 $('#clear_btn').click(function(e) {
   e.preventDefault();
+  if (historyLoading) return;
   if (!confirm('BookOasis Mate 검사 이력을 모두 삭제하시겠습니까?')) return;
   bookoasisMateAjax('main', 'clear_history', {}, loadHistory);
 });
