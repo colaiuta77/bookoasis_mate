@@ -27,6 +27,15 @@
 
 ## Changelog
 
+- v1.6.3 (2026-08-10)
+  - Google Drive 경로 매핑 진단 개선
+    - 설정 화면에서 gd-poller 수신 경로를 입력해 Mate 변환 경로, BookOasis 보관함과 rclone VFS 규칙을 저장 전에 확인하는 기능 추가.
+    - `/mnt/gds2/mnt/gds2/...` 형태의 중복 접두사를 감지하고 gd-poller `target`·`mappings` 중복 설정과 기존 실패 이벤트 처리 방법을 구체적으로 안내.
+    - 정상적인 반복 디렉터리를 보호하기 위해 경로를 임의로 자동 보정하지 않고, 검사 결과에 rclone 인증정보가 노출되지 않도록 처리.
+  - gd-poller 연동 매뉴얼 개선
+    - 전체 `config.yaml` 예시와 gd-poller·Mate 중 한 곳에서만 경로를 변환하는 원칙 추가.
+    - 공식 gd-poller GitHub 기반 설치·업데이트·실행 명령을 언어 라벨이 있는 코드 창으로 정리.
+
 - v1.6.2 (2026-08-10)
   - 설정 및 조회 UX 개선
     - 설정에서 BookOasis 루트의 `.env`를 안전하게 읽고, 기존 파일을 백업한 뒤 저장할 수 있는 편집 기능 추가.

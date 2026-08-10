@@ -100,6 +100,16 @@ def map_path(path, mappings):
     return normalized
 
 
+def find_repeated_leading_prefix(path):
+    """선두에서 두 번 반복된 디렉터리 접두사를 진단용으로 찾습니다."""
+    normalized = normalize_event_path(path)
+    parts = [part for part in normalized.split("/") if part]
+    for size in range(2, (len(parts) // 2) + 1):
+        if parts[:size] == parts[size : size * 2]:
+            return "/" + "/".join(parts[:size])
+    return ""
+
+
 def parse_vfs_rules(value):
     rules = []
     for line in str(value or "").replace("\r", "").splitlines():
@@ -370,6 +380,50 @@ class GDriveScanProcessor:
         if self.logger is not None:
             getattr(self.logger, level, self.logger.info)(message)
 
+    @staticmethod
+    def _duplicate_prefix_error(path, prefix):
+        return (
+            f"변경 경로에 중복 접두사 '{prefix}'가 감지되었습니다: {path}. "
+            "gd-poller target에 이미 로컬 경로가 포함되어 있으면 "
+            "CommandDispatcher mappings를 제거해 주세요. 기존 실패 이벤트는 "
+            "손상된 수신 경로를 유지하므로 삭제한 뒤 새 이벤트를 받아야 합니다."
+        )
+
+    def preview_path(self, path):
+        received_path = normalize_event_path(path)
+        mapped_path = map_path(received_path, self.path_mappings)
+        library = find_library(mapped_path, self.libraries)
+        vfs_rule = find_vfs_rule(mapped_path, self.vfs_rules)
+        repeated_prefix = find_repeated_leading_prefix(mapped_path)
+        warning = ""
+        if repeated_prefix:
+            warning = self._duplicate_prefix_error(mapped_path, repeated_prefix)
+        elif library is None:
+            warning = "변환 경로에 해당하는 BookOasis 보관함을 찾을 수 없습니다."
+        elif vfs_rule is None:
+            warning = "변환 경로에 일치하는 rclone VFS 규칙이 없습니다."
+        return {
+            "received_path": received_path,
+            "mapped_path": mapped_path,
+            "mapping_applied": received_path != mapped_path,
+            "repeated_prefix": repeated_prefix,
+            "library": {
+                "db_type": library["db_type"],
+                "id": library["id"],
+                "name": library["name"],
+                "root": library["root"],
+            }
+            if library
+            else None,
+            "vfs_rule": {
+                "local": vfs_rule["local"],
+                "remote": vfs_rule["remote"],
+            }
+            if vfs_rule
+            else None,
+            "warning": warning,
+        }
+
     def prepare_event(self, event):
         item = dict(event)
         item["mapped_path"] = map_path(item.get("path"), self.path_mappings)
@@ -389,6 +443,12 @@ class GDriveScanProcessor:
                 seen.add((library["db_type"], library["id"]))
                 item["libraries"].append(library)
         if not item["libraries"]:
+            for candidate in candidates:
+                repeated_prefix = find_repeated_leading_prefix(candidate)
+                if repeated_prefix:
+                    raise ValueError(
+                        self._duplicate_prefix_error(candidate, repeated_prefix)
+                    )
             raise ValueError("변경 경로에 해당하는 BookOasis 보관함을 찾을 수 없습니다.")
         return item
 

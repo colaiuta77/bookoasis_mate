@@ -1,7 +1,7 @@
 {# gd-poller CommandDispatcher 래퍼와 BookOasis 변경 감지 연동 절차를 안내합니다. #}
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=gdrive-manual-2">
 
 <div class="doctor-section doctor-card">
   <h3>Google Drive 변경 감지 연동 매뉴얼</h3>
@@ -9,7 +9,28 @@
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>1. 사전 설정</h4>
+  <h4>1. gd-poller 설치 및 실행</h4>
+  <p>gd-poller 설치 정보와 최신 소스는 공식 <a href="https://github.com/halfaider/gd-poller" target="_blank" rel="noopener noreferrer">halfaider/gd-poller GitHub 저장소</a>에서 확인할 수 있습니다.</p>
+  <p>먼저 gd-poller를 실행할 Python 환경에서 pip 설치 도구를 업데이트합니다.</p>
+  <div class="doctor-code-window">
+    <div class="doctor-code-window-header">Bash</div>
+    <pre><code>python -m pip install --upgrade pip setuptools wheel</code></pre>
+  </div>
+  <p>설치 또는 업데이트할 작업 경로로 이동한 뒤 아래 명령을 실행합니다. 현재 경로에 <code>gd-poller</code> 소스 폴더를 만들고 editable 방식으로 설치합니다.</p>
+  <div class="doctor-code-window">
+    <div class="doctor-code-window-header">Bash</div>
+    <pre><code>pip install --src . -e "git+https://github.com/halfaider/gd-poller.git#egg=gd_poller"</code></pre>
+  </div>
+  <p>FF 시스템 커맨드에 등록하거나 같은 Python 환경의 셸에서 다음 형식으로 실행합니다.</p>
+  <div class="doctor-code-window">
+    <div class="doctor-code-window-header">Bash</div>
+    <pre><code>gd-poller /path/to/config.yaml</code></pre>
+  </div>
+  <p class="doctor-muted">FF Docker 컨테이너 내부에 직접 설치한 패키지는 이미지를 다시 만들거나 컨테이너를 교체하면 사라질 수 있습니다. 재생성 후에도 유지하려면 커스텀 이미지 또는 컨테이너 시작 시 설치 절차를 별도로 구성해야 합니다.</p>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>2. Mate 사전 설정</h4>
   <ol>
     <li>BookOasis Mate 설정에서 현재 DB 엔진과 연결 정보를 설정하고 BookOasis URL과 스캔 웹훅 토큰을 입력합니다. SQLite는 사용할 일반·성인·오디오북 DB 경로를 확인하고 MariaDB는 접속 정보를 입력합니다.</li>
     <li>Google Drive 연동 설정에서 경로 매핑과 rclone VFS 규칙을 실제 컨테이너 경로에 맞춥니다.</li>
@@ -19,28 +40,65 @@
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>2. gd-poller 설정 예시</h4>
-  <p>gd-poller <code>config.yaml</code>의 기존 <code>pollers[].dispatchers</code> 목록에 아래 항목을 추가합니다. YAML 들여쓰기는 탭이 아닌 공백을 사용해야 합니다.</p>
-  <pre><code>- class: CommandDispatcher
-  command: "python3 /data/plugins/bookoasis_mate/scripts/gd_poller_ff_bridge.py --url http://FLASKFARM_IP:9999/bookoasis_mate/api/gdrive_scan/event --apikey FLASKFARM_API_KEY"
-  wait_for_process: true
-  timeout: 15</code></pre>
+  <h4>3. gd-poller config.yaml 설정 예시</h4>
+  <p>gd-poller <code>config.yaml</code>에 아래처럼 별도 poller를 추가합니다. 기존 poller에 결합할 때는 <code>pollers[].dispatchers</code> 목록에 CommandDispatcher 부분만 추가합니다. YAML 들여쓰기는 탭이 아닌 공백을 사용해야 합니다.</p>
+  <div class="doctor-code-window">
+    <div class="doctor-code-window-header">YAML</div>
+    <pre><code>- name: '북오아시스 스캔용'
+  polling_interval: 120
+  page_size: 30
+  ignore_folder: true
+  patterns: [.*]
+  targets:
+    - 'GOOGLE_DRIVE_FOLDER_ID#/mnt/gds2/GDRIVE/READING'
+  actions:
+    - 'create'
+    - 'move'
+    - 'delete'
+    - 'rename'
+  dispatchers:
+    - class: CommandDispatcher
+      command: "python3 /data/plugins/bookoasis_mate/scripts/gd_poller_ff_bridge.py --url http://FLASKFARM_IP:9999/bookoasis_mate/api/gdrive_scan/event --apikey FLASKFARM_API_KEY"
+      wait_for_process: true
+      timeout: 15
+#     mappings:
+#       - "/GDRIVE:/mnt/gds2/GDRIVE"</code></pre>
+  </div>
   <p><code>CommandDispatcher</code>는 명령 뒤에 <code>action</code>, <code>file|directory</code>, 현재 경로, 이전 경로를 순서대로 자동 추가합니다.</p>
-  <p><code>FLASKFARM_IP</code>와 <code>FLASKFARM_API_KEY</code>를 실제 값으로 바꿉니다. 이 방식은 전용 Dispatcher가 추가되기 전까지 사용하는 임시 방식입니다.</p>
+  <p><code>GOOGLE_DRIVE_FOLDER_ID</code>, <code>FLASKFARM_IP</code>와 <code>FLASKFARM_API_KEY</code>를 실제 값으로 바꿉니다. 이 방식은 전용 Dispatcher가 추가되기 전까지 사용하는 임시 방식입니다.</p>
   <p><strong>주의:</strong> API 키가 gd-poller <code>Command</code> 로그와 운영체제 프로세스 목록에 노출될 수 있습니다. 설정 파일과 로그의 접근 권한을 제한하고 외부에 공유하지 마세요.</p>
   <p>실제 60초 버퍼와 동일 보관함 중복 제거는 BookOasis Mate의 이벤트 버퍼 설정이 담당합니다.</p>
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>3. 경로 매핑 예시</h4>
-  <pre><code>/GDRIVE =&gt; /mnt/gds/GDRIVE</code></pre>
+  <h4>4. 경로 매핑 원칙</h4>
+  <p><strong>gd-poller와 Mate 중 한쪽에서만 경로를 변환해야 합니다.</strong> 위 예시는 target의 <code>#</code> 뒤에 이미 <code>/mnt/gds2/GDRIVE/READING</code>을 사용하므로 gd-poller의 <code>mappings</code>는 주석 상태로 둡니다.</p>
+  <p>gd-poller <code>CommandDispatcher</code>는 target 경로를 만든 뒤 <code>mappings</code>의 원본 문자열을 단순 치환합니다. target이 이미 <code>/mnt/gds2/GDRIVE/...</code>인데 <code>/GDRIVE:/mnt/gds2/GDRIVE</code>를 함께 사용하면 아래처럼 접두사가 중복됩니다.</p>
+  <div class="doctor-code-window">
+    <div class="doctor-code-window-header">Path</div>
+    <pre><code>/mnt/gds2/GDRIVE/READING/A.cbz
+→ /mnt/gds2/mnt/gds2/GDRIVE/READING/A.cbz</code></pre>
+  </div>
+  <ul>
+    <li>gd-poller가 BookOasis DB 경로를 그대로 보내면 Mate 경로 매핑은 비웁니다.</li>
+    <li>gd-poller가 <code>/GDRIVE/...</code>처럼 축약 경로를 보내면 Mate에서 다음 형식으로 변환합니다.</li>
+  </ul>
+  <div class="doctor-code-window">
+    <div class="doctor-code-window-header">Mapping</div>
+    <pre><code>/GDRIVE =&gt; /mnt/gds/GDRIVE</code></pre>
+  </div>
   <p>gd-poller가 <code>/GDRIVE/READING/만화/A.cbz</code>를 보내면 <code>/mnt/gds/GDRIVE/READING/만화/A.cbz</code>로 해석합니다. 대상 접두사는 BookOasis DB의 <code>libraries.physical_path</code>에 저장된 보관함 경로와 같아야 하며 FlaskFarm 파일시스템에 실제로 존재할 필요는 없습니다.</p>
+  <p>gd-poller의 문법은 <code>원본:대상</code>이고 Mate의 문법은 <code>원본 =&gt; 대상</code>입니다. 두 설정을 동시에 사용하지 마세요.</p>
+  <p>Mate 연동 설정의 <strong>경로 매핑 검사</strong>에 실제 수신 예상 경로를 입력하면 Mate 변환 경로, BookOasis 보관함과 VFS 규칙을 저장 전에 확인할 수 있습니다.</p>
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>4. rclone VFS 규칙 예시</h4>
-  <pre><code>/mnt/gds/GDRIVE|/GDRIVE|http://172.17.0.1:5572
+  <h4>5. rclone VFS 규칙 예시</h4>
+  <div class="doctor-code-window">
+    <div class="doctor-code-window-header">Config</div>
+    <pre><code>/mnt/gds/GDRIVE|/GDRIVE|http://172.17.0.1:5572
 /mnt/gds/GDRIVE|/GDRIVE|http://172.17.0.1:5572#vfs|RCLONE_USER|RCLONE_PASSWORD</code></pre>
+  </div>
   <p>인증정보가 필요하면 URL에 포함하지 말고 네 번째·다섯 번째 필드에 사용자명과 비밀번호를 입력합니다. 실제 값이 포함된 설정이나 로그는 외부에 공유하지 마세요.</p>
   <p>이동·이름 변경은 이전 경로 forget과 이전·현재 부모 경로 refresh를 실행합니다. 생성·수정·복원은 현재 부모 경로를 refresh하고, 삭제는 대상 forget 후 부모를 refresh합니다.</p>
 </div>
@@ -52,6 +110,8 @@
     <li>같은 버퍼 구간에 여러 파일이 변경되어도 동일 DB·보관함의 스캔 요청은 한 번만 보냅니다.</li>
     <li>경로에 맞는 VFS 규칙이 없거나 refresh가 실패하면 BookOasis 스캔을 보류하고 이벤트를 재시도합니다.</li>
     <li>FlaskFarm이 재시작되면 처리 중이던 이벤트는 재시도 대기로 복구합니다.</li>
+    <li>재시도는 이벤트를 받을 때 저장한 원본 경로에 현재 Mate 매핑 설정을 다시 적용합니다. gd-poller가 이미 중복된 경로를 보낸 기존 실패 이벤트는 원래 경로를 복원할 수 없으므로 삭제하고 새 이벤트를 받아야 합니다.</li>
+    <li>Mate는 합법적인 반복 디렉터리 이름을 훼손하지 않기 위해 중복 접두사를 자동 삭제하지 않습니다. 중복이 의심되면 원인과 설정 조치 방법을 오류로 표시합니다.</li>
     <li>지원 확장자가 아닌 파일 이벤트는 정상 응답 후 무시합니다. 디렉터리 이벤트와 스캔 범위를 변경하는 <code>.bookoasisignore</code> 파일 이벤트는 항상 처리합니다.</li>
     <li>BookOasis도 원격 보관함 스캔 시작 시 VFS를 갱신할 수 있어 Mate의 변경 부모 경로 갱신과 중복될 수 있습니다. 현재 공개 API에는 내부 VFS 갱신 생략 옵션이 없으므로 두 동작의 로그를 함께 확인합니다.</li>
   </ul>
