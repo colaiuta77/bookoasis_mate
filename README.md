@@ -27,6 +27,15 @@
 
 ## Changelog
 
+- v1.6.4 (2026-08-10)
+  - MariaDB 필수 패키지 설치 지원
+    - 공통 매뉴얼에서 FF 컨테이너의 PyMySQL과 mariadb-client 설치 상태·버전을 확인하는 기능 추가.
+    - PyMySQL과 mariadb-client를 개별 또는 일괄로 백그라운드 설치하고 진행률·결과 출력을 확인하는 기능 추가.
+    - 설치 대상을 고정 목록으로 제한하고 실행 전 확인, root 권한과 apt-get·apk 지원 여부 검사를 적용.
+  - 공통 매뉴얼 가독성 개선
+    - MariaDB 필수 패키지 명령과 사용자 이미지 예시를 Bash·Dockerfile 언어 라벨이 있는 코드 창으로 정리.
+    - 컨테이너 재생성 시 직접 설치한 패키지가 사라질 수 있다는 유지 관리 안내 보강.
+
 - v1.6.3 (2026-08-10)
   - Google Drive 경로 매핑 진단 개선
     - 설정 화면에서 gd-poller 수신 경로를 입력해 Mate 변환 경로, BookOasis 보관함과 rclone VFS 규칙을 저장 전에 확인하는 기능 추가.
