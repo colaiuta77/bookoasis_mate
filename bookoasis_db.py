@@ -1,7 +1,10 @@
 # BookOasis의 SQLite와 MariaDB를 같은 읽기 전용 인터페이스로 연결합니다.
 import os
+import queue
 import re
 import sqlite3
+import threading
+import time as monotonic_time
 from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
@@ -9,6 +12,9 @@ from pathlib import Path
 
 VALID_DB_TYPES = {"general", "adult", "audiobook"}
 VALID_ENGINES = {"auto", "sqlite", "mariadb"}
+MARIADB_READ_POOL_SIZE = 4
+MARIADB_POOL_IDLE_SECONDS = 300
+SCHEMA_CACHE_SECONDS = 300
 
 
 class BookOasisDatabaseError(RuntimeError):
@@ -72,11 +78,137 @@ class CursorProxy:
         self._cursor.close()
 
 
+class _SchemaMetadataCache:
+    def __init__(self, ttl_seconds=SCHEMA_CACHE_SECONDS):
+        self.ttl_seconds = ttl_seconds
+        self._lock = threading.RLock()
+        self._values = {}
+
+    def get(self, key):
+        with self._lock:
+            item = self._values.get(key)
+            if item is None:
+                return None
+            if monotonic_time.monotonic() - item[0] > self.ttl_seconds:
+                self._values.pop(key, None)
+                return None
+            return set(item[1])
+
+    def set(self, key, value):
+        with self._lock:
+            self._values[key] = (monotonic_time.monotonic(), set(value))
+
+    def clear(self):
+        with self._lock:
+            self._values.clear()
+
+
+class _MariaDBReadPool:
+    def __init__(self, creator, max_size=MARIADB_READ_POOL_SIZE, wait_timeout=10):
+        self.creator = creator
+        self.max_size = max_size
+        self.wait_timeout = wait_timeout
+        self._available = queue.LifoQueue(maxsize=max_size)
+        self._lock = threading.Lock()
+        self._created = 0
+        self._closed = False
+
+    @staticmethod
+    def _open(connection):
+        return getattr(connection, "open", True) is not False
+
+    @classmethod
+    def _usable(cls, connection):
+        if not cls._open(connection):
+            return False
+        ping = getattr(connection, "ping", None)
+        if ping is not None:
+            try:
+                ping(reconnect=True)
+            except Exception:
+                return False
+        return True
+
+    def _discard(self, connection):
+        try:
+            connection.close()
+        except Exception:
+            pass
+        with self._lock:
+            self._created = max(0, self._created - 1)
+
+    def _create_reserved(self):
+        try:
+            return self.creator()
+        except Exception:
+            with self._lock:
+                self._created = max(0, self._created - 1)
+            raise
+
+    def acquire(self):
+        deadline = monotonic_time.monotonic() + self.wait_timeout
+        while True:
+            try:
+                connection, returned_at = self._available.get_nowait()
+            except queue.Empty:
+                connection = None
+                with self._lock:
+                    if self._closed:
+                        raise RuntimeError("MariaDB 연결 풀이 종료되었습니다.")
+                    if self._created < self.max_size:
+                        self._created += 1
+                        create = True
+                    else:
+                        create = False
+                if create:
+                    return self._create_reserved()
+                remaining = deadline - monotonic_time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("사용 가능한 MariaDB 읽기 연결을 기다리다 시간이 초과되었습니다.")
+                try:
+                    connection, returned_at = self._available.get(timeout=remaining)
+                except queue.Empty as error:
+                    raise RuntimeError(
+                        "사용 가능한 MariaDB 읽기 연결을 기다리다 시간이 초과되었습니다."
+                    ) from error
+
+            expired = monotonic_time.monotonic() - returned_at > MARIADB_POOL_IDLE_SECONDS
+            if expired or not self._usable(connection):
+                self._discard(connection)
+                continue
+            return connection
+
+    def release(self, connection):
+        with self._lock:
+            closed = self._closed
+        if closed or not self._open(connection):
+            self._discard(connection)
+            return
+        try:
+            self._available.put_nowait((connection, monotonic_time.monotonic()))
+        except queue.Full:
+            self._discard(connection)
+
+    def close(self):
+        with self._lock:
+            self._closed = True
+        while True:
+            try:
+                connection, unused_returned_at = self._available.get_nowait()
+            except queue.Empty:
+                break
+            self._discard(connection)
+
+
 class ConnectionProxy:
-    def __init__(self, connection, target):
+    def __init__(self, connection, target, release=None, metadata_cache=None, metadata_namespace=None):
         self._connection = connection
         self.target = target
         self.engine = target.engine
+        self._release = release
+        self._closed = False
+        self._metadata_cache = metadata_cache
+        self._metadata_namespace = metadata_namespace
         self._tables_cache = None
         self._columns_cache = {}
 
@@ -123,11 +255,24 @@ class ConnectionProxy:
         self._connection.rollback()
 
     def close(self):
-        self._connection.close()
+        if self._closed:
+            return
+        self._closed = True
+        if self._release is not None:
+            self._release(self._connection)
+        else:
+            self._connection.close()
 
     def tables(self):
         if self._tables_cache is not None:
             return set(self._tables_cache)
+        shared_key = None
+        if self._metadata_cache is not None and self._metadata_namespace is not None:
+            shared_key = (self._metadata_namespace, "tables")
+            cached = self._metadata_cache.get(shared_key)
+            if cached is not None:
+                self._tables_cache = cached
+                return set(cached)
         if self.engine == "sqlite":
             rows = self.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
@@ -139,12 +284,21 @@ class ConnectionProxy:
                 (self.target.database,),
             ).fetchall()
         self._tables_cache = {str(row["name"]) for row in rows}
+        if shared_key is not None:
+            self._metadata_cache.set(shared_key, self._tables_cache)
         return set(self._tables_cache)
 
     def columns(self, table):
         safe_table = validate_identifier(table)
         if safe_table in self._columns_cache:
             return set(self._columns_cache[safe_table])
+        shared_key = None
+        if self._metadata_cache is not None and self._metadata_namespace is not None:
+            shared_key = (self._metadata_namespace, "columns", safe_table)
+            cached = self._metadata_cache.get(shared_key)
+            if cached is not None:
+                self._columns_cache[safe_table] = cached
+                return set(cached)
         if self.engine == "sqlite":
             rows = self.execute(f'PRAGMA table_info("{safe_table}")').fetchall()
         else:
@@ -154,6 +308,8 @@ class ConnectionProxy:
                 (self.target.database, safe_table),
             ).fetchall()
         self._columns_cache[safe_table] = {str(row["name"]) for row in rows}
+        if shared_key is not None:
+            self._metadata_cache.set(shared_key, self._columns_cache[safe_table])
         return set(self._columns_cache[safe_table])
 
     def database_size(self):
@@ -199,6 +355,10 @@ class DatabaseTarget:
 
 
 class BookOasisDatabaseAdapter:
+    _shared_lock = threading.RLock()
+    _read_pools = {}
+    _schema_cache = _SchemaMetadataCache()
+
     def __init__(self, settings, pymysql_module=None):
         self.settings = dict(settings or {})
         self.selected_engine = normalize_engine(self.settings.get("db_engine"))
@@ -267,31 +427,71 @@ class BookOasisDatabaseAdapter:
             raise BookOasisDatabaseError(
                 "MariaDB 호스트와 사용자를 설정해 주세요."
             )
-        try:
-            connection = module.connect(
+        port = bounded_int(self.settings.get("mariadb_port"), 3306, 1, 65535)
+        password = str(self.settings.get("mariadb_password") or "")
+        connect_timeout = bounded_int(
+            self.settings.get("mariadb_connect_timeout"), 10, 1, 60
+        )
+        read_timeout = bounded_int(
+            self.settings.get("mariadb_read_timeout"), 30, 1, 600
+        )
+        write_timeout = bounded_int(
+            self.settings.get("mariadb_write_timeout"), 30, 1, 600
+        )
+
+        def create_connection():
+            return module.connect(
                 host=host,
-                port=bounded_int(self.settings.get("mariadb_port"), 3306, 1, 65535),
+                port=port,
                 user=user,
-                password=str(self.settings.get("mariadb_password") or ""),
+                password=password,
                 database=target.database,
                 charset="utf8mb4",
                 autocommit=bool(readonly),
                 cursorclass=module.cursors.DictCursor,
-                connect_timeout=bounded_int(
-                    self.settings.get("mariadb_connect_timeout"), 10, 1, 60
-                ),
-                read_timeout=bounded_int(
-                    self.settings.get("mariadb_read_timeout"), 30, 1, 600
-                ),
-                write_timeout=bounded_int(
-                    self.settings.get("mariadb_write_timeout"), 30, 1, 600
-                ),
+                connect_timeout=connect_timeout,
+                read_timeout=read_timeout,
+                write_timeout=write_timeout,
             )
-            return ConnectionProxy(connection, target)
+
+        try:
+            if not readonly:
+                return ConnectionProxy(create_connection(), target)
+
+            pool_key = (
+                id(module), host, port, user, password, target.database,
+                connect_timeout, read_timeout, write_timeout,
+            )
+            with self._shared_lock:
+                pool = self._read_pools.get(pool_key)
+                if pool is None:
+                    pool = _MariaDBReadPool(
+                        create_connection,
+                        wait_timeout=connect_timeout,
+                    )
+                    self._read_pools[pool_key] = pool
+            connection = pool.acquire()
+            metadata_namespace = (host, port, user, target.database)
+            return ConnectionProxy(
+                connection,
+                target,
+                release=pool.release,
+                metadata_cache=self._schema_cache,
+                metadata_namespace=metadata_namespace,
+            )
         except Exception as error:
             raise BookOasisDatabaseError(
                 f"MariaDB {target.database} 연결 실패: {error}"
             ) from error
+
+    @classmethod
+    def clear_shared_state(cls):
+        with cls._shared_lock:
+            pools = list(cls._read_pools.values())
+            cls._read_pools = {}
+            cls._schema_cache.clear()
+        for pool in pools:
+            pool.close()
 
     def public_info(self):
         return {

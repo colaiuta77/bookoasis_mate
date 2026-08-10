@@ -32,6 +32,8 @@ from .font_manager import CustomFontManager
 
 GAP_CACHE_SECONDS = 300
 GAP_CACHE_LIMIT = 8
+ISSUE_CACHE_SECONDS = 15
+ISSUE_CACHE_LIMIT = 32
 
 
 def _format_number_ranges(values):
@@ -141,6 +143,8 @@ class BookOasisMateService:
         self._cover_issue_cache = None
         self._gap_cache = {}
         self._gap_analysis_lock = threading.Lock()
+        self._issue_cache = {}
+        self._issue_query_lock = threading.Lock()
         self._admin_client = None
         self._admin_client_fingerprint = None
         self._orphan_cleanup_process = None
@@ -462,6 +466,7 @@ class BookOasisMateService:
             self._cover_issue_cache_key = None
             self._cover_issue_cache = None
             self._gap_cache = {}
+            self._issue_cache = {}
             if self._report_status.get("is_working") != "run":
                 self._report_status = self._empty_report_status()
             if self._library_statistics_status.get("is_working") != "run":
@@ -811,7 +816,57 @@ class BookOasisMateService:
         started = time.monotonic()
         settings = self.settings()
         page_size = kwargs.pop("page_size", settings["page_size"])
-        data = self.engine(settings).list_issues(page_size=page_size, **kwargs)
+        database_info = BookOasisDatabaseAdapter(settings).public_info()
+        cache_key = (
+            str(kwargs.get("db_type") or "general").strip().lower(),
+            str(kwargs.get("library_id") or "").strip(),
+            str(kwargs.get("issue_type") or "all").strip().lower(),
+            str(kwargs.get("search") or "").strip(),
+            str(kwargs.get("page") or 1),
+            str(page_size),
+            str(database_info.get("resolved_engine") or ""),
+            str(database_info.get("host") or ""),
+            str(database_info.get("port") or ""),
+            str(database_info.get("database_prefix") or ""),
+            str(settings.get("general_db_path") or ""),
+            str(settings.get("adult_db_path") or ""),
+            str(settings.get("bookoasis_url") or ""),
+            str(bool(settings.get("check_missing_isbn"))).lower(),
+        )
+
+        def cached_value():
+            with self._lock:
+                cached = self._issue_cache.get(cache_key)
+                if cached and time.monotonic() - cached["created_at"] <= ISSUE_CACHE_SECONDS:
+                    data = copy.deepcopy(cached["data"])
+                    data["cache_hit"] = True
+                    return data
+            return None
+
+        data = cached_value()
+        if data is None:
+            with self._issue_query_lock:
+                data = cached_value()
+                if data is None:
+                    data = self.engine(settings).list_issues(page_size=page_size, **kwargs)
+                    data["cache_hit"] = False
+                    with self._lock:
+                        now = time.monotonic()
+                        self._issue_cache = {
+                            key: value
+                            for key, value in self._issue_cache.items()
+                            if now - value["created_at"] <= ISSUE_CACHE_SECONDS
+                        }
+                        if len(self._issue_cache) >= ISSUE_CACHE_LIMIT:
+                            oldest_key = min(
+                                self._issue_cache,
+                                key=lambda key: self._issue_cache[key]["created_at"],
+                            )
+                            self._issue_cache.pop(oldest_key, None)
+                        self._issue_cache[cache_key] = {
+                            "created_at": now,
+                            "data": copy.deepcopy(data),
+                        }
         self._debug(
             "문제 도서 조회 완료",
             db_type=kwargs.get("db_type", "general"),
@@ -821,6 +876,7 @@ class BookOasisMateService:
             page=data.get("page", 1),
             total=data.get("total", 0),
             items=len(data.get("items", [])),
+            cache_hit=str(data.get("cache_hit", False)).lower(),
             duration_ms=self._duration_ms(started),
         )
         return data

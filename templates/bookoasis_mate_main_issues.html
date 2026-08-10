@@ -40,14 +40,14 @@
   <div id="batch_rescan_error" class="doctor-live-error" style="display:none"></div>
   <div id="batch_rescan_log" class="doctor-batch-log"><div class="doctor-empty">처리 결과가 없습니다.</div></div>
 </div>
-<div class="doctor-table-wrap">
+<div class="doctor-table-wrap" style="display:none">
   <table class="table table-sm doctor-table">
     <thead><tr><th>표지</th><th>도서</th><th>보관함</th><th>상태</th><th>등록일</th><th>근거</th></tr></thead>
     <tbody id="issue_rows"></tbody>
   </table>
 </div>
-<div id="issue_empty" class="doctor-empty" style="display:none">문제 도서가 없습니다.</div>
-<div class="doctor-pagination">
+<div id="issue_empty" class="doctor-empty">조건을 선택한 후 조회 버튼을 눌러주세요.</div>
+<div id="issue_pagination" class="doctor-pagination" style="display:none">
   <button id="prev_btn" class="btn btn-sm btn-secondary">이전</button>
   <span id="page_info"></span>
   <button id="next_btn" class="btn btn-sm btn-secondary">다음</button>
@@ -108,13 +108,27 @@ function closeIssueJson() {
   modal.style.display = 'none';
   modal.setAttribute('aria-hidden', 'true');
 }
+function resetIssueResults() {
+  bookoasisMateClear(document.getElementById('issue_rows'));
+  issuePage = 1;
+  issuePages = 1;
+  $('#issue_count').text('');
+  $('#issue_progress').removeClass('doctor-query-status-active').text('');
+  $('.doctor-table-wrap').hide();
+  $('#issue_pagination').hide();
+  $('#page_info').text('');
+  $('#issue_empty').text('조건을 선택한 후 조회 버튼을 눌러주세요.').show();
+  if (issueBatchRescan) issueBatchRescan.setAvailableCount(0);
+  updateIssueControls();
+}
 function renderIssues(data) {
   var body = document.getElementById('issue_rows');
   bookoasisMateClear(body);
   $('#issue_count').text('총 ' + data.total + '권');
   if (issueBatchRescan) issueBatchRescan.setAvailableCount(data.total);
-  $('#issue_empty').toggle(data.items.length === 0);
+  $('#issue_empty').text('문제 도서가 없습니다.').toggle(data.items.length === 0);
   $('.doctor-table-wrap').toggle(data.items.length > 0);
+  $('#issue_pagination').toggle(data.items.length > 0);
   data.items.forEach(function(item) {
     var row = document.createElement('tr');
     var coverCell = document.createElement('td');
@@ -166,6 +180,7 @@ function loadIssueLibraries() {
   var dbType = $('#db_type').val();
   var select = $('#issue_library_id');
   issueLibrariesReady = false;
+  resetIssueResults();
   select.prop('disabled', true).empty().append($('<option>', {value:'', text:'보관함 불러오는 중'}));
   bookoasisMateAjax('main', 'scanner', {db_type:dbType, limit:10}, function(ret) {
     if ($('#db_type').val() !== dbType || !ret.data) return;
@@ -176,20 +191,19 @@ function loadIssueLibraries() {
     issueLibrariesReady = true;
     select.prop('disabled', false);
     updateIssueControls();
-    loadIssues(1);
   }, function(xhr, status) {
     if ($('#db_type').val() === dbType && status !== 'success') {
       issueLibrariesReady = true;
       select.empty().append($('<option>', {value:'', text:'전체 보관함'})).prop('disabled', false);
       updateIssueControls();
-      loadIssues(1);
     }
   }, {global:false});
 }
 $('#search_btn').click(function(e) { e.preventDefault(); loadIssues(1); });
 $('#search').keydown(function(e) { if (e.key === 'Enter') { e.preventDefault(); loadIssues(1); } });
 $('#db_type').change(function() { loadIssueLibraries(); });
-$('#issue_library_id,#issue_type').change(function() { if (issueLibrariesReady) loadIssues(1); });
+$('#issue_library_id,#issue_type').change(function() { if (issueLibrariesReady) resetIssueResults(); });
+$('#search').on('input', function() { if (issueLibrariesReady) resetIssueResults(); });
 $('#prev_btn').click(function() { if (issuePage > 1) loadIssues(issuePage - 1); });
 $('#next_btn').click(function() { if (issuePage < issuePages) loadIssues(issuePage + 1); });
 $('#issue_json_close').click(closeIssueJson);
