@@ -29,6 +29,17 @@
     </div>
   </div>
 
+  <div class="doctor-section doctor-card">
+    <h4>경로 매핑 검사</h4>
+    <p class="doctor-muted">gd-poller가 래퍼에 전달할 경로를 입력하면 현재 입력된 Mate 매핑과 VFS 규칙으로 변환 결과를 검사합니다. 설정을 저장하기 전에도 사용할 수 있습니다.</p>
+    <div class="doctor-toolbar">
+      <input type="text" class="form-control" id="gdrive_scan_preview_path" style="flex:1 1 560px" placeholder="예: /mnt/gds2/GDRIVE/READING/만화/샘플.cbz">
+      <button type="button" class="btn btn-outline-primary" id="gdrive_scan_preview_btn">경로 검사</button>
+      <span class="doctor-query-status" id="gdrive_scan_preview_status"></span>
+    </div>
+    <div id="gdrive_scan_preview_result" class="doctor-grid" style="display:none"></div>
+  </div>
+
   <div class="form-group row">
     <label class="col-sm-3 control-label">rclone VFS 규칙</label>
     <div class="col-sm-9">
@@ -61,6 +72,57 @@ $('#setting_save_btn').click(function(e) {
 $('#gdrive_scan_wake_btn').click(function(e) {
   e.preventDefault();
   bookoasisMateAjax('gdrive_scan', 'wake', {}, function() {});
+});
+
+function gdriveScanPreviewCard(label, value) {
+  var card = bookoasisMateText('div', 'doctor-card', '');
+  card.appendChild(bookoasisMateText('h5', '', label));
+  card.appendChild(bookoasisMateText('div', 'doctor-path', value || '-'));
+  return card;
+}
+
+$('#gdrive_scan_preview_btn').click(function() {
+  var path = String($('#gdrive_scan_preview_path').val() || '').trim();
+  if (!path) {
+    notify('검사할 절대 경로를 입력해 주세요.', 'warning');
+    return;
+  }
+  var button = this;
+  var status = document.getElementById('gdrive_scan_preview_status');
+  var result = document.getElementById('gdrive_scan_preview_result');
+  button.disabled = true;
+  status.className = 'doctor-query-status doctor-query-status-active';
+  status.textContent = '검사 중';
+  result.style.display = 'none';
+  bookoasisMateAjax('gdrive_scan', 'path_preview', {
+    path: path,
+    path_mappings: $('#gdrive_scan_path_mappings').val(),
+    vfs_rules: $('#gdrive_scan_vfs_rules').val()
+  }, function(ret) {
+    var data = ret.data || {};
+    bookoasisMateClear(result);
+    result.appendChild(gdriveScanPreviewCard('수신 경로', data.received_path));
+    result.appendChild(gdriveScanPreviewCard('Mate 변환 경로', data.mapped_path));
+    var library = data.library;
+    result.appendChild(gdriveScanPreviewCard(
+      'BookOasis 보관함',
+      library ? library.name + ' · ' + library.db_type + ' · ID ' + library.id : '일치 없음'
+    ));
+    var vfsRule = data.vfs_rule;
+    result.appendChild(gdriveScanPreviewCard(
+      'rclone VFS 규칙',
+      vfsRule ? vfsRule.local + ' → ' + (vfsRule.remote || '/') : '일치 없음'
+    ));
+    result.style.display = 'grid';
+    status.className = 'doctor-query-status';
+    status.textContent = data.warning ? '확인 필요' : '정상';
+  }, function() {
+    button.disabled = false;
+    if (status.classList.contains('doctor-query-status-active')) {
+      status.className = 'doctor-query-status';
+      status.textContent = '검사 실패';
+    }
+  }, {global:false});
 });
 </script>
 {% endblock %}

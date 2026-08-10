@@ -168,11 +168,32 @@ class ModuleGDriveScan(PluginModuleBase):
             return jsonify({"ret": "fail", "msg": "변경 이벤트 저장에 실패했습니다."}), 500
 
     def process_ajax(self, command, req):
-        if self.model is None:
-            return jsonify(
-                {"ret": "danger", "msg": "이벤트 저장 모델을 사용할 수 없습니다."}
-            ), 503
         try:
+            if command == "path_preview":
+                settings = self._settings()
+                settings["gdrive_scan_path_mappings"] = req.form.get(
+                    "path_mappings", settings["gdrive_scan_path_mappings"]
+                )
+                settings["gdrive_scan_vfs_rules"] = req.form.get(
+                    "vfs_rules", settings["gdrive_scan_vfs_rules"]
+                )
+                processor = GDriveScanProcessor(
+                    settings,
+                    scan_callback=lambda *args: {},
+                    logger=P.logger,
+                )
+                preview = processor.preview_path(req.form.get("path"))
+                return jsonify(
+                    {
+                        "ret": "warning" if preview["warning"] else "success",
+                        "msg": preview["warning"] or "경로 매핑과 보관함 연결을 확인했습니다.",
+                        "data": preview,
+                    }
+                )
+            if self.model is None:
+                return jsonify(
+                    {"ret": "danger", "msg": "이벤트 저장 모델을 사용할 수 없습니다."}
+                ), 503
             if command == "list":
                 settings = self._settings()
                 max_page_size = settings["gdrive_scan_history_limit"]
