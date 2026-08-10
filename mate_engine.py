@@ -679,16 +679,13 @@ class BookOasisMateEngine:
             ]
             where = " AND ".join(conditions)
             base_from = f"FROM books b {parts['duplicate_join']} {parts['library_join']}"
-            total = connection.execute(
-                f"{parts['duplicate_cte']} SELECT COUNT(*) {base_from} WHERE {where}",
-                params,
-            ).fetchone()[0]
             rows = connection.execute(
                 f"""
                 {parts['duplicate_cte']}
                 SELECT {', '.join(value_select)}, {parts['library_name']},
                        {parts['duplicate_count']} AS isbn_count,
-                       {', '.join(flag_select)}
+                       {', '.join(flag_select)},
+                       COUNT(*) OVER() AS filtered_total
                 {base_from}
                 WHERE {where}
                 ORDER BY {('b.created_at DESC,' if 'created_at' in parts['columns'] else '')} b.id DESC
@@ -696,10 +693,20 @@ class BookOasisMateEngine:
                 """,
                 [*params, page_size, (page - 1) * page_size],
             ).fetchall()
+            total = int(rows[0]["filtered_total"] or 0) if rows else 0
+            if not rows and page > 1:
+                total = int(
+                    connection.execute(
+                        f"{parts['duplicate_cte']} SELECT COUNT(*) {base_from} WHERE {where}",
+                        params,
+                    ).fetchone()[0]
+                    or 0
+                )
 
         items = []
         for row in rows:
             item = dict(row)
+            item.pop("filtered_total", None)
             issue_keys = [key for key in PROBLEM_BOOK_LABELS if item.pop(f"issue_{key}", 0)]
             item["issues"] = [{"type": key, "label": PROBLEM_BOOK_LABELS[key]} for key in issue_keys]
             item["db_type"] = db_type

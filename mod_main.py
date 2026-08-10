@@ -6,6 +6,7 @@ import traceback
 from flask import Response, jsonify, render_template
 
 from .setup import *
+from .bookoasis_db import BookOasisDatabaseAdapter
 from .mate_service import BookOasisMateService
 
 
@@ -387,6 +388,7 @@ class ModuleMain(PluginModuleBase):
             f"[BookOasisMate] 설정 저장 후 처리 changed_count={len(change_list)} "
             f"scheduler_changed={str(scheduler_changed).lower()}"
         )
+        BookOasisDatabaseAdapter.clear_shared_state()
         self.service.invalidate()
         if scheduler_changed:
             try:
