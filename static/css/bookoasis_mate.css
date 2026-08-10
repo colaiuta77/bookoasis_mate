@@ -266,6 +266,20 @@
 .doctor-guide-grid > div { padding:12px 14px; border:1px solid #dee2e6; border-radius:7px; }
 .doctor-guide-grid strong, .doctor-guide-grid span { display:block; }
 .doctor-guide-grid span { margin-top:4px; color:#6c757d; font-size:.84rem; }
+.doctor-dependency-actions { display:flex; flex-wrap:wrap; gap:7px; }
+.doctor-dependency-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.doctor-dependency-card { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px 16px; align-items:start; padding:15px; border:1px solid #dee2e6; border-radius:8px; background:rgba(127,127,127,.03); }
+.doctor-dependency-card strong, .doctor-dependency-card code { display:block; }
+.doctor-dependency-card code { margin-top:5px; color:#d63384; background:transparent; }
+.doctor-dependency-meta { display:flex; flex-direction:column; align-items:flex-end; gap:6px; min-width:120px; }
+.doctor-dependency-version { max-width:300px; color:#6c757d; font-size:.75rem; text-align:right; overflow-wrap:anywhere; }
+.doctor-dependency-message { grid-column:1 / -1; min-height:20px; margin:0; }
+.doctor-dependency-card .dependency-install { grid-column:2; justify-self:end; min-width:72px; }
+.doctor-dependency-platform { margin-top:11px; padding:9px 11px; border-radius:6px; background:rgba(127,127,127,.055); overflow-wrap:anywhere; }
+.doctor-dependency-job { margin-top:14px; padding:14px; border:1px solid #dee2e6; border-radius:8px; }
+.doctor-dependency-job-head { display:flex; justify-content:space-between; gap:12px; margin-bottom:9px; }
+.doctor-dependency-job .doctor-live-progress-track { margin-bottom:9px; }
+.doctor-dependency-output { min-height:80px; max-height:280px; margin:12px 0 0; overflow:auto; padding:12px; border-radius:6px; background:#111827; color:#d1fae5; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.5 Consolas,Monaco,monospace; }
 .doctor-statistics-toolbar { align-items:center; }
 .doctor-statistics-toolbar .form-control { min-width:150px; width:auto; }
 .doctor-statistics-toolbar #statistics_library { min-width:230px; }
@@ -309,7 +323,7 @@
   .doctor-sql-results { border-color:#495057; }
   .doctor-font-upload, .doctor-font-list, .doctor-font-row { border-color:#495057; }
   .doctor-font-dropzone { border-color:#6c757d; color:#ced4da; }
-  .doctor-db-action-card, .doctor-db-modal-identity, .doctor-guide-grid > div { border-color:#495057; }
+  .doctor-db-action-card, .doctor-db-modal-identity, .doctor-guide-grid > div, .doctor-dependency-card, .doctor-dependency-job { border-color:#495057; }
   .doctor-statistics-kpi { border-color:#495057; }
   .doctor-statistics-kpi strong { color:#f8f9fa; }
 }
@@ -350,6 +364,7 @@
   .doctor-setting-tabs .nav-link { padding:.6rem .7rem; font-size:.84rem; }
   .doctor-db-modal-summary { grid-template-columns:repeat(2,minmax(100px,1fr)); }
   .doctor-guide-grid { grid-template-columns:1fr; }
+  .doctor-dependency-grid { grid-template-columns:1fr; }
   .doctor-statistics-toolbar { align-items:stretch; }
   .doctor-statistics-toolbar .form-control, .doctor-statistics-toolbar #statistics_library { min-width:0; width:100%; }
   .doctor-statistics-status-head { flex-direction:column; gap:5px; }
