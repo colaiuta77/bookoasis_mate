@@ -72,6 +72,7 @@ class ModulePlugins(PluginModuleBase):
                     req.form.get("plugin_id"),
                     req.form.get("name"),
                     req.form.get("description"),
+                    req.form.get("verified"),
                     settings,
                 )
                 return jsonify(

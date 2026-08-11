@@ -53,6 +53,60 @@ class BookOasisPluginManager:
             "catalog_version": "1.1.0",
             "dependencies": [],
         },
+        {
+            "id": "naverkakaoridi",
+            "name": "통합 웹툰/웹소설 검색",
+            "description": "네이버·카카오·리디·노벨피아·문피아의 웹툰과 웹소설 메타데이터를 통합 검색해 도서에 적용합니다.",
+            "repository": "https://github.com/javara999/naverkakaoridi",
+            "ref": "main",
+            "catalog_version": "1.6.2",
+            "dependencies": [],
+        },
+        {
+            "id": "extract_isbn",
+            "name": "ISBN 추출기",
+            "description": "EPUB·PDF·TXT의 판권지 구간을 분석해 ISBN을 찾고, 필요한 경우 Gemini 또는 LiteLLM으로 보조 판독합니다.",
+            "repository": "https://github.com/yume-script/extract_isbn",
+            "ref": "main",
+            "catalog_version": "1.3.2",
+            "dependencies": [],
+        },
+        {
+            "id": "unified_book",
+            "name": "통합 도서 검색",
+            "description": "알라딘·국립중앙도서관·Google 도서 정보를 병렬 검색하고 ISBN과 서지 메타데이터를 조합해 적용합니다.",
+            "repository": "https://github.com/yume-script/unified_book",
+            "ref": "main",
+            "catalog_version": "1.6.3",
+            "dependencies": [],
+        },
+        {
+            "id": "pixiv_ranking",
+            "name": "Pixiv 랭킹",
+            "description": "Pixiv의 일간·주간·월간 등 랭킹을 콘텐츠 유형별 카드로 보여주는 카테고리 전용 탭입니다.",
+            "repository": "https://github.com/yume-script/pixiv_ranking",
+            "ref": "main",
+            "catalog_version": "1.0.1",
+            "dependencies": [],
+        },
+        {
+            "id": "plugin_manager",
+            "name": "BookOasis 플러그인 매니저",
+            "description": "BookOasis 웹 UI에서 플러그인의 ZIP·Git 설치, 업데이트, 삭제, 활성화와 설정 관리를 지원합니다.",
+            "repository": "https://github.com/madnite1/bookoasis_plugin_manager",
+            "ref": "main",
+            "catalog_version": "1.0.0",
+            "dependencies": [],
+        },
+        {
+            "id": "plugin_board",
+            "name": "플러그인 목록장",
+            "description": "BookOasis 플러그인 GitHub 저장소를 실시간 정보와 함께 카드로 보여주는 안내용 카테고리 탭입니다.",
+            "repository": "https://github.com/yume-script/plugin_board",
+            "ref": "main",
+            "catalog_version": "1.0.0",
+            "dependencies": [],
+        },
     )
     PLUGIN_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
     GITHUB_COMPONENT_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
@@ -263,6 +317,13 @@ class BookOasisPluginManager:
             raise PluginManagerError("표시명은 1~80자로 입력해 주세요.")
         if len(description) > 500:
             raise PluginManagerError("플러그인 소개는 500자 이하로 입력해 주세요.")
+        verified_value = value.get("verified", False)
+        verified = verified_value is True or str(verified_value).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         return {
             "id": plugin_id,
             "name": name,
@@ -272,6 +333,7 @@ class BookOasisPluginManager:
             "catalog_version": "",
             "dependencies": [],
             "custom": True,
+            "verified": verified,
         }
 
     def _load_custom_catalog(self, settings):
@@ -317,7 +379,7 @@ class BookOasisPluginManager:
             temporary.unlink(missing_ok=True)
 
     def save_custom_catalog_item(
-        self, repository, ref, plugin_id, name, description, settings
+        self, repository, ref, plugin_id, name, description, verified, settings
     ):
         item = self._normalize_custom_catalog_item(
             {
@@ -326,6 +388,7 @@ class BookOasisPluginManager:
                 "id": plugin_id,
                 "name": name,
                 "description": description,
+                "verified": verified,
             }
         )
         builtin_ids = {value["id"] for value in self.CATALOG}
@@ -457,7 +520,11 @@ class BookOasisPluginManager:
             item["installed_version"] = local.get("installed_version", "")
             item["latest_version"] = remote_versions.get(item["id"]) or item["catalog_version"]
             item["version_error"] = remote_errors.get(item["id"], "")
-            item["trusted"] = not bool(item.get("custom"))
+            item["trusted"] = (
+                bool(item.get("verified"))
+                if item.get("custom")
+                else True
+            )
             item["update_available"] = bool(
                 item["installed_version"]
                 and self._version_tuple(item["installed_version"])

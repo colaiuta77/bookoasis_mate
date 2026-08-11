@@ -64,6 +64,14 @@
         <div class="form-group"><label for="plugin_custom_name">표시명</label><input id="plugin_custom_name" class="form-control" maxlength="80" placeholder="플러그인 이름"></div>
         <div class="form-group"><label for="plugin_custom_description">간단 소개</label><input id="plugin_custom_description" class="form-control" maxlength="500" placeholder="플러그인의 주요 기능"></div>
       </div>
+      <div class="form-group">
+        <label for="plugin_custom_verified">카탈로그 분류</label>
+        <select id="plugin_custom_verified" class="form-control">
+          <option value="false">사용자 카탈로그</option>
+          <option value="true">검증 카탈로그</option>
+        </select>
+        <small class="form-text text-muted">검증 분류를 선택해도 사용자 등록 저장소는 패키지 검사와 설치 확인을 거칩니다.</small>
+      </div>
       <button id="plugin_custom_save" type="button" class="btn btn-primary">카탈로그에 추가</button>
     </details>
     <div id="plugin_catalog_status" class="doctor-query-status"></div>
@@ -307,11 +315,13 @@ $('#plugin_custom_save').click(function() {
     ref:$('#plugin_custom_ref').val(),
     plugin_id:$('#plugin_custom_id').val(),
     name:$('#plugin_custom_name').val(),
-    description:$('#plugin_custom_description').val()
+    description:$('#plugin_custom_description').val(),
+    verified:$('#plugin_custom_verified').val()
   }, function(ret) {
     if (ret.msg) notify(ret.msg, ret.ret || 'info');
     $('#plugin_custom_repository, #plugin_custom_id, #plugin_custom_name, #plugin_custom_description').val('');
     $('#plugin_custom_ref').val('main');
+    $('#plugin_custom_verified').val('false');
     pluginManagerLoadCatalog(false);
   });
 });
