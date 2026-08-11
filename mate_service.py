@@ -15,6 +15,7 @@ from pathlib import Path
 from .bookoasis_client import BookOasisClient
 from .bookoasis_db import BookOasisDatabaseAdapter
 from .bookoasis_logs import (
+    delete_all_log_archives,
     delete_log_archive,
     list_log_archives,
     list_log_files,
@@ -1072,6 +1073,31 @@ class BookOasisMateService:
             "BookOasis 과거 ZIP 로그 삭제 완료",
             file=data.get("name"),
             success=str(data.get("success", False)).lower(),
+            duration_ms=self._duration_ms(started),
+        )
+        return data
+
+    def delete_all_log_archives(self):
+        started = time.monotonic()
+        try:
+            data = delete_all_log_archives(
+                self.settings().get("bookoasis_log_dir")
+            )
+        except (ValueError, OSError) as error:
+            data = {
+                "success": False,
+                "matched": 0,
+                "deleted": 0,
+                "deleted_bytes": 0,
+                "failed": 0,
+                "failures": [],
+                "message": str(error),
+            }
+        self._debug(
+            "BookOasis 과거 ZIP 로그 일괄 삭제 완료",
+            matched=data.get("matched", 0),
+            deleted=data.get("deleted", 0),
+            failed=data.get("failed", 0),
             duration_ms=self._duration_ms(started),
         )
         return data

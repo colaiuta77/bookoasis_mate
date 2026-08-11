@@ -310,6 +310,15 @@ class ModuleMain(PluginModuleBase):
                     "msg": data.get("message"),
                     "data": data,
                 })
+            if command == "log_archive_delete_all":
+                if req.form.get("confirm_delete_all") != "DELETE_ALL_ZIP_LOGS":
+                    return jsonify({"ret": "warning", "msg": "과거 ZIP 로그 전체 삭제 확인이 필요합니다."}), 400
+                data = self.service.delete_all_log_archives()
+                return jsonify({
+                    "ret": "success" if data.get("success") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
             if command == "covers":
                 data = self.service.covers(
                     db_type=req.form.get("db_type", "general"),

@@ -41,7 +41,10 @@
       <h4>과거 ZIP 로그</h4>
       <p class="doctor-muted mb-0">BookOasis 로그 디렉터리 바로 아래의 ZIP 파일만 표시합니다. 삭제한 파일은 복구할 수 없습니다.</p>
     </div>
-    <button id="log_archive_refresh_btn" type="button" class="btn btn-sm btn-outline-primary">ZIP 목록 새로고침</button>
+    <div class="doctor-cleanup-actions">
+      <button id="log_archive_refresh_btn" type="button" class="btn btn-sm btn-outline-primary">ZIP 목록 새로고침</button>
+      <button id="log_archive_delete_all_btn" type="button" class="btn btn-sm btn-outline-danger" disabled>ZIP 전체 삭제</button>
+    </div>
   </div>
   <div id="log_archive_status" class="doctor-muted mb-2">과거 ZIP 로그를 확인하는 중입니다.</div>
   <div class="doctor-table-wrap">
@@ -59,6 +62,8 @@ var logPaused = false;
 var logCursorIdentity = '';
 var logCursorOffset = '';
 var logRawText = '';
+var logArchiveTotal = 0;
+var logArchiveTotalBytes = 0;
 
 function scheduleLogPoll() {
   clearTimeout(logPollTimer);
@@ -181,6 +186,9 @@ function renderLogArchives(data) {
   var body = document.getElementById('log_archive_body');
   bookoasisMateClear(body);
   var files = data.files || [];
+  logArchiveTotal = Number(data.total || files.length || 0);
+  logArchiveTotalBytes = files.reduce(function(total, file) { return total + Number(file.size || 0); }, 0);
+  $('#log_archive_delete_all_btn').prop('disabled', logArchiveTotal < 1);
   if (!files.length) {
     var emptyRow = document.createElement('tr');
     var emptyCell = bookoasisMateText('td', 'doctor-muted', data.message || '삭제할 과거 ZIP 로그 파일이 없습니다.');
@@ -228,9 +236,25 @@ function deleteLogArchive(event) {
   }, function() { button.disabled = false; });
 }
 
+function deleteAllLogArchives(event) {
+  if (logArchiveTotal < 1) return;
+  var detail = logArchiveTotal.toLocaleString() + '개';
+  if (logArchiveTotal === $('#log_archive_body tr').length) detail += ' · ' + bookoasisMateBytes(logArchiveTotalBytes);
+  if (!confirm('과거 ZIP 로그 ' + detail + '를 모두 영구 삭제할까요? 현재 .log 파일은 삭제하지 않습니다.')) return;
+  var button = event.currentTarget;
+  button.disabled = true;
+  bookoasisMateAjax('main', 'log_archive_delete_all', {
+    confirm_delete_all:'DELETE_ALL_ZIP_LOGS'
+  }, function(ret) {
+    if (ret.msg) notify(ret.msg, ret.ret || 'info');
+    loadLogArchives(false);
+  }, function() { button.disabled = false; });
+}
+
 $('#log_file').change(function() { resetLogCursor(); loadLogTail(true); });
 $('#log_catalog_btn').click(function(e) { e.preventDefault(); loadLogCatalog(true); });
 $('#log_archive_refresh_btn').click(function(e) { e.preventDefault(); loadLogArchives(true); });
+$('#log_archive_delete_all_btn').click(function(e) { e.preventDefault(); deleteAllLogArchives(e); });
 $('#log_pause_btn').click(function(e) {
   e.preventDefault();
   logPaused = !logPaused;

@@ -151,6 +151,51 @@ def delete_log_archive(log_dir, filename):
     }
 
 
+def delete_all_log_archives(log_dir):
+    root = _log_root(log_dir)
+    candidates = sorted(
+        (
+            candidate
+            for candidate in root.iterdir()
+            if candidate.is_file()
+            and not candidate.is_symlink()
+            and candidate.suffix.lower() == ".zip"
+        ),
+        key=lambda item: item.name.lower(),
+    )
+    deleted_count = 0
+    deleted_bytes = 0
+    failures = []
+    for candidate in candidates:
+        try:
+            _, path = _safe_log_archive(root, candidate.name)
+            size = int(path.stat().st_size)
+            path.unlink()
+            deleted_count += 1
+            deleted_bytes += size
+        except (ValueError, OSError) as error:
+            failures.append({"name": candidate.name, "error": str(error)})
+    success = not failures
+    if not candidates:
+        message = "삭제할 과거 ZIP 로그 파일이 없습니다."
+    elif success:
+        message = f"과거 ZIP 로그 {deleted_count}개를 삭제했습니다."
+    else:
+        message = (
+            f"과거 ZIP 로그 {deleted_count}개를 삭제했고 "
+            f"{len(failures)}개는 삭제하지 못했습니다."
+        )
+    return {
+        "success": success,
+        "matched": len(candidates),
+        "deleted": deleted_count,
+        "deleted_bytes": deleted_bytes,
+        "failed": len(failures),
+        "failures": failures[:20],
+        "message": message,
+    }
+
+
 def read_log_tail(log_dir, filename, cursor_identity="", cursor_offset=None, max_bytes=DEFAULT_MAX_BYTES, max_lines=DEFAULT_MAX_LINES):
     _, path = _safe_log_file(log_dir, filename)
     max_bytes = max(1024, min(int(max_bytes or DEFAULT_MAX_BYTES), DEFAULT_MAX_BYTES))
