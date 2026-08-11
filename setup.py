@@ -55,6 +55,7 @@ setting = {
                 ],
             },
             {"uri": "sql", "name": "SQL 도구"},
+            {"uri": "plugins", "name": "플러그인 관리"},
             {"uri": "font", "name": "커스텀 폰트"},
             {"uri": "manual", "name": "매뉴얼"},
             {"uri": "log", "name": "로그"},
@@ -93,6 +94,7 @@ from .mod_font import ModuleFont
 from .mod_migration import ModuleMigration
 from .mod_manual import ModuleManual
 from .mod_sql import ModuleSql
+from .mod_plugins import ModulePlugins
 from .mod_setting import ModuleSetting
 
 P.set_module_list(
@@ -102,6 +104,7 @@ P.set_module_list(
         ModuleDatabaseMigration,
         ModuleGDriveScan,
         ModuleSql,
+        ModulePlugins,
         ModuleSetting,
         ModuleFont,
         ModuleManual,
