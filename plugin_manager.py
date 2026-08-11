@@ -89,6 +89,7 @@ class BookOasisPluginManager:
     ACTIVE_STATES = {"ready", "running", "stopping"}
     MAX_LOGS = 200
     DOWNLOAD_TIMEOUT = 30
+    MAX_CUSTOM_CATALOG_ITEMS = 100
 
     def __init__(self, logger=None):
         self.logger = logger
@@ -227,6 +228,139 @@ class BookOasisPluginManager:
             "work_dir": normalized["work_dir"],
         }
 
+    def _custom_catalog_path(self, settings, create=False):
+        normalized = self.normalized_settings(settings)
+        if not normalized["work_dir"]:
+            if create:
+                raise PluginManagerError("플러그인 작업 디렉터리를 설정해 주세요.")
+            return None
+        if create:
+            work_root = self._safe_resolve(
+                normalized["work_dir"], "플러그인 작업 디렉터리", create=True
+            )
+        else:
+            work_root = Path(normalized["work_dir"]).expanduser().resolve(strict=False)
+            if work_root.exists() and not work_root.is_dir():
+                raise PluginManagerError("플러그인 작업 디렉터리가 디렉터리가 아닙니다.")
+        return work_root / "custom_catalog.json"
+
+    @classmethod
+    def _normalize_custom_catalog_item(cls, value):
+        if not isinstance(value, dict):
+            raise PluginManagerError("사용자 카탈로그 항목 형식이 올바르지 않습니다.")
+        owner, repository_name = cls.parse_github_url(value.get("repository"))
+        repository = f"https://github.com/{owner}/{repository_name}"
+        plugin_id = cls._validate_plugin_id(
+            value.get("id") or repository_name.lower().replace("-", "_")
+        )
+        ref = cls._validate_ref(value.get("ref"))
+        name = str(value.get("name") or repository_name).strip()
+        description = str(
+            value.get("description")
+            or "사용자가 등록한 공개 GitHub BookOasis 플러그인입니다."
+        ).strip()
+        if not name or len(name) > 80:
+            raise PluginManagerError("표시명은 1~80자로 입력해 주세요.")
+        if len(description) > 500:
+            raise PluginManagerError("플러그인 소개는 500자 이하로 입력해 주세요.")
+        return {
+            "id": plugin_id,
+            "name": name,
+            "description": description,
+            "repository": repository,
+            "ref": ref,
+            "catalog_version": "",
+            "dependencies": [],
+            "custom": True,
+        }
+
+    def _load_custom_catalog(self, settings):
+        path = self._custom_catalog_path(settings)
+        if path is None:
+            return []
+        if not path.exists():
+            return []
+        if path.is_symlink() or not path.is_file():
+            raise PluginManagerError("사용자 카탈로그 파일 형식이 올바르지 않습니다.")
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise PluginManagerError(
+                f"사용자 카탈로그 파일을 읽을 수 없습니다: {error}"
+            ) from error
+        if not isinstance(payload, list):
+            raise PluginManagerError("사용자 카탈로그 파일은 JSON 배열이어야 합니다.")
+        if len(payload) > self.MAX_CUSTOM_CATALOG_ITEMS:
+            raise PluginManagerError("사용자 카탈로그 항목 수가 허용 범위를 초과했습니다.")
+        result = []
+        seen_ids = set()
+        for raw in payload:
+            item = self._normalize_custom_catalog_item(raw)
+            if item["id"] in seen_ids:
+                raise PluginManagerError(
+                    f"사용자 카탈로그에 중복 플러그인 ID가 있습니다: {item['id']}"
+                )
+            seen_ids.add(item["id"])
+            result.append(item)
+        return result
+
+    def _write_custom_catalog(self, settings, items):
+        path = self._custom_catalog_path(settings, create=True)
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_text(
+                json.dumps(items, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def save_custom_catalog_item(
+        self, repository, ref, plugin_id, name, description, settings
+    ):
+        item = self._normalize_custom_catalog_item(
+            {
+                "repository": repository,
+                "ref": ref,
+                "id": plugin_id,
+                "name": name,
+                "description": description,
+            }
+        )
+        builtin_ids = {value["id"] for value in self.CATALOG}
+        if item["id"] in builtin_ids:
+            raise PluginManagerError("기본 카탈로그와 같은 플러그인 ID는 등록할 수 없습니다.")
+        builtin_repositories = {
+            value["repository"].lower() for value in self.CATALOG
+        }
+        if item["repository"].lower() in builtin_repositories:
+            raise PluginManagerError("기본 카탈로그에 이미 등록된 GitHub 저장소입니다.")
+        with self._lock:
+            items = self._load_custom_catalog(settings)
+            if len(items) >= self.MAX_CUSTOM_CATALOG_ITEMS:
+                raise PluginManagerError(
+                    f"사용자 카탈로그는 최대 {self.MAX_CUSTOM_CATALOG_ITEMS}개까지 등록할 수 있습니다."
+                )
+            for existing in items:
+                if existing["id"] == item["id"]:
+                    raise PluginManagerError("같은 플러그인 ID가 이미 등록되어 있습니다.")
+                if existing["repository"].lower() == item["repository"].lower():
+                    raise PluginManagerError("같은 GitHub 저장소가 이미 등록되어 있습니다.")
+            items.append(item)
+            self._write_custom_catalog(settings, items)
+        return copy.deepcopy(item)
+
+    def delete_custom_catalog_item(self, plugin_id, settings):
+        plugin_id = self._validate_plugin_id(plugin_id)
+        with self._lock:
+            items = self._load_custom_catalog(settings)
+            remaining = [item for item in items if item["id"] != plugin_id]
+            if len(remaining) == len(items):
+                raise PluginManagerError("삭제할 사용자 카탈로그 항목을 찾을 수 없습니다.")
+            self._write_custom_catalog(settings, remaining)
+        return {"id": plugin_id, "deleted": True}
+
     def _installed_catalog(self, settings):
         normalized = self.normalized_settings(settings)
         root_value = normalized["plugin_root"]
@@ -261,6 +395,9 @@ class BookOasisPluginManager:
 
     def installed(self, settings):
         catalog_by_id = {item["id"]: item for item in self.CATALOG}
+        catalog_by_id.update(
+            {item["id"]: item for item in self._load_custom_catalog(settings)}
+        )
         result = []
         for plugin_id, installed in self._installed_catalog(settings).items():
             item = dict(catalog_by_id.get(plugin_id) or {})
@@ -296,13 +433,15 @@ class BookOasisPluginManager:
 
     def catalog(self, settings, refresh_remote=False):
         installed = self._installed_catalog(settings)
+        catalog_items = [copy.deepcopy(item) for item in self.CATALOG]
+        catalog_items.extend(self._load_custom_catalog(settings))
         remote_versions = {}
         remote_errors = {}
         if refresh_remote:
-            with ThreadPoolExecutor(max_workers=3) as executor:
+            with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = {
                     executor.submit(self._fetch_remote_version, item): item["id"]
-                    for item in self.CATALOG
+                    for item in catalog_items
                 }
                 for future, plugin_id in futures.items():
                     try:
@@ -310,7 +449,7 @@ class BookOasisPluginManager:
                     except Exception as error:
                         remote_errors[plugin_id] = str(error)[:240]
         result = []
-        for original in self.CATALOG:
+        for original in catalog_items:
             item = copy.deepcopy(original)
             local = installed.get(item["id"]) or {}
             item.update(local)
@@ -318,7 +457,7 @@ class BookOasisPluginManager:
             item["installed_version"] = local.get("installed_version", "")
             item["latest_version"] = remote_versions.get(item["id"]) or item["catalog_version"]
             item["version_error"] = remote_errors.get(item["id"], "")
-            item["trusted"] = True
+            item["trusted"] = not bool(item.get("custom"))
             item["update_available"] = bool(
                 item["installed_version"]
                 and self._version_tuple(item["installed_version"])

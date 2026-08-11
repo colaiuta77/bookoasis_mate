@@ -49,6 +49,23 @@
       <p class="doctor-muted mb-0">Mate에서 호환성을 확인한 공개 플러그인 목록입니다.</p>
       <button id="plugin_catalog_refresh" type="button" class="btn btn-sm btn-outline-primary">최신 버전 확인</button>
     </div>
+    <details class="doctor-card doctor-plugin-catalog-editor">
+      <summary>사용자 GitHub 플러그인 추가</summary>
+      <p class="doctor-muted">새 플러그인의 공개 GitHub 주소를 저장해 카탈로그에서 계속 관리합니다. 사용자 항목은 반드시 패키지 검사 후 설치합니다.</p>
+      <div class="form-group">
+        <label for="plugin_custom_repository">GitHub 저장소</label>
+        <input id="plugin_custom_repository" class="form-control" type="url" placeholder="https://github.com/owner/repository">
+      </div>
+      <div class="doctor-plugin-source-row">
+        <div class="form-group"><label for="plugin_custom_ref">브랜치·태그</label><input id="plugin_custom_ref" class="form-control" value="main"></div>
+        <div class="form-group"><label for="plugin_custom_id">플러그인 ID</label><input id="plugin_custom_id" class="form-control" placeholder="repository_name"></div>
+      </div>
+      <div class="doctor-plugin-source-row">
+        <div class="form-group"><label for="plugin_custom_name">표시명</label><input id="plugin_custom_name" class="form-control" maxlength="80" placeholder="플러그인 이름"></div>
+        <div class="form-group"><label for="plugin_custom_description">간단 소개</label><input id="plugin_custom_description" class="form-control" maxlength="500" placeholder="플러그인의 주요 기능"></div>
+      </div>
+      <button id="plugin_custom_save" type="button" class="btn btn-primary">카탈로그에 추가</button>
+    </details>
     <div id="plugin_catalog_status" class="doctor-query-status"></div>
     <div id="plugin_catalog" class="doctor-plugin-grid"></div>
   </div>
@@ -137,9 +154,10 @@ function pluginManagerRenderCards(targetId, items, catalogMode) {
     card.appendChild(header);
     card.appendChild(pluginManagerText('p', 'doctor-plugin-description', item.description || '설명 정보가 없습니다.'));
     var badges = pluginManagerText('div', 'doctor-plugin-badges', '');
-    badges.appendChild(pluginManagerBadge(item.trusted ? '검증 카탈로그' : (item.managed ? '자동 업데이트 지원' : '업데이트 관리 안 됨'), item.trusted ? 'doctor-plugin-badge-trusted' : ''));
+    badges.appendChild(pluginManagerBadge(item.trusted ? '검증 카탈로그' : (item.custom ? '사용자 카탈로그' : (item.managed ? '자동 업데이트 지원' : '업데이트 관리 안 됨')), item.trusted ? 'doctor-plugin-badge-trusted' : ''));
     if (item.installed) badges.appendChild(pluginManagerBadge('설치됨 ' + (item.installed_version || '버전 미상'), 'doctor-plugin-badge-installed'));
     if (item.update_available) badges.appendChild(pluginManagerBadge('업데이트 ' + item.latest_version, 'doctor-plugin-badge-update'));
+    if (item.version_error) badges.appendChild(pluginManagerBadge('VERSION 확인 실패', 'doctor-plugin-badge-warning'));
     (item.dependencies || []).forEach(function(value) { badges.appendChild(pluginManagerBadge('필수 ' + value, '')); });
     card.appendChild(badges);
     var footer = pluginManagerText('div', 'doctor-plugin-card-footer', '');
@@ -149,10 +167,17 @@ function pluginManagerRenderCards(targetId, items, catalogMode) {
       footer.appendChild(link);
     }
     if (catalogMode) {
-      var button = pluginManagerText('button', 'btn btn-sm btn-primary', item.installed ? '안전 업데이트' : '설치');
+      var button = pluginManagerText('button', 'btn btn-sm btn-primary', item.custom ? '패키지 검사' : (item.installed ? '안전 업데이트' : '설치'));
       button.type = 'button'; button.dataset.pluginId = item.id; button.dataset.pluginName = item.name || item.id;
-      button.addEventListener('click', pluginManagerInstallCatalog);
+      button.dataset.repository = item.repository || ''; button.dataset.ref = item.ref || 'main';
+      button.addEventListener('click', item.custom ? pluginManagerInspectCatalog : pluginManagerInstallCatalog);
       footer.appendChild(button);
+      if (item.custom) {
+        var removeButton = pluginManagerText('button', 'btn btn-sm btn-outline-danger', '목록 삭제');
+        removeButton.type = 'button'; removeButton.dataset.pluginId = item.id; removeButton.dataset.pluginName = item.name || item.id;
+        removeButton.addEventListener('click', pluginManagerDeleteCustomCatalog);
+        footer.appendChild(removeButton);
+      }
     }
     card.appendChild(footer);
     target.appendChild(card);
@@ -177,6 +202,27 @@ function pluginManagerInstallCatalog(event) {
   if (!confirm(name + ' 플러그인을 설치하거나 업데이트할까요? 이 Python 코드에 BookOasis 서버 실행 권한을 부여합니다.')) return;
   bookoasisMateAjax('plugins', 'catalog_install', {plugin_id:button.dataset.pluginId, confirm_install:'true'}, function(ret) {
     pluginManagerRenderJob(ret.data || {}); pluginManagerStartPolling();
+  });
+}
+
+function pluginManagerInspectCatalog(event) {
+  var button = event.currentTarget;
+  bookoasisMateAjax('plugins', 'github_inspect', {
+    repository:button.dataset.repository,
+    ref:button.dataset.ref || 'main',
+    plugin_id:button.dataset.pluginId
+  }, function(ret) {
+    pluginManagerRenderJob(ret.data || {}); pluginManagerStartPolling();
+  });
+}
+
+function pluginManagerDeleteCustomCatalog(event) {
+  var button = event.currentTarget;
+  var name = button.dataset.pluginName || button.dataset.pluginId;
+  if (!confirm(name + ' 항목을 사용자 카탈로그에서 삭제할까요? 이미 설치된 플러그인은 삭제하지 않습니다.')) return;
+  bookoasisMateAjax('plugins', 'custom_catalog_delete', {plugin_id:button.dataset.pluginId}, function(ret) {
+    if (ret.msg) notify(ret.msg, ret.ret || 'info');
+    pluginManagerLoadCatalog(false); pluginManagerLoadInstalled();
   });
 }
 
@@ -255,6 +301,20 @@ $('#plugin_settings_save').click(function() {
   }});
 });
 $('#plugin_catalog_refresh').click(function() { pluginManagerLoadCatalog(true); });
+$('#plugin_custom_save').click(function() {
+  bookoasisMateAjax('plugins', 'custom_catalog_save', {
+    repository:$('#plugin_custom_repository').val(),
+    ref:$('#plugin_custom_ref').val(),
+    plugin_id:$('#plugin_custom_id').val(),
+    name:$('#plugin_custom_name').val(),
+    description:$('#plugin_custom_description').val()
+  }, function(ret) {
+    if (ret.msg) notify(ret.msg, ret.ret || 'info');
+    $('#plugin_custom_repository, #plugin_custom_id, #plugin_custom_name, #plugin_custom_description').val('');
+    $('#plugin_custom_ref').val('main');
+    pluginManagerLoadCatalog(false);
+  });
+});
 $('#plugin_installed_refresh').click(pluginManagerLoadInstalled);
 $('#plugin_history_refresh').click(pluginManagerLoadHistory);
 

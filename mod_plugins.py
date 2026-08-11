@@ -65,6 +65,33 @@ class ModulePlugins(PluginModuleBase):
                 return jsonify(
                     {"ret": "success", "data": self.manager.history(settings)}
                 )
+            if command == "custom_catalog_save":
+                data = self.manager.save_custom_catalog_item(
+                    req.form.get("repository"),
+                    req.form.get("ref"),
+                    req.form.get("plugin_id"),
+                    req.form.get("name"),
+                    req.form.get("description"),
+                    settings,
+                )
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "msg": "사용자 GitHub 플러그인을 카탈로그에 추가했습니다.",
+                        "data": data,
+                    }
+                )
+            if command == "custom_catalog_delete":
+                data = self.manager.delete_custom_catalog_item(
+                    req.form.get("plugin_id"), settings
+                )
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "msg": "사용자 카탈로그 항목을 삭제했습니다. 설치된 플러그인은 삭제하지 않았습니다.",
+                        "data": data,
+                    }
+                )
             if command == "catalog_install":
                 if req.form.get("confirm_install") != "true":
                     raise PluginManagerError("플러그인 실행 권한 부여 확인이 필요합니다.")
