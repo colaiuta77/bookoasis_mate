@@ -93,7 +93,7 @@ class BookOasisPluginManager:
             "id": "plugin_manager",
             "name": "BookOasis 플러그인 매니저",
             "description": "BookOasis 웹 UI에서 플러그인의 ZIP·Git 설치, 업데이트, 삭제, 활성화와 설정 관리를 지원합니다.",
-            "repository": "https://github.com/madnite1/bookoasis_plugin_manager",
+            "repository": "https://github.com/madnite1/plugin_manager",
             "ref": "main",
             "catalog_version": "1.0.0",
             "dependencies": [],
