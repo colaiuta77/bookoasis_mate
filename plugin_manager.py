@@ -81,6 +81,16 @@ class BookOasisPluginManager:
             "dependencies": [],
         },
         {
+            "id": "ssn_rating",
+            "name": "소설넷 평점",
+            "description": "소설넷의 공개 작품 페이지에서 평균 평점과 최고 평점 리뷰를 가져와 BookOasis 평점과 작품 설명에 적용합니다.",
+            "repository": "https://github.com/javara999/ssn_rating",
+            "ref": "main",
+            "catalog_version": "1.0.4",
+            "dependencies": [],
+            "ignored_archive_files": ["ssn_rating.zip"],
+        },
+        {
             "id": "pixiv_ranking",
             "name": "Pixiv 랭킹",
             "description": "Pixiv의 일간·주간·월간 등 랭킹을 콘텐츠 유형별 카드로 보여주는 카테고리 전용 탭입니다.",
@@ -765,6 +775,7 @@ class BookOasisPluginManager:
             "ref": item["ref"],
             "plugin_id": item["id"],
             "trusted": True,
+            "ignored_archive_files": list(item.get("ignored_archive_files") or []),
         }
         return self._begin_job(
             "install",
@@ -882,7 +893,7 @@ class BookOasisPluginManager:
             raise PluginManagerError("GitHub에서 빈 아카이브를 받았습니다.")
 
     @classmethod
-    def _validate_archive_member(cls, info):
+    def _validate_archive_member(cls, info, ignored_root_files=None):
         path = PurePosixPath(info.filename.replace("\\", "/"))
         if path.is_absolute() or not path.parts or any(part in {"", ".", ".."} for part in path.parts):
             raise PluginManagerError(f"ZIP에 허용되지 않은 경로가 있습니다: {info.filename}")
@@ -894,11 +905,24 @@ class BookOasisPluginManager:
             raise PluginManagerError(f"ZIP의 심볼릭 링크는 허용하지 않습니다: {info.filename}")
         if file_type not in {0, stat.S_IFREG, stat.S_IFDIR}:
             raise PluginManagerError(f"ZIP의 특수 파일은 허용하지 않습니다: {info.filename}")
+        ignored_root_files = {
+            str(value or "").strip()
+            for value in (ignored_root_files or [])
+            if str(value or "").strip()
+        }
+        if (
+            not info.is_dir()
+            and len(path.parts) == 2
+            and path.name in ignored_root_files
+        ):
+            return None
         if not info.is_dir() and path.suffix.lower() in cls.REJECTED_SUFFIXES:
             raise PluginManagerError(f"ZIP 안의 중첩 압축·실행 파일은 허용하지 않습니다: {info.filename}")
         return path
 
-    def _extract_archive(self, archive_path, destination, settings, job_id):
+    def _extract_archive(
+        self, archive_path, destination, settings, job_id, ignored_root_files=None
+    ):
         try:
             archive = zipfile.ZipFile(archive_path)
         except (OSError, zipfile.BadZipFile) as error:
@@ -909,8 +933,12 @@ class BookOasisPluginManager:
                 raise PluginManagerError("ZIP 파일 수가 설정한 최대 개수를 초과했습니다.")
             total = 0
             members = []
+            ignored_count = 0
             for info in infos:
-                safe_path = self._validate_archive_member(info)
+                safe_path = self._validate_archive_member(info, ignored_root_files)
+                if safe_path is None:
+                    ignored_count += 1
+                    continue
                 total += int(info.file_size or 0)
                 if total > settings["max_extracted_bytes"]:
                     raise PluginManagerError("ZIP 해제 후 크기가 설정한 최대값을 초과했습니다.")
@@ -937,7 +965,16 @@ class BookOasisPluginManager:
                         shutil.copyfileobj(source, output, length=1024 * 1024)
                 if index % 100 == 0:
                     self._append_log(job_id, f"ZIP 파일 {index}/{len(members)}개를 검사·해제했습니다.")
-        return {"archive_files": len(infos), "archive_bytes": total}
+        if ignored_count:
+            self._append_log(
+                job_id,
+                f"검증 카탈로그의 배포용 ZIP {ignored_count}개를 추출 대상에서 제외했습니다.",
+            )
+        return {
+            "archive_files": len(members),
+            "archive_bytes": total,
+            "archive_ignored_files": ignored_count,
+        }
 
     @staticmethod
     def _collapse_wrapper(root):
@@ -1193,6 +1230,7 @@ class BookOasisPluginManager:
                 extracted,
                 settings,
                 job_id,
+                ignored_root_files=spec.get("ignored_archive_files"),
             )
             archive_path.unlink(missing_ok=True)
             self._set_job(job_id, percent=58, message="BookOasis 플러그인 구조와 Python 문법을 검사하고 있습니다.")
