@@ -299,6 +299,26 @@ class ModuleMain(PluginModuleBase):
                     line_limit=req.form.get("line_limit", 500),
                 )
                 return jsonify({"ret": "success", "data": data})
+            if command == "log_archive_catalog":
+                return jsonify({"ret": "success", "data": self.service.log_archive_catalog()})
+            if command == "log_archive_delete":
+                if req.form.get("confirm_delete") != "true":
+                    return jsonify({"ret": "warning", "msg": "과거 ZIP 로그 삭제 확인이 필요합니다."}), 400
+                data = self.service.delete_log_archive(req.form.get("filename"))
+                return jsonify({
+                    "ret": "success" if data.get("success") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
+            if command == "log_archive_delete_all":
+                if req.form.get("confirm_delete_all") != "DELETE_ALL_ZIP_LOGS":
+                    return jsonify({"ret": "warning", "msg": "과거 ZIP 로그 전체 삭제 확인이 필요합니다."}), 400
+                data = self.service.delete_all_log_archives()
+                return jsonify({
+                    "ret": "success" if data.get("success") else "warning",
+                    "msg": data.get("message"),
+                    "data": data,
+                })
             if command == "covers":
                 data = self.service.covers(
                     db_type=req.form.get("db_type", "general"),

@@ -35,6 +35,26 @@
 <pre id="log_output" class="doctor-log-output" tabindex="0"></pre>
 <div id="log_empty" class="doctor-empty" style="display:none"></div>
 
+<section class="doctor-card mt-3">
+  <div class="doctor-section-heading">
+    <div>
+      <h4>과거 ZIP 로그</h4>
+      <p class="doctor-muted mb-0">BookOasis 로그 디렉터리 바로 아래의 ZIP 파일만 표시합니다. 삭제한 파일은 복구할 수 없습니다.</p>
+    </div>
+    <div class="doctor-cleanup-actions">
+      <button id="log_archive_refresh_btn" type="button" class="btn btn-sm btn-outline-primary">ZIP 목록 새로고침</button>
+      <button id="log_archive_delete_all_btn" type="button" class="btn btn-sm btn-outline-danger" disabled>ZIP 전체 삭제</button>
+    </div>
+  </div>
+  <div id="log_archive_status" class="doctor-muted mb-2">과거 ZIP 로그를 확인하는 중입니다.</div>
+  <div class="doctor-table-wrap">
+    <table class="table table-sm doctor-table">
+      <thead><tr><th>파일명</th><th>크기</th><th>수정 시각</th><th>작업</th></tr></thead>
+      <tbody id="log_archive_body"></tbody>
+    </table>
+  </div>
+</section>
+
 <script>
 var logPollTimer = null;
 var logRequestRunning = false;
@@ -42,6 +62,8 @@ var logPaused = false;
 var logCursorIdentity = '';
 var logCursorOffset = '';
 var logRawText = '';
+var logArchiveTotal = 0;
+var logArchiveTotalBytes = 0;
 
 function scheduleLogPoll() {
   clearTimeout(logPollTimer);
@@ -160,8 +182,79 @@ function loadLogTail(showLoading) {
   });
 }
 
+function renderLogArchives(data) {
+  var body = document.getElementById('log_archive_body');
+  bookoasisMateClear(body);
+  var files = data.files || [];
+  logArchiveTotal = Number(data.total || files.length || 0);
+  logArchiveTotalBytes = files.reduce(function(total, file) { return total + Number(file.size || 0); }, 0);
+  $('#log_archive_delete_all_btn').prop('disabled', logArchiveTotal < 1);
+  if (!files.length) {
+    var emptyRow = document.createElement('tr');
+    var emptyCell = bookoasisMateText('td', 'doctor-muted', data.message || '삭제할 과거 ZIP 로그 파일이 없습니다.');
+    emptyCell.colSpan = 4; emptyRow.appendChild(emptyCell); body.appendChild(emptyRow);
+  }
+  files.forEach(function(file) {
+    var row = document.createElement('tr');
+    row.appendChild(bookoasisMateText('td', 'doctor-path', file.name || '-'));
+    row.appendChild(bookoasisMateText('td', '', bookoasisMateBytes(file.size || 0)));
+    row.appendChild(bookoasisMateText('td', '', file.modified_at || '-'));
+    var action = document.createElement('td');
+    var button = bookoasisMateText('button', 'btn btn-sm btn-outline-danger', '삭제');
+    button.type = 'button'; button.dataset.filename = file.name || '';
+    button.addEventListener('click', deleteLogArchive);
+    action.appendChild(button); row.appendChild(action); body.appendChild(row);
+  });
+  var summary = 'ZIP 로그 ' + Number(data.total || files.length).toLocaleString() + '개';
+  if (data.truncated) summary += ' · 최근 ' + files.length.toLocaleString() + '개만 표시';
+  document.getElementById('log_archive_status').textContent = summary;
+}
+
+function loadLogArchives(showLoading) {
+  bookoasisMateAjax('main', 'log_archive_catalog', {}, function(ret) {
+    var data = ret.data || {};
+    renderLogArchives(data);
+    if (!data.success) document.getElementById('log_archive_status').textContent = data.message || '과거 ZIP 로그 목록을 읽을 수 없습니다.';
+  }, null, {
+    global:showLoading === true,
+    silent:showLoading !== true,
+    error:function(xhr, message) { document.getElementById('log_archive_status').textContent = message; }
+  });
+}
+
+function deleteLogArchive(event) {
+  var button = event.currentTarget;
+  var filename = button.dataset.filename || '';
+  if (!filename || !confirm(filename + ' 과거 ZIP 로그를 영구 삭제할까요?')) return;
+  button.disabled = true;
+  bookoasisMateAjax('main', 'log_archive_delete', {
+    filename:filename,
+    confirm_delete:'true'
+  }, function(ret) {
+    if (ret.msg) notify(ret.msg, ret.ret || 'info');
+    loadLogArchives(false);
+  }, function() { button.disabled = false; });
+}
+
+function deleteAllLogArchives(event) {
+  if (logArchiveTotal < 1) return;
+  var detail = logArchiveTotal.toLocaleString() + '개';
+  if (logArchiveTotal === $('#log_archive_body tr').length) detail += ' · ' + bookoasisMateBytes(logArchiveTotalBytes);
+  if (!confirm('과거 ZIP 로그 ' + detail + '를 모두 영구 삭제할까요? 현재 .log 파일은 삭제하지 않습니다.')) return;
+  var button = event.currentTarget;
+  button.disabled = true;
+  bookoasisMateAjax('main', 'log_archive_delete_all', {
+    confirm_delete_all:'DELETE_ALL_ZIP_LOGS'
+  }, function(ret) {
+    if (ret.msg) notify(ret.msg, ret.ret || 'info');
+    loadLogArchives(false);
+  }, function() { button.disabled = false; });
+}
+
 $('#log_file').change(function() { resetLogCursor(); loadLogTail(true); });
 $('#log_catalog_btn').click(function(e) { e.preventDefault(); loadLogCatalog(true); });
+$('#log_archive_refresh_btn').click(function(e) { e.preventDefault(); loadLogArchives(true); });
+$('#log_archive_delete_all_btn').click(function(e) { e.preventDefault(); deleteAllLogArchives(e); });
 $('#log_pause_btn').click(function(e) {
   e.preventDefault();
   logPaused = !logPaused;
@@ -181,6 +274,6 @@ document.addEventListener('visibilitychange', function() {
   else loadLogTail(false);
 });
 window.addEventListener('beforeunload', function() { clearTimeout(logPollTimer); });
-$(document).ready(function() { loadLogCatalog(false); });
+$(document).ready(function() { loadLogCatalog(false); loadLogArchives(false); });
 </script>
 {% endblock %}
