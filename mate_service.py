@@ -14,7 +14,13 @@ from pathlib import Path
 
 from .bookoasis_client import BookOasisClient
 from .bookoasis_db import BookOasisDatabaseAdapter
-from .bookoasis_logs import list_log_files, read_lazy_progress, read_log_tail
+from .bookoasis_logs import (
+    delete_log_archive,
+    list_log_archives,
+    list_log_files,
+    read_lazy_progress,
+    read_log_tail,
+)
 from .bookoasis_package_import import BookOasisPackageImportEngine
 from .category_migration import (
     CategoryMigrationEngine,
@@ -1037,6 +1043,35 @@ class BookOasisMateService:
             file=data.get("file"),
             bytes=len(data.get("text", "").encode("utf-8")),
             reset=str(data.get("reset", False)).lower(),
+            duration_ms=self._duration_ms(started),
+        )
+        return data
+
+    def log_archive_catalog(self):
+        started = time.monotonic()
+        try:
+            data = list_log_archives(self.settings().get("bookoasis_log_dir"))
+        except (ValueError, OSError) as error:
+            data = {"success": False, "files": [], "total": 0, "message": str(error)}
+        self._debug(
+            "BookOasis 과거 ZIP 로그 목록 조회 완료",
+            files=len(data.get("files", [])),
+            duration_ms=self._duration_ms(started),
+        )
+        return data
+
+    def delete_log_archive(self, filename):
+        started = time.monotonic()
+        try:
+            data = delete_log_archive(
+                self.settings().get("bookoasis_log_dir"), str(filename or "")
+            )
+        except (ValueError, OSError) as error:
+            data = {"success": False, "name": str(filename or ""), "message": str(error)}
+        self._debug(
+            "BookOasis 과거 ZIP 로그 삭제 완료",
+            file=data.get("name"),
+            success=str(data.get("success", False)).lower(),
             duration_ms=self._duration_ms(started),
         )
         return data

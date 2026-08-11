@@ -52,6 +52,19 @@ class ModulePlugins(PluginModuleBase):
                 return jsonify(
                     {"ret": "success", "data": self.manager.installed(settings)}
                 )
+            if command == "installed_delete":
+                if req.form.get("confirm_delete") != "true":
+                    raise PluginManagerError("설치 플러그인 삭제 확인이 필요합니다.")
+                data = self.manager.delete_installed_plugin(
+                    req.form.get("plugin_id"), settings
+                )
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "msg": "설치 플러그인을 백업한 뒤 삭제했습니다. BookOasis를 재시작해 주세요.",
+                        "data": data,
+                    }
+                )
             if command == "paths":
                 return jsonify(
                     {

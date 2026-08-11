@@ -12,6 +12,7 @@ ALLOWED_LOG_FILES = {
 }
 DEFAULT_MAX_BYTES = 256 * 1024
 DEFAULT_MAX_LINES = 500
+MAX_ARCHIVE_FILES = 500
 _LAZY_PROGRESS_PATTERN = re.compile(
     r"\((?P<done>\d+)/(?P<total>\d+)\).*?처리 시작\s*->\s*(?P<filename>.+?)\s*$"
 )
@@ -78,6 +79,75 @@ def list_log_files(log_dir):
         "success": True,
         "files": files,
         "message": "" if files else "표시할 BookOasis 로그 파일이 없습니다.",
+    }
+
+
+def _safe_log_archive(log_dir, filename):
+    name = str(filename or "").strip()
+    if not name or Path(name).name != name or Path(name).suffix.lower() != ".zip":
+        raise ValueError("삭제할 과거 ZIP 로그 파일명이 올바르지 않습니다.")
+    root = _log_root(log_dir)
+    candidate = root / name
+    if candidate.is_symlink():
+        raise ValueError("심볼릭 링크 ZIP 로그 파일은 삭제할 수 없습니다.")
+    resolved = candidate.resolve(strict=False)
+    try:
+        resolved.relative_to(root)
+    except ValueError as error:
+        raise ValueError("로그 디렉터리 밖의 파일은 삭제할 수 없습니다.") from error
+    if not resolved.exists() or not resolved.is_file():
+        raise ValueError("삭제할 과거 ZIP 로그 파일을 찾을 수 없습니다.")
+    return root, resolved
+
+
+def list_log_archives(log_dir, limit=MAX_ARCHIVE_FILES):
+    root = _log_root(log_dir)
+    limit = max(1, min(int(limit or MAX_ARCHIVE_FILES), MAX_ARCHIVE_FILES))
+    files = []
+    for candidate in root.iterdir():
+        if (
+            candidate.is_symlink()
+            or not candidate.is_file()
+            or candidate.suffix.lower() != ".zip"
+        ):
+            continue
+        resolved = candidate.resolve(strict=False)
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            continue
+        stat_result = resolved.stat()
+        files.append({
+            "name": candidate.name,
+            "size": int(stat_result.st_size),
+            "modified_at": _modified_at(stat_result),
+            "modified_timestamp": float(stat_result.st_mtime),
+        })
+    files.sort(key=lambda item: (-item["modified_timestamp"], item["name"].lower()))
+    total = len(files)
+    visible = files[:limit]
+    for item in visible:
+        item.pop("modified_timestamp", None)
+    return {
+        "success": True,
+        "files": visible,
+        "total": total,
+        "truncated": total > len(visible),
+        "message": "" if visible else "삭제할 과거 ZIP 로그 파일이 없습니다.",
+    }
+
+
+def delete_log_archive(log_dir, filename):
+    _, path = _safe_log_archive(log_dir, filename)
+    stat_result = path.stat()
+    name = path.name
+    size = int(stat_result.st_size)
+    path.unlink()
+    return {
+        "success": True,
+        "name": name,
+        "size": size,
+        "message": f"과거 ZIP 로그 {name} 파일을 삭제했습니다.",
     }
 
 

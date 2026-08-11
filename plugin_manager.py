@@ -144,6 +144,7 @@ class BookOasisPluginManager:
     MAX_LOGS = 200
     DOWNLOAD_TIMEOUT = 30
     MAX_CUSTOM_CATALOG_ITEMS = 100
+    PROTECTED_PLUGIN_IDS = {"bookoasis_mate"}
 
     def __init__(self, logger=None):
         self.logger = logger
@@ -478,6 +479,102 @@ class BookOasisPluginManager:
             )
             result.append(item)
         return result
+
+    @staticmethod
+    def _dependency_id(value):
+        match = re.fullmatch(
+            r"([a-z][a-z0-9_]{1,63})(?:>=(\d+(?:\.\d+){0,2}))?",
+            str(value or "").strip(),
+        )
+        return match.group(1) if match else ""
+
+    def _installed_dependents(self, plugin_id, settings):
+        installed_ids = set(self._installed_catalog(settings))
+        catalog_items = [copy.deepcopy(item) for item in self.CATALOG]
+        catalog_items.extend(self._load_custom_catalog(settings))
+        dependents = []
+        for item in catalog_items:
+            if item.get("id") not in installed_ids:
+                continue
+            dependency_ids = {
+                self._dependency_id(value) for value in item.get("dependencies") or []
+            }
+            if plugin_id in dependency_ids:
+                dependents.append(str(item.get("id") or ""))
+        return sorted(value for value in dependents if value)
+
+    def delete_installed_plugin(self, plugin_id, settings):
+        plugin_id = self._validate_plugin_id(plugin_id)
+        if plugin_id in self.PROTECTED_PLUGIN_IDS:
+            raise PluginManagerError("BookOasis Mate 자체 플러그인은 이 화면에서 삭제할 수 없습니다.")
+        normalized = self.normalized_settings(settings)
+        with self._lock:
+            if self._job and self._job.get("status") in self.ACTIVE_STATES:
+                raise PluginManagerError("다른 플러그인 작업이 진행 중입니다.")
+            root_input = Path(normalized["plugin_root"]).expanduser()
+            if root_input.is_symlink():
+                raise PluginManagerError("심볼릭 링크 plugins/metadata 경로에서는 삭제할 수 없습니다.")
+            plugin_root = self._safe_resolve(
+                normalized["plugin_root"], "BookOasis plugins/metadata 경로"
+            )
+            work_root = self._safe_resolve(
+                normalized["work_dir"], "플러그인 작업 디렉터리", create=True
+            )
+            try:
+                work_root.relative_to(plugin_root)
+                raise PluginManagerError(
+                    "플러그인 작업 디렉터리는 plugins/metadata 경로 밖에 설정해 주세요."
+                )
+            except ValueError:
+                pass
+            target = plugin_root / plugin_id
+            if target.is_symlink():
+                raise PluginManagerError("심볼릭 링크 플러그인은 삭제할 수 없습니다.")
+            if not target.exists() or not target.is_dir() or not (target / "__init__.py").is_file():
+                raise PluginManagerError("삭제할 설치 플러그인을 찾을 수 없습니다.")
+            resolved_target = target.resolve()
+            if resolved_target.parent != plugin_root:
+                raise PluginManagerError("plugins/metadata 바로 아래 플러그인만 삭제할 수 있습니다.")
+            dependents = self._installed_dependents(plugin_id, settings)
+            if dependents:
+                raise PluginManagerError(
+                    "이 플러그인을 사용하는 설치 플러그인을 먼저 삭제해 주세요: "
+                    + ", ".join(dependents)
+                )
+            version = self._read_version(target)
+            job_id = uuid.uuid4().hex
+            backup = self._backup_existing(
+                target,
+                plugin_id,
+                work_root,
+                normalized["backup_keep"],
+                job_id,
+            )
+            shutil.rmtree(target)
+            if target.exists():
+                raise PluginManagerError("플러그인 폴더 삭제를 완료하지 못했습니다.")
+            finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
+            result = {
+                "plugin_id": plugin_id,
+                "version": version,
+                "deleted": True,
+                "backup": backup,
+                "restart_recommended": True,
+            }
+            self._record_history(
+                normalized,
+                {
+                    "id": job_id,
+                    "operation": "delete",
+                    "source": "installed",
+                    "status": "completed",
+                    "message": "설치 플러그인을 백업한 뒤 삭제했습니다.",
+                    "result": result,
+                    "started_at": finished_at,
+                    "finished_at": finished_at,
+                },
+            )
+            return result
 
     @staticmethod
     def _fetch_remote_version(item):

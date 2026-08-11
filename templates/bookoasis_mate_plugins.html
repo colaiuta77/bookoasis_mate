@@ -186,6 +186,11 @@ function pluginManagerRenderCards(targetId, items, catalogMode) {
         removeButton.addEventListener('click', pluginManagerDeleteCustomCatalog);
         footer.appendChild(removeButton);
       }
+    } else if (item.installed) {
+      var deleteButton = pluginManagerText('button', 'btn btn-sm btn-outline-danger', '플러그인 삭제');
+      deleteButton.type = 'button'; deleteButton.dataset.pluginId = item.id; deleteButton.dataset.pluginName = item.name || item.id;
+      deleteButton.addEventListener('click', pluginManagerDeleteInstalled);
+      footer.appendChild(deleteButton);
     }
     card.appendChild(footer);
     target.appendChild(card);
@@ -232,6 +237,20 @@ function pluginManagerDeleteCustomCatalog(event) {
     if (ret.msg) notify(ret.msg, ret.ret || 'info');
     pluginManagerLoadCatalog(false); pluginManagerLoadInstalled();
   });
+}
+
+function pluginManagerDeleteInstalled(event) {
+  var button = event.currentTarget;
+  var name = button.dataset.pluginName || button.dataset.pluginId;
+  if (!confirm(name + ' 설치 플러그인을 삭제할까요? 현재 폴더는 작업·백업 경로에 보관되며 적용 후 BookOasis를 재시작해야 합니다.')) return;
+  button.disabled = true;
+  bookoasisMateAjax('plugins', 'installed_delete', {
+    plugin_id:button.dataset.pluginId,
+    confirm_delete:'true'
+  }, function(ret) {
+    if (ret.msg) notify(ret.msg, ret.ret || 'info');
+    pluginManagerLoadCatalog(false); pluginManagerLoadInstalled(); pluginManagerLoadHistory();
+  }, function() { button.disabled = false; });
 }
 
 function pluginManagerRenderManifest(result) {
