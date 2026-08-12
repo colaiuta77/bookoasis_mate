@@ -289,6 +289,54 @@ def find_library(path, libraries):
     return None
 
 
+def event_scan_targets(event, libraries):
+    """변경 이벤트를 보관함 기준 스캔 디렉터리로 변환합니다."""
+    action = event["action"]
+    item_type = event["item_type"]
+    current = event.get("mapped_path") or event.get("path") or ""
+    previous = event.get("mapped_removed_path") or event.get("removed_path") or ""
+    candidates = []
+
+    if action in {"move", "rename"}:
+        if previous:
+            candidates.append((previous, True))
+        if current:
+            candidates.append((current, False))
+    elif action == "delete":
+        target = previous or current
+        if target:
+            candidates.append((target, True))
+    elif current:
+        candidates.append((current, False))
+
+    targets = []
+    seen = set()
+    for path, removed in candidates:
+        library = find_library(path, libraries)
+        if library is None:
+            continue
+        directory = (
+            posixpath.dirname(path) or "/"
+            if item_type == "file" or removed
+            else path
+        )
+        root = library["root"].rstrip("/") or "/"
+        if directory == root:
+            relative_path = ""
+        elif root == "/":
+            relative_path = directory.lstrip("/")
+        elif directory.startswith(f"{root}/"):
+            relative_path = directory[len(root) :].lstrip("/")
+        else:
+            continue
+        key = (library["db_type"], library["id"], relative_path)
+        if key in seen:
+            continue
+        seen.add(key)
+        targets.append({"library": library, "path": relative_path})
+    return targets
+
+
 class RcloneRcClient:
     def __init__(self, timeout=30, opener=None):
         self.timeout = max(1, min(int(timeout or 30), 300))
@@ -348,11 +396,13 @@ class GDriveScanProcessor:
         self,
         settings,
         scan_callback,
+        path_scan_callback=None,
         rc_client=None,
         logger=None,
     ):
         self.settings = dict(settings or {})
         self.scan_callback = scan_callback
+        self.path_scan_callback = path_scan_callback
         self.rc_client = rc_client or RcloneRcClient(
             self.settings.get("gdrive_scan_rc_timeout", 30)
         )
@@ -450,6 +500,7 @@ class GDriveScanProcessor:
                         self._duplicate_prefix_error(candidate, repeated_prefix)
                     )
             raise ValueError("변경 경로에 해당하는 BookOasis 보관함을 찾을 수 없습니다.")
+        item["scan_targets"] = event_scan_targets(item, self.libraries)
         return item
 
     def process_batch(self, events):
@@ -466,16 +517,10 @@ class GDriveScanProcessor:
                 }
 
         operations = []
-        libraries = {}
-        event_ids_by_library = {}
         for event in prepared:
             event_id = int(event["id"])
             for operation in event_vfs_operations(event):
                 operations.append((event_id,) + operation)
-            for library in event["libraries"]:
-                key = (library["db_type"], library["id"])
-                libraries[key] = library
-                event_ids_by_library.setdefault(key, set()).add(event_id)
 
         operation_results = {}
         operation_cache = {}
@@ -505,42 +550,83 @@ class GDriveScanProcessor:
                         }
             operation_results.setdefault(event_id, []).append(operation_cache[key])
 
+        fallback_libraries = {
+            (target["library"]["db_type"], target["library"]["id"])
+            for event in prepared
+            for target in event.get("scan_targets", [])
+            if not self.path_scan_callback or not target["path"]
+        }
+        scan_requests = {}
+        event_scan_keys = {}
+        for event in prepared:
+            event_id = int(event["id"])
+            for target in event.get("scan_targets", []):
+                library = target["library"]
+                library_key = (library["db_type"], library["id"])
+                if library_key in fallback_libraries:
+                    request_key = ("library",) + library_key + ("",)
+                else:
+                    request_key = ("path",) + library_key + (target["path"],)
+                scan_requests.setdefault(
+                    request_key,
+                    {"library": library, "event_ids": set()},
+                )["event_ids"].add(event_id)
+                event_scan_keys.setdefault(event_id, [])
+                if request_key not in event_scan_keys[event_id]:
+                    event_scan_keys[event_id].append(request_key)
+
         scan_results = {}
-        for key, library in libraries.items():
-            related_event_ids = event_ids_by_library.get(key, set())
+        for request_key, request_data in scan_requests.items():
+            mode, db_type, library_id, relative_path = request_key
+            library = request_data["library"]
+            related_event_ids = request_data["event_ids"]
             vfs_failed = any(
                 not operation_result.get("success")
                 for event_id in related_event_ids
                 for operation_result in operation_results.get(event_id, [])
             )
             if vfs_failed:
-                scan_results[key] = {
+                scan_results[request_key] = {
                     "success": False,
                     "message": "VFS 갱신에 실패하여 BookOasis 스캔 요청을 보류했습니다.",
                     "response": {},
+                    "mode": mode,
+                    "path": relative_path,
                 }
                 continue
             try:
-                response = self.scan_callback(
-                    library["db_type"], library["id"], library["name"]
-                )
+                if mode == "path":
+                    response = self.path_scan_callback(
+                        db_type,
+                        library_id,
+                        library["name"],
+                        relative_path,
+                    )
+                else:
+                    response = self.scan_callback(
+                        db_type,
+                        library_id,
+                        library["name"],
+                    )
                 success = bool(response.get("success"))
                 message = response.get("message") or response.get("error") or ""
             except Exception as error:
                 success = False
                 message = str(error)
                 response = {}
-            scan_results[key] = {
+            scan_results[request_key] = {
                 "success": success,
                 "message": message,
                 "response": response,
+                "mode": mode,
+                "path": relative_path,
             }
 
         for event in prepared:
             event_id = int(event["id"])
             event_scan_results = [
-                scan_results[(library["db_type"], library["id"])]
-                for library in event["libraries"]
+                scan_results[key]
+                for key in event_scan_keys.get(event_id, [])
             ]
             event_operation_results = operation_results.get(event_id, [])
             failed_operations = [

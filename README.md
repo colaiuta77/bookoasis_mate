@@ -9,7 +9,7 @@
 - 스캔 상태 및 주요 로그 실시간 확인.
 - 시리즈 누락, 표지 문제와 고아 표지파일 검사.
 - 안전한 읽기 전용 SQL 진단 도구와 운영 프리셋.
-- gd-poller 변경 감지 기반 rclone VFS 갱신과 BookOasis 증분 스캔.
+- gd-poller 변경 감지 기반 rclone VFS 갱신과 BookOasis 개별 경로 스캔.
 - BookOasis 일반·성인·오디오북 카테고리 내보내기·가져오기.
 - Kavita 및 BookOasis 공유 패키지 통DB 이관.
 - BookOasis 커스텀 폰트 업로드와 설치 상태 확인.

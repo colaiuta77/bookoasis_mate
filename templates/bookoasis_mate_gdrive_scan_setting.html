@@ -8,7 +8,7 @@
 <form id="setting">
   <div class="doctor-section doctor-card">
     <h3>Google Drive 변경 감지 연동</h3>
-    <p class="doctor-muted">gd-poller 이벤트를 먼저 FlaskFarm DB에 저장하고 버퍼 시간이 지난 뒤 rclone VFS 갱신과 BookOasis 보관함 증분 스캔을 실행합니다.</p>
+    <p class="doctor-muted">gd-poller 이벤트를 먼저 FlaskFarm DB에 저장하고 버퍼 시간이 지난 뒤 rclone VFS 갱신과 BookOasis 개별 경로 스캔을 실행합니다. BookOasis v1.9.5 이상과 관리자 계정 설정이 필요합니다.</p>
   </div>
 
   {{ macros.setting_checkbox('gdrive_scan_enabled', '연동 사용', value=arg['gdrive_scan_enabled'], desc=['꺼져 있으면 외부 이벤트 API가 503으로 응답합니다.']) }}
@@ -52,7 +52,7 @@
 <div class="doctor-section doctor-card">
   <h4>이벤트 API</h4>
   <p><code>/bookoasis_mate/api/gdrive_scan/event</code></p>
-  <p class="doctor-muted">FlaskFarm 전역 API 키가 필요합니다. BookOasis 스캔 웹훅 토큰은 상단 설정 메뉴의 값을 사용합니다.</p>
+  <p class="doctor-muted">FlaskFarm 전역 API 키가 필요합니다. 개별 경로 스캔은 상단 설정 메뉴의 BookOasis 관리자 계정을 사용하며, 보관함 루트 폴백은 스캔 웹훅 토큰을 사용합니다.</p>
 </div>
 
 <script>

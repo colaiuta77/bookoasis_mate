@@ -72,6 +72,8 @@ class ModuleGDriveScan(PluginModuleBase):
             "mariadb_read_timeout": model.get("mariadb_read_timeout"),
             "mariadb_write_timeout": model.get("mariadb_write_timeout"),
             "bookoasis_url": model.get("bookoasis_url"),
+            "bookoasis_username": model.get("bookoasis_username"),
+            "bookoasis_password": model.get("bookoasis_password"),
             "webhook_token": model.get("webhook_token"),
             "api_timeout": self._as_int(model.get("api_timeout"), 30, 1, 30),
             "gdrive_scan_enabled": model.get_bool("gdrive_scan_enabled"),
@@ -287,6 +289,28 @@ class ModuleGDriveScan(PluginModuleBase):
         )
         return response
 
+    def _path_scan_callback(self, db_type, library_id, library_name, relative_path):
+        settings = self._settings()
+        client = BookOasisClient(
+            settings["bookoasis_url"],
+            settings["api_timeout"],
+            username=settings["bookoasis_username"],
+            password=settings["bookoasis_password"],
+        )
+        response = client.scan_library_path(
+            library_id,
+            relative_path,
+            db_type=db_type,
+            force=False,
+        )
+        P.logger.info(
+            "[BookOasisMate] BookOasis 개별 경로 스캔 결과 "
+            f"db={db_type} library_id={library_id} library={library_name} "
+            f"path={relative_path} "
+            f"success={str(bool(response.get('success'))).lower()}"
+        )
+        return response
+
     def _process_once(self):
         settings = self._settings()
         if not settings["gdrive_scan_enabled"] or self.model is None:
@@ -308,6 +332,7 @@ class ModuleGDriveScan(PluginModuleBase):
             processor = GDriveScanProcessor(
                 settings,
                 scan_callback=self._scan_callback,
+                path_scan_callback=self._path_scan_callback,
                 logger=P.logger,
             )
             results = processor.process_batch(events)

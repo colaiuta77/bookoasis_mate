@@ -1,5 +1,6 @@
 # BookOasis 공개 상태 API와 관리자 세션 API에 안전하게 연결합니다.
 import json
+import posixpath
 import time
 from http.cookiejar import CookieJar
 from http.client import HTTPException, IncompleteRead, RemoteDisconnected
@@ -177,6 +178,33 @@ class BookOasisClient:
             method="POST",
             form={
                 "type": db_type,
+                "force": "true" if force else "false",
+            },
+        )
+
+    def scan_library_path(self, library_id, relative_path, db_type="general", force=False):
+        library_id, error = self._valid_positive_id(library_id, "보관함 ID")
+        if error:
+            return error
+        db_type = self._valid_library_db_type(db_type)
+        if not db_type:
+            return self._admin_error("DB 유형이 올바르지 않습니다.")
+        relative_path = str(relative_path or "").strip().replace("\\", "/")
+        parts = [part for part in relative_path.split("/") if part]
+        if (
+            not relative_path
+            or relative_path.startswith("/")
+            or ".." in parts
+            or posixpath.normpath(relative_path) in {"", ".", ".."}
+        ):
+            return self._admin_error("보관함 기준 상대 디렉터리 경로가 올바르지 않습니다.")
+        relative_path = posixpath.normpath(relative_path)
+        return self._admin_request(
+            f"api/media/libraries/{library_id}/scan-path",
+            method="POST",
+            form={
+                "type": db_type,
+                "path": relative_path,
                 "force": "true" if force else "false",
             },
         )
