@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .bookoasis_client import BookOasisClient
-from .bookoasis_db import BookOasisDatabaseAdapter
+from .bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
 from .bookoasis_logs import (
     delete_all_log_archives,
     delete_log_archive,
@@ -41,7 +41,14 @@ GAP_CACHE_SECONDS = 300
 GAP_CACHE_LIMIT = 8
 ISSUE_CACHE_SECONDS = 15
 ISSUE_CACHE_LIMIT = 32
+ISSUE_COUNT_CACHE_SECONDS = 300
+ISSUE_COUNT_STALE_SECONDS = 3600
 LIBRARY_STATISTICS_SNAPSHOT_SECONDS = 21600
+
+
+def _is_mariadb_statement_timeout(error):
+    text = str(error or "").lower()
+    return "max_statement_time" in text or "(1969," in text
 
 
 def _format_number_ranges(values):
@@ -946,31 +953,59 @@ class BookOasisMateService:
                 if data is None:
                     with self._lock:
                         count_entry = self._issue_count_cache.get(count_cache_key)
+                        count_age = (
+                            time.monotonic() - count_entry["created_at"]
+                            if count_entry
+                            else None
+                        )
                         known_total = (
                             int(count_entry["total"])
                             if count_entry
-                            and time.monotonic() - count_entry["created_at"]
-                            <= ISSUE_CACHE_SECONDS
+                            and count_age <= ISSUE_COUNT_CACHE_SECONDS
+                            else None
+                        )
+                        stale_total = (
+                            int(count_entry["total"])
+                            if count_entry
+                            and count_age <= ISSUE_COUNT_STALE_SECONDS
                             else None
                         )
                     engine = self.engine(settings)
+                    count_status = "exact"
                     if known_total is None:
-                        known_total = engine.count_issues(
-                            db_type=kwargs.get("db_type", "general"),
-                            library_id=kwargs.get("library_id"),
-                            issue_type=kwargs.get("issue_type", "all"),
-                            search=kwargs.get("search", ""),
-                        )
-                        with self._lock:
-                            self._issue_count_cache[count_cache_key] = {
-                                "created_at": time.monotonic(),
-                                "total": int(known_total),
-                            }
+                        try:
+                            known_total = engine.count_issues(
+                                db_type=kwargs.get("db_type", "general"),
+                                library_id=kwargs.get("library_id"),
+                                issue_type=kwargs.get("issue_type", "all"),
+                                search=kwargs.get("search", ""),
+                            )
+                        except BookOasisDatabaseError as error:
+                            if not _is_mariadb_statement_timeout(error):
+                                raise
+                            known_total = stale_total
+                            count_status = (
+                                "stale" if known_total is not None else "unavailable"
+                            )
+                            self.P.logger.warning(
+                                "문제 도서 전체 건수 집계가 MariaDB 제한 시간을 초과했습니다. "
+                                "count_status=%s",
+                                count_status,
+                            )
+                        else:
+                            with self._lock:
+                                self._issue_count_cache[count_cache_key] = {
+                                    "created_at": time.monotonic(),
+                                    "total": int(known_total),
+                                }
                     data = engine.list_issues(
                         page_size=page_size,
                         known_total=known_total,
+                        skip_count=known_total is None,
                         **kwargs,
                     )
+                    data["count_status"] = count_status
+                    data["total_exact"] = count_status == "exact"
                     data["cache_hit"] = False
                     with self._lock:
                         now = time.monotonic()
@@ -992,7 +1027,7 @@ class BookOasisMateService:
                         self._issue_count_cache = {
                             key: value
                             for key, value in self._issue_count_cache.items()
-                            if now - value["created_at"] <= ISSUE_CACHE_SECONDS
+                            if now - value["created_at"] <= ISSUE_COUNT_STALE_SECONDS
                         }
         self._debug(
             "문제 도서 조회 완료",
@@ -1001,7 +1036,8 @@ class BookOasisMateService:
             issue_type=kwargs.get("issue_type", "all"),
             search=str(bool(kwargs.get("search"))).lower(),
             page=data.get("page", 1),
-            total=data.get("total", 0),
+            total=(data.get("total") if data.get("total") is not None else "unavailable"),
+            count_status=data.get("count_status", "exact"),
             items=len(data.get("items", [])),
             cache_hit=str(data.get("cache_hit", False)).lower(),
             duration_ms=self._duration_ms(started),

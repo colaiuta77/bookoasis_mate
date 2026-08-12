@@ -668,6 +668,7 @@ class BookOasisMateEngine:
         library_id=None,
         issue_type="all",
         search="",
+        include_duplicate_isbn=None,
     ):
         search = str(search or "").strip()
         issue_type = issue_type if issue_type in PROBLEM_BOOK_LABELS else "all"
@@ -680,7 +681,11 @@ class BookOasisMateEngine:
             if selected_library_id <= 0:
                 raise ValueError("보관함 ID가 올바르지 않습니다.")
 
-        include_duplicate = issue_type in {"all", "duplicate_isbn"}
+        include_duplicate = (
+            issue_type in {"all", "duplicate_isbn"}
+            if include_duplicate_isbn is None
+            else bool(include_duplicate_isbn)
+        )
         parts = self._book_query_parts(
             connection,
             include_duplicate_isbn=include_duplicate,
@@ -738,6 +743,55 @@ class BookOasisMateEngine:
     ):
         target = self.get_target(db_type)
         with closing(self._connect(target)) as connection:
+            normalized_issue_type = (
+                issue_type if issue_type in PROBLEM_BOOK_LABELS else "all"
+            )
+            if normalized_issue_type == "all":
+                base_context = self._issue_query_context(
+                    connection,
+                    library_id=library_id,
+                    issue_type=issue_type,
+                    search=search,
+                    include_duplicate_isbn=False,
+                )
+                total = 0
+                if base_context is not None:
+                    base_row = connection.execute(
+                        f"""
+                        SELECT COUNT(*) AS filtered_total
+                        {base_context['base_from']}
+                        WHERE {base_context['where']}
+                        """,
+                        base_context["params"],
+                    ).fetchone()
+                    total = int(base_row["filtered_total"] or 0)
+
+                duplicate_context = self._issue_query_context(
+                    connection,
+                    library_id=library_id,
+                    issue_type="duplicate_isbn",
+                    search=search,
+                )
+                if duplicate_context is None:
+                    return total
+                duplicate_parts = duplicate_context["parts"]
+                base_problem = (
+                    " OR ".join(base_context["expressions"].values())
+                    if base_context is not None
+                    else "0"
+                ) or "0"
+                duplicate_row = connection.execute(
+                    f"""
+                    {duplicate_parts['duplicate_cte']}
+                    SELECT COUNT(*) AS filtered_total
+                    {duplicate_context['base_from']}
+                    WHERE {duplicate_context['where']}
+                      AND NOT ({base_problem})
+                    """,
+                    duplicate_context["params"],
+                ).fetchone()
+                return total + int(duplicate_row["filtered_total"] or 0)
+
             context = self._issue_query_context(
                 connection,
                 library_id=library_id,
@@ -767,6 +821,7 @@ class BookOasisMateEngine:
         page=1,
         page_size=50,
         known_total=None,
+        skip_count=False,
     ):
         target = self.get_target(db_type)
         page = _as_int(page, 1, 1, 100000)
@@ -782,13 +837,16 @@ class BookOasisMateEngine:
                 return {
                     "items": [],
                     "total": 0,
+                    "total_exact": True,
+                    "count_status": "exact",
+                    "has_more": False,
                     "page": page,
                     "page_size": page_size,
                     "pages": 0,
                 }
             parts = context["parts"]
             expressions = context["expressions"]
-            if known_total is None:
+            if known_total is None and not skip_count:
                 total_row = connection.execute(
                     f"""
                     {parts['duplicate_cte']}
@@ -799,8 +857,13 @@ class BookOasisMateEngine:
                     context["params"],
                 ).fetchone()
                 total = int(total_row["filtered_total"] or 0)
+                count_status = "exact"
+            elif known_total is None:
+                total = None
+                count_status = "unavailable"
             else:
                 total = max(0, int(known_total or 0))
+                count_status = "exact"
 
             flag_select = [
                 f"CASE WHEN {expressions[key]} THEN 1 ELSE 0 END AS issue_{key}"
@@ -823,8 +886,12 @@ class BookOasisMateEngine:
                 ORDER BY {('b.created_at DESC,' if 'created_at' in parts['columns'] else '')} b.id DESC
                 LIMIT ? OFFSET ?
                 """,
-                [*context["params"], page_size, (page - 1) * page_size],
+                [*context["params"], page_size + 1, (page - 1) * page_size],
             ).fetchall()
+
+        has_more = len(rows) > page_size
+        if has_more:
+            rows = rows[:page_size]
 
         items = []
         for row in rows:
@@ -836,8 +903,21 @@ class BookOasisMateEngine:
             cover = str(item.get("cover_image") or "").replace("\\", "/").lstrip("/")
             item["cover_url"] = f"{self.bookoasis_url}/covers/{quote(cover, safe='/')}" if cover and self.bookoasis_url else ""
             items.append(item)
-        pages = (int(total) + page_size - 1) // page_size
-        return {"items": items, "total": int(total), "page": page, "page_size": page_size, "pages": pages}
+        pages = (
+            (int(total) + page_size - 1) // page_size
+            if total is not None
+            else page + (1 if has_more else 0)
+        )
+        return {
+            "items": items,
+            "total": int(total) if total is not None else None,
+            "total_exact": total is not None,
+            "count_status": count_status,
+            "has_more": has_more,
+            "page": page,
+            "page_size": page_size,
+            "pages": pages,
+        }
 
     def issue_book_batch(
         self,
