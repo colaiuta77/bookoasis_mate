@@ -307,12 +307,6 @@ class LibraryStatisticsEngine:
         return " AND ".join(conditions) or "1 = 1", params
 
     @staticmethod
-    def _distinct_expr(columns, alias, name):
-        if name not in columns:
-            return "0"
-        return f"COUNT(DISTINCT CASE WHEN TRIM(COALESCE({alias}.{name}, '')) != '' THEN TRIM({alias}.{name}) END)"
-
-    @staticmethod
     def _library_distribution(connection, table, alias, where_sql, params, size_expr):
         tables = connection.tables()
         columns = connection.columns(table)
@@ -483,10 +477,11 @@ class LibraryStatisticsEngine:
         should_stop,
         include_taxonomy=False,
         year_column="",
+        distinct_fields=(),
     ):
         available = [field for field in fields if field[0] in columns]
         if not available:
-            return [], [], [], [], []
+            return [], [], [], [], [], {}
         select_columns = [f"{alias}.{name} AS {name}" for name, unused_label, unused_type in available]
         if year_column and year_column in columns and year_column not in {field[0] for field in available}:
             select_columns.append(f"{alias}.{year_column} AS {year_column}")
@@ -501,6 +496,11 @@ class LibraryStatisticsEngine:
         tag_counter = Counter()
         tag_labels = {}
         year_counter = Counter()
+        distinct_values = {
+            name: set()
+            for name in distinct_fields
+            if name in columns
+        }
         current = 0
         denominator = max(1, len(available))
         while True:
@@ -532,6 +532,10 @@ class LibraryStatisticsEngine:
                     year = _year_from_value(row.get(year_column))
                     if year:
                         year_counter[year] += 1
+                for name, values in distinct_values.items():
+                    value = str(row.get(name) or "").strip()
+                    if value:
+                        values.add(value)
             current += len(rows)
             self._check_cancel(should_stop)
             percent = 20 + round((current / max(1, total)) * 50)
@@ -560,6 +564,7 @@ class LibraryStatisticsEngine:
             _top_tokens(genre_counter, genre_labels),
             _top_tokens(tag_counter, tag_labels, limit=20),
             year_rows,
+            {name: len(values) for name, values in distinct_values.items()},
         )
 
     def _analyze_books(self, connection, target, library_id, on_progress, should_stop):
@@ -568,8 +573,6 @@ class LibraryStatisticsEngine:
         library_column = "library_id" if "library_id" in columns else ""
         where_sql, params = self._where("b", active_column, library_column, library_id)
         library_name = self._resolve_library(connection, library_id)
-        author_count = self._distinct_expr(columns, "b", "author")
-        publisher_count = self._distinct_expr(columns, "b", "publisher")
         storage = "COALESCE(SUM(COALESCE(b.file_size, 0)), 0)" if "file_size" in columns else "0"
         current_year = str(datetime.now().year)
         added_this_year = (
@@ -581,11 +584,12 @@ class LibraryStatisticsEngine:
         if "created_at" in columns:
             summary_params.append(f"{current_year}-01-01 00:00:00")
         summary_params.extend(params)
+        self._notify(on_progress, "summary", 3, 100, "도서 수와 저장 용량을 집계하고 있습니다.")
         row = connection.execute(
             f"""
             SELECT COUNT(*) AS total_items,
-                   {author_count} AS total_authors,
-                   {publisher_count} AS total_publishers,
+                   0 AS total_authors,
+                   0 AS total_publishers,
                    {storage} AS storage_bytes,
                    {added_this_year} AS added_this_year
             FROM books b
@@ -627,7 +631,7 @@ class LibraryStatisticsEngine:
             "COALESCE(SUM(COALESCE(b.file_size, 0)), 0)" if "file_size" in columns else "0",
         )
         self._check_cancel(should_stop)
-        metadata, missing, genres, tags, years = self._metadata_stream(
+        metadata, missing, genres, tags, years, distinct_counts = self._metadata_stream(
             connection,
             "books",
             "b",
@@ -640,7 +644,10 @@ class LibraryStatisticsEngine:
             should_stop,
             include_taxonomy=True,
             year_column="release_date",
+            distinct_fields=("author", "publisher"),
         )
+        summary["total_authors"] = int(distinct_counts.get("author") or 0)
+        summary["total_publishers"] = int(distinct_counts.get("publisher") or 0)
         self._notify(on_progress, "ranking", 80, 100, "대용량 도서와 독서 진행 상태를 집계하고 있습니다.")
         title_expr = "b.title" if "title" in columns else "''"
         series_expr = "b.series_name" if "series_name" in columns else "''"
@@ -702,8 +709,6 @@ class LibraryStatisticsEngine:
         library_column = "library_id" if "library_id" in columns else ""
         where_sql, params = self._where("a", active_column, library_column, library_id)
         library_name = self._resolve_library(connection, library_id)
-        author_count = self._distinct_expr(columns, "a", "author")
-        publisher_count = self._distinct_expr(columns, "a", "publisher")
         current_year = str(datetime.now().year)
         added_this_year = (
             "SUM(CASE WHEN a.created_at >= ? THEN 1 ELSE 0 END)"
@@ -714,12 +719,13 @@ class LibraryStatisticsEngine:
         if "created_at" in columns:
             summary_params.append(f"{current_year}-01-01 00:00:00")
         summary_params.extend(params)
+        self._notify(on_progress, "summary", 3, 100, "오디오북 수와 재생 시간을 집계하고 있습니다.")
         row = connection.execute(
             f"""
             SELECT COUNT(*) AS total_items,
                    0 AS total_series,
-                   {author_count} AS total_authors,
-                   {publisher_count} AS total_publishers,
+                   0 AS total_authors,
+                   0 AS total_publishers,
                    {added_this_year} AS added_this_year,
                    {('COALESCE(SUM(COALESCE(a.total_duration, 0)), 0)' if 'total_duration' in columns else '0')} AS total_duration
             FROM audiobooks a
@@ -801,7 +807,7 @@ class LibraryStatisticsEngine:
                         params,
                     ).fetchall()
                 ]
-        metadata, missing, unused_genres, unused_tags, years = self._metadata_stream(
+        metadata, missing, unused_genres, unused_tags, years, distinct_counts = self._metadata_stream(
             connection,
             "audiobooks",
             "a",
@@ -814,7 +820,10 @@ class LibraryStatisticsEngine:
             should_stop,
             include_taxonomy=False,
             year_column="premiered",
+            distinct_fields=("author", "publisher"),
         )
+        summary["total_authors"] = int(distinct_counts.get("author") or 0)
+        summary["total_publishers"] = int(distinct_counts.get("publisher") or 0)
         self._notify(on_progress, "ranking", 80, 100, "대용량 오디오북과 청취 상태를 집계하고 있습니다.")
         library_join = ""
         library_name_expr = "''"
