@@ -87,6 +87,15 @@ except Exception as error:
     P.logger.error(f"BookOasis Mate 변경 이벤트 모델을 초기화하지 못했습니다: {error}")
     P.logger.error(traceback.format_exc())
 
+P.library_statistics_model = None
+try:
+    from .model_library_statistics import ModelLibraryStatisticsSnapshot
+
+    P.library_statistics_model = ModelLibraryStatisticsSnapshot
+except Exception as error:
+    P.logger.error(f"BookOasis Mate 통계 스냅샷 모델을 초기화하지 못했습니다: {error}")
+    P.logger.error(traceback.format_exc())
+
 from .mod_main import ModuleMain
 from .mod_database_migration import ModuleDatabaseMigration
 from .mod_gdrive_scan import ModuleGDriveScan

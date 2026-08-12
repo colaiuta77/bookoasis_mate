@@ -208,6 +208,7 @@ class StatusWriter:
                 "failed_count": failed_count,
                 "progress_percent": min(100, round(current * 100 / total)) if total else 0,
                 "message": f"도서 {current:,}/{total:,}권을 처리했습니다.",
+                "last_book_id": int(book_id),
             }
         )
         if not success:
@@ -412,6 +413,7 @@ def _scan_book_with_retry(client, book_id, db_type, stop_file, max_attempts=3):
 
 def _run_batch_book_rescan(config, writer, stop_file):
     db_type = str(config.get("db_type") or "general")
+    issue_filter = dict(config.get("issue_filter") or {})
     book_ids = [
         int(value)
         for value in config.get("book_ids") or []
@@ -423,10 +425,39 @@ def _run_batch_book_rescan(config, writer, stop_file):
             "source": str(config.get("source") or ""),
             "source_label": str(config.get("source_label") or "검색 결과"),
             "total": len(book_ids),
-            "message": "BookOasis 관리자 API에 연결하고 있습니다.",
+            "message": (
+                "문제 도서 재스캔 대상을 집계하고 있습니다."
+                if issue_filter
+                else "BookOasis 관리자 API에 연결하고 있습니다."
+            ),
         }
     )
     writer._save(force=True)
+    db_settings = config.get("db_settings") or {
+        "db_engine": "sqlite",
+        f"{db_type}_db_path": config.get("db_path"),
+    }
+    engine = BookOasisMateEngine(db_settings)
+    if issue_filter:
+        total = engine.count_issues(
+            db_type=db_type,
+            library_id=issue_filter.get("library_id"),
+            issue_type=issue_filter.get("issue_type", "all"),
+            search=issue_filter.get("search", ""),
+        )
+        writer.status.update(
+            {
+                "stage": "target_count",
+                "total": total,
+                "message": f"문제 도서 재스캔 대상 {total:,}권을 확인했습니다.",
+            }
+        )
+        writer._append_log(writer.status["message"])
+        writer._save(force=True)
+        if total == 0:
+            writer.complete_batch_rescan(stopped=False)
+            return
+
     client = BookOasisClient(
         config.get("bookoasis_url"),
         config.get("api_timeout", 30),
@@ -438,41 +469,56 @@ def _run_batch_book_rescan(config, writer, stop_file):
         raise RuntimeError(login.get("message") or "BookOasis 관리자 로그인에 실패했습니다.")
 
     consecutive_transport_failures = 0
-    db_settings = config.get("db_settings") or {
-        "db_engine": "sqlite",
-        f"{db_type}_db_path": config.get("db_path"),
-    }
-    with closing(_open_book_database(db_settings, db_type)) as connection:
-        for book_id in book_ids:
-            if stop_file.exists():
-                writer.complete_batch_rescan(stopped=True)
-                return
-            row = connection.execute(
-                "SELECT title FROM books WHERE id = ?",
-                (book_id,),
-            ).fetchone()
-            title = str(row["title"] or "") if row else ""
-            result = _scan_book_with_retry(
-                client,
-                book_id,
-                db_type,
-                stop_file,
-                max_attempts=3,
-            )
-            success = bool(result.get("success"))
-            message = result.get("message") or result.get("error") or (
-                "재스캔 완료" if success else "재스캔 실패"
-            )
-            writer.batch_rescan_progress(book_id, title, success, message)
-            if success or not result.get("retryable"):
-                consecutive_transport_failures = 0
-            else:
-                consecutive_transport_failures += 1
-                if consecutive_transport_failures >= 10:
-                    raise RuntimeError(
-                        "BookOasis API 응답이 10권 연속 실패하여 일괄 재스캔을 중단했습니다. "
-                        "BookOasis 상태와 네트워크를 확인한 뒤 다시 실행해 주세요."
-                    )
+    def process_book(book_id, title):
+        nonlocal consecutive_transport_failures
+        result = _scan_book_with_retry(
+            client,
+            book_id,
+            db_type,
+            stop_file,
+            max_attempts=3,
+        )
+        success = bool(result.get("success"))
+        message = result.get("message") or result.get("error") or (
+            "재스캔 완료" if success else "재스캔 실패"
+        )
+        writer.batch_rescan_progress(book_id, title, success, message)
+        if success or not result.get("retryable"):
+            consecutive_transport_failures = 0
+        else:
+            consecutive_transport_failures += 1
+            if consecutive_transport_failures >= 10:
+                raise RuntimeError(
+                    "BookOasis API 응답이 10권 연속 실패하여 일괄 재스캔을 중단했습니다. "
+                    "BookOasis 상태와 네트워크를 확인한 뒤 다시 실행해 주세요."
+                )
+
+    if issue_filter:
+        for batch in engine.iter_issue_book_batches(
+            db_type=db_type,
+            library_id=issue_filter.get("library_id"),
+            issue_type=issue_filter.get("issue_type", "all"),
+            search=issue_filter.get("search", ""),
+            after_id=int(issue_filter.get("after_id") or 0),
+            batch_size=int(issue_filter.get("batch_size") or 500),
+        ):
+            for item in batch:
+                if stop_file.exists():
+                    writer.complete_batch_rescan(stopped=True)
+                    return
+                process_book(int(item["id"]), str(item.get("title") or ""))
+    else:
+        with closing(_open_book_database(db_settings, db_type)) as connection:
+            for book_id in book_ids:
+                if stop_file.exists():
+                    writer.complete_batch_rescan(stopped=True)
+                    return
+                row = connection.execute(
+                    "SELECT title FROM books WHERE id = ?",
+                    (book_id,),
+                ).fetchone()
+                title = str(row["title"] or "") if row else ""
+                process_book(book_id, title)
     writer.complete_batch_rescan(stopped=False)
 
 

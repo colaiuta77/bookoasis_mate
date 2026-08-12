@@ -1,4 +1,6 @@
 # BookOasis 라이브러리의 도서·메타데이터·용량 분포를 읽기 전용으로 집계합니다.
+import hashlib
+import json
 import re
 import time
 from collections import Counter
@@ -159,6 +161,91 @@ class LibraryStatisticsEngine:
                 "libraries": libraries,
             }
 
+    def source_fingerprint(self, db_type="general", library_id=None):
+        target = self._target(db_type)
+        selected_library_id = self._selected_library_id(library_id)
+        with closing(self.database_adapter.connect(target)) as connection:
+            tables = connection.tables()
+            if target.db_type == "audiobook" and "audiobooks" in tables:
+                table = "audiobooks"
+                alias = "a"
+                progress_table = "audiobook_progress"
+                progress_time = "last_listened_at"
+            elif "books" in tables:
+                table = "books"
+                alias = "b"
+                progress_table = "user_progress"
+                progress_time = "last_read_at"
+            else:
+                raise RuntimeError("통계 원본 테이블을 찾을 수 없습니다.")
+            columns = connection.columns(table)
+            where_sql, params = self._where(
+                alias,
+                "is_deleted" if "is_deleted" in columns else "",
+                "library_id" if "library_id" in columns else "",
+                selected_library_id,
+            )
+            version_select = ["COUNT(*) AS source_rows", f"MAX({alias}.id) AS max_id"]
+            for column in ("created_at", "cover_updated_at", "file_mtime"):
+                if column in columns:
+                    version_select.append(f"MAX({alias}.{column}) AS max_{column}")
+            row = connection.execute(
+                f"SELECT {', '.join(version_select)} FROM {table} {alias} "
+                f"WHERE {where_sql}",
+                params,
+            ).fetchone()
+            payload = {key: row[key] for key in row.keys()}
+            if "libraries" in tables:
+                library_columns = connection.columns("libraries")
+                if "last_scanned_at" in library_columns:
+                    if selected_library_id is None:
+                        library_row = connection.execute(
+                            "SELECT MAX(last_scanned_at) AS last_scanned_at FROM libraries"
+                        ).fetchone()
+                    else:
+                        library_row = connection.execute(
+                            "SELECT last_scanned_at FROM libraries WHERE id = ?",
+                            (selected_library_id,),
+                        ).fetchone()
+                    payload["last_scanned_at"] = (
+                        library_row["last_scanned_at"] if library_row else None
+                    )
+            if progress_table in tables:
+                progress_columns = connection.columns(progress_table)
+                if progress_time in progress_columns:
+                    progress_row = connection.execute(
+                        f"SELECT COUNT(*) AS progress_rows, "
+                        f"MAX({progress_time}) AS latest_progress FROM {progress_table}"
+                    ).fetchone()
+                    payload["progress_rows"] = progress_row["progress_rows"]
+                    payload["latest_progress"] = progress_row["latest_progress"]
+            if table == "audiobooks" and "audiobook_tracks" in tables:
+                track_row = connection.execute(
+                    "SELECT COUNT(*) AS track_rows, MAX(id) AS max_track_id "
+                    "FROM audiobook_tracks"
+                ).fetchone()
+                payload["track_rows"] = track_row["track_rows"]
+                payload["max_track_id"] = track_row["max_track_id"]
+
+        identity = {
+            "engine": target.engine,
+            "database": target.database or target.path,
+            "db_type": target.db_type,
+            "library_id": selected_library_id,
+            "version": payload,
+        }
+        encoded = json.dumps(
+            identity,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+        return {
+            **identity,
+            "source_rows": int(payload.get("source_rows") or 0),
+            "fingerprint": hashlib.sha256(encoded).hexdigest(),
+        }
+
     def analyze(self, db_type="general", library_id=None, on_progress=None, should_stop=None):
         started = time.monotonic()
         target = self._target(db_type)
@@ -209,7 +296,9 @@ class LibraryStatisticsEngine:
         conditions = []
         params = []
         if active_column:
-            conditions.append(f"COALESCE({alias}.{active_column}, 0) = 0")
+            conditions.append(
+                f"({alias}.{active_column} = 0 OR {alias}.{active_column} IS NULL)"
+            )
         if library_id is not None:
             if not library_column:
                 raise ValueError("보관함 필터를 지원하지 않는 DB 스키마입니다.")
@@ -287,6 +376,16 @@ class LibraryStatisticsEngine:
             item_key = "book_id"
         if table not in connection.tables():
             return {"not_started": 0, "in_progress": 0, "completed": 0, "started": 0}
+        progress_columns = connection.columns(table)
+        activity_parts = ["COALESCE(p.is_completed, 0) = 1"]
+        if media_kind == "audiobook":
+            if "current_time" in progress_columns:
+                activity_parts.append("COALESCE(p.current_time, 0) > 0")
+            if "total_progress_pct" in progress_columns:
+                activity_parts.append("COALESCE(p.total_progress_pct, 0) > 0")
+        elif "pages_read" in progress_columns:
+            activity_parts.append("COALESCE(p.pages_read, 0) > 0")
+        activity = "(" + " OR ".join(activity_parts) + ")"
         total_row = connection.execute(
             f"SELECT COUNT(*) AS total FROM {item_table} {item_alias} WHERE {where_sql}",
             params,
@@ -301,7 +400,7 @@ class LibraryStatisticsEngine:
                 SELECT p.{item_key} AS item_id, MAX(COALESCE(p.is_completed, 0)) AS completed
                 FROM {table} p
                 JOIN {item_table} {item_alias} ON {item_alias}.id = p.{item_key}
-                WHERE {where_sql}
+                WHERE {where_sql} AND {activity}
                 GROUP BY p.{item_key}
             ) progress
             """,
@@ -316,6 +415,59 @@ class LibraryStatisticsEngine:
             "completed": completed,
             "started": started,
         }
+
+    @staticmethod
+    def _series_count(connection, library_id):
+        tables = connection.tables()
+        if {"series_summary", "series_summary_state"}.issubset(tables):
+            state_columns = connection.columns("series_summary_state")
+            summary_columns = connection.columns("series_summary")
+            if "is_ready" in state_columns and "library_id" in summary_columns:
+                state = connection.execute(
+                    "SELECT is_ready FROM series_summary_state WHERE id = 1"
+                ).fetchone()
+                if state is not None and int(state["is_ready"] or 0) == 1:
+                    if library_id is None:
+                        row = connection.execute(
+                            "SELECT COUNT(*) AS series_count FROM series_summary"
+                        ).fetchone()
+                    else:
+                        row = connection.execute(
+                            "SELECT COUNT(*) AS series_count "
+                            "FROM series_summary WHERE library_id = ?",
+                            (library_id,),
+                        ).fetchone()
+                    return int(row["series_count"] or 0)
+
+        book_columns = connection.columns("books")
+        conditions = (
+            ["(b.is_deleted = 0 OR b.is_deleted IS NULL)"]
+            if "is_deleted" in book_columns
+            else ["1 = 1"]
+        )
+        params = []
+        if library_id is not None:
+            conditions.append("b.library_id = ?")
+            params.append(library_id)
+        series_key = (
+            "COALESCE(NULLIF(b.series_name, ''), b.title)"
+            if "series_name" in book_columns
+            else "b.title"
+        )
+        row = connection.execute(
+            f"""
+            SELECT COUNT(*) AS series_count
+            FROM (
+                SELECT 1
+                FROM books b
+                WHERE {' AND '.join(conditions)}
+                GROUP BY {('b.library_id' if 'library_id' in book_columns else '0')},
+                         {series_key}
+            ) AS grouped_series
+            """,
+            params,
+        ).fetchone()
+        return int(row["series_count"] or 0)
 
     def _metadata_stream(
         self,
@@ -416,7 +568,6 @@ class LibraryStatisticsEngine:
         library_column = "library_id" if "library_id" in columns else ""
         where_sql, params = self._where("b", active_column, library_column, library_id)
         library_name = self._resolve_library(connection, library_id)
-        series_count = self._distinct_expr(columns, "b", "series_name")
         author_count = self._distinct_expr(columns, "b", "author")
         publisher_count = self._distinct_expr(columns, "b", "publisher")
         storage = "COALESCE(SUM(COALESCE(b.file_size, 0)), 0)" if "file_size" in columns else "0"
@@ -433,7 +584,6 @@ class LibraryStatisticsEngine:
         row = connection.execute(
             f"""
             SELECT COUNT(*) AS total_items,
-                   {series_count} AS total_series,
                    {author_count} AS total_authors,
                    {publisher_count} AS total_publishers,
                    {storage} AS storage_bytes,
@@ -444,6 +594,7 @@ class LibraryStatisticsEngine:
             summary_params,
         ).fetchone()
         summary = {key: int(row[key] or 0) for key in row.keys()}
+        summary["total_series"] = self._series_count(connection, library_id)
         total = summary["total_items"]
         self._notify(on_progress, "distribution", 10, 100, "포맷과 보관함 분포를 집계하고 있습니다.")
         format_rows = []
@@ -587,17 +738,6 @@ class LibraryStatisticsEngine:
             track_params = list(params)
             track_size = "COALESCE(t.file_size, 0)" if "file_size" in track_columns else "0"
             track_format = "LOWER(TRIM(COALESCE(t.format, '')))" if "format" in track_columns else "''"
-            track_summary = connection.execute(
-                f"""
-                SELECT COUNT(*) AS total_tracks, COALESCE(SUM({track_size}), 0) AS storage_bytes
-                FROM audiobook_tracks t
-                JOIN audiobooks a ON a.id = t.audiobook_id
-                WHERE {track_filter}
-                """,
-                track_params,
-            ).fetchone()
-            summary["total_tracks"] = int(track_summary["total_tracks"] or 0)
-            summary["storage_bytes"] = int(track_summary["storage_bytes"] or 0)
             format_rows = [
                 {
                     "label": str(item["format_name"] or "알 수 없음").upper(),
@@ -617,35 +757,50 @@ class LibraryStatisticsEngine:
                     track_params,
                 ).fetchall()
             ]
+            summary["total_tracks"] = sum(item["count"] for item in format_rows)
+            summary["storage_bytes"] = sum(
+                item["size_bytes"] for item in format_rows
+            )
         self._notify(on_progress, "distribution", 15, 100, "오디오 포맷과 보관함 분포를 집계했습니다.")
-        library_rows = self._library_distribution(
-            connection,
-            "audiobooks",
-            "a",
-            where_sql,
-            params,
-            "0",
-        )
-        if library_rows and "audiobook_tracks" in connection.tables() and "library_id" in columns:
-            track_columns = connection.columns("audiobook_tracks")
-            if "file_size" in track_columns:
-                size_rows = connection.execute(
-                    f"""
-                    SELECT a.library_id, COALESCE(SUM(COALESCE(t.file_size, 0)), 0) AS size_bytes
-                    FROM audiobooks a
-                    LEFT JOIN audiobook_tracks t ON t.audiobook_id = a.id
-                    WHERE {where_sql}
-                    GROUP BY a.library_id
-                    """,
-                    params,
-                ).fetchall()
-                library_sizes = {
-                    int(item["library_id"]): int(item["size_bytes"] or 0)
-                    for item in size_rows
-                    if item["library_id"] is not None
-                }
-                for item in library_rows:
-                    item["size_bytes"] = library_sizes.get(item["id"], 0)
+        library_rows = []
+        if "libraries" in connection.tables() and "library_id" in columns:
+            library_columns = connection.columns("libraries")
+            if {"id", "name"}.issubset(library_columns):
+                track_join = ""
+                size_expr = "0"
+                if "audiobook_tracks" in connection.tables():
+                    track_columns = connection.columns("audiobook_tracks")
+                    if "file_size" in track_columns:
+                        track_join = """
+                            LEFT JOIN (
+                                SELECT audiobook_id,
+                                       SUM(COALESCE(file_size, 0)) AS size_bytes
+                                FROM audiobook_tracks
+                                GROUP BY audiobook_id
+                            ) track_sizes ON track_sizes.audiobook_id = a.id
+                        """
+                        size_expr = "COALESCE(SUM(track_sizes.size_bytes), 0)"
+                library_rows = [
+                    {
+                        "id": int(item["id"]),
+                        "name": str(item["name"] or ""),
+                        "count": int(item["item_count"] or 0),
+                        "size_bytes": int(item["size_bytes"] or 0),
+                    }
+                    for item in connection.execute(
+                        f"""
+                        SELECT l.id, l.name, COUNT(*) AS item_count,
+                               {size_expr} AS size_bytes
+                        FROM audiobooks a
+                        JOIN libraries l ON l.id = a.library_id
+                        {track_join}
+                        WHERE {where_sql}
+                        GROUP BY l.id, l.name
+                        ORDER BY item_count DESC, l.name
+                        """,
+                        params,
+                    ).fetchall()
+                ]
         metadata, missing, unused_genres, unused_tags, years = self._metadata_stream(
             connection,
             "audiobooks",

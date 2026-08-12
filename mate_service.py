@@ -41,6 +41,7 @@ GAP_CACHE_SECONDS = 300
 GAP_CACHE_LIMIT = 8
 ISSUE_CACHE_SECONDS = 15
 ISSUE_CACHE_LIMIT = 32
+LIBRARY_STATISTICS_SNAPSHOT_SECONDS = 21600
 
 
 def _format_number_ranges(values):
@@ -151,6 +152,7 @@ class BookOasisMateService:
         self._gap_cache = {}
         self._gap_analysis_lock = threading.Lock()
         self._issue_cache = {}
+        self._issue_count_cache = {}
         self._issue_query_lock = threading.Lock()
         self._admin_client = None
         self._admin_client_fingerprint = None
@@ -171,6 +173,7 @@ class BookOasisMateService:
         self._library_statistics_stop = threading.Event()
         self._library_statistics_started_monotonic = None
         self._library_statistics_status = self._empty_library_statistics_status()
+        self._library_statistics_snapshot_checked = False
         self._migration_stop = threading.Event()
         self._migration_process = None
         self._migration_status_path = None
@@ -307,6 +310,7 @@ class BookOasisMateService:
             "result": None,
             "error": "",
             "stopped": False,
+            "cached": False,
         }
 
     def _debug(self, event, **fields):
@@ -474,10 +478,20 @@ class BookOasisMateService:
             self._cover_issue_cache = None
             self._gap_cache = {}
             self._issue_cache = {}
+            self._issue_count_cache = {}
             if self._report_status.get("is_working") != "run":
                 self._report_status = self._empty_report_status()
             if self._library_statistics_status.get("is_working") != "run":
                 self._library_statistics_status = self._empty_library_statistics_status()
+                self._library_statistics_snapshot_checked = False
+        snapshot_model = getattr(self.P, "library_statistics_model", None)
+        if snapshot_model is not None and snapshot_model.available():
+            try:
+                snapshot_model.delete_all()
+            except Exception as error:
+                self.P.logger.warning(
+                    f"BookOasis Mate 통계 스냅샷 초기화 실패: {error}"
+                )
         self._debug("상태 요약 캐시 초기화")
 
     def library_statistics_catalog(self, db_type="general"):
@@ -492,6 +506,7 @@ class BookOasisMateService:
         return data
 
     def library_statistics_status(self):
+        self._restore_library_statistics_snapshot()
         with self._lock:
             status = copy.deepcopy(self._library_statistics_status)
             if (
@@ -503,6 +518,63 @@ class BookOasisMateService:
                     1,
                 )
             return status
+
+    def _restore_library_statistics_snapshot(self):
+        with self._lock:
+            if self._library_statistics_snapshot_checked:
+                return
+            if self._library_statistics_status.get("is_working") != "wait":
+                self._library_statistics_snapshot_checked = True
+                return
+            self._library_statistics_snapshot_checked = True
+        snapshot_model = getattr(self.P, "library_statistics_model", None)
+        if snapshot_model is None or not snapshot_model.available():
+            return
+        try:
+            snapshot = snapshot_model.latest()
+            if not snapshot or not snapshot.get("result"):
+                return
+            created_at = datetime.fromisoformat(str(snapshot.get("created_at") or ""))
+            age_seconds = max(0, (datetime.now() - created_at).total_seconds())
+            if age_seconds > LIBRARY_STATISTICS_SNAPSHOT_SECONDS:
+                return
+            source = LibraryStatisticsEngine(self.settings()).source_fingerprint(
+                db_type=snapshot.get("db_type") or "general",
+                library_id=snapshot.get("library_id") or None,
+            )
+            if source.get("fingerprint") != snapshot.get("source_fingerprint"):
+                return
+            result = snapshot["result"]
+            restored = self._empty_library_statistics_status()
+            restored.update(
+                {
+                    "is_working": "done",
+                    "db_type": snapshot.get("db_type") or "general",
+                    "library_id": snapshot.get("library_id") or "",
+                    "library_name": result.get("library_name") or "전체 보관함",
+                    "stage": "complete",
+                    "current": 100,
+                    "total": 100,
+                    "progress_percent": 100,
+                    "finished_at": snapshot.get("created_at") or "",
+                    "message": "저장된 라이브러리 통계 결과를 표시합니다.",
+                    "result": result,
+                    "cached": True,
+                }
+            )
+            with self._lock:
+                if self._library_statistics_status.get("is_working") == "wait":
+                    self._library_statistics_status = restored
+            self._debug(
+                "라이브러리 통계 스냅샷 복원",
+                db_type=restored["db_type"],
+                library_id=restored["library_id"] or "all",
+                age_seconds=round(age_seconds, 1),
+            )
+        except Exception as error:
+            self.P.logger.warning(
+                f"BookOasis Mate 통계 스냅샷 복원 실패: {error}"
+            )
 
     def _library_statistics_progress(self, stage, current, total, message):
         with self._lock:
@@ -520,12 +592,20 @@ class BookOasisMateService:
 
     def _run_library_statistics(self, settings, db_type, library_id):
         try:
-            result = LibraryStatisticsEngine(settings).analyze(
+            engine = LibraryStatisticsEngine(settings)
+            result = engine.analyze(
                 db_type=db_type,
                 library_id=library_id,
                 on_progress=self._library_statistics_progress,
                 should_stop=self._library_statistics_stop.is_set,
             )
+            source = engine.source_fingerprint(
+                db_type=db_type,
+                library_id=library_id,
+            )
+            snapshot_model = getattr(self.P, "library_statistics_model", None)
+            if snapshot_model is not None and snapshot_model.available():
+                snapshot_model.store(result, source)
             with self._lock:
                 status = self._library_statistics_status
                 status.update(
@@ -543,6 +623,7 @@ class BookOasisMateService:
                         "message": "라이브러리 통계 분석을 완료했습니다.",
                         "result": result,
                         "error": "",
+                        "cached": False,
                     }
                 )
             self._debug(
@@ -629,6 +710,7 @@ class BookOasisMateService:
         self._library_statistics_stop.clear()
         with self._lock:
             self._library_statistics_status = initial
+            self._library_statistics_snapshot_checked = True
             self._library_statistics_started_monotonic = time.monotonic()
             thread = threading.Thread(
                 target=self._run_library_statistics,
@@ -840,6 +922,13 @@ class BookOasisMateService:
             str(settings.get("bookoasis_url") or ""),
             str(bool(settings.get("check_missing_isbn"))).lower(),
         )
+        count_cache_key = (
+            cache_key[0],
+            cache_key[1],
+            cache_key[2],
+            cache_key[3],
+            *cache_key[6:],
+        )
 
         def cached_value():
             with self._lock:
@@ -855,7 +944,33 @@ class BookOasisMateService:
             with self._issue_query_lock:
                 data = cached_value()
                 if data is None:
-                    data = self.engine(settings).list_issues(page_size=page_size, **kwargs)
+                    with self._lock:
+                        count_entry = self._issue_count_cache.get(count_cache_key)
+                        known_total = (
+                            int(count_entry["total"])
+                            if count_entry
+                            and time.monotonic() - count_entry["created_at"]
+                            <= ISSUE_CACHE_SECONDS
+                            else None
+                        )
+                    engine = self.engine(settings)
+                    if known_total is None:
+                        known_total = engine.count_issues(
+                            db_type=kwargs.get("db_type", "general"),
+                            library_id=kwargs.get("library_id"),
+                            issue_type=kwargs.get("issue_type", "all"),
+                            search=kwargs.get("search", ""),
+                        )
+                        with self._lock:
+                            self._issue_count_cache[count_cache_key] = {
+                                "created_at": time.monotonic(),
+                                "total": int(known_total),
+                            }
+                    data = engine.list_issues(
+                        page_size=page_size,
+                        known_total=known_total,
+                        **kwargs,
+                    )
                     data["cache_hit"] = False
                     with self._lock:
                         now = time.monotonic()
@@ -873,6 +988,11 @@ class BookOasisMateService:
                         self._issue_cache[cache_key] = {
                             "created_at": now,
                             "data": copy.deepcopy(data),
+                        }
+                        self._issue_count_cache = {
+                            key: value
+                            for key, value in self._issue_count_cache.items()
+                            if now - value["created_at"] <= ISSUE_CACHE_SECONDS
                         }
         self._debug(
             "문제 도서 조회 완료",
@@ -2085,18 +2205,22 @@ class BookOasisMateService:
                 }
 
         if source == "issues":
-            book_ids = self.engine(settings).issue_book_ids(
-                db_type=db_type,
-                library_id=library_id,
-                issue_type=issue_type,
-                search=search,
-            )
+            book_ids = None
             source_label = "문제 도서"
             filter_summary = {
                 "library_id": str(library_id or ""),
                 "issue_type": str(issue_type or "all"),
                 "search": str(search or ""),
             }
+            resume_after_id = 0
+            resume_current = 0
+            if (
+                current_status.get("source") == "issues"
+                and current_status.get("is_working") in {"error", "stop"}
+                and current_status.get("filters") == filter_summary
+            ):
+                resume_after_id = int(current_status.get("last_book_id") or 0)
+                resume_current = int(current_status.get("current") or 0)
         else:
             book_ids = self.cover_issue_book_ids(
                 db_type=db_type,
@@ -2110,8 +2234,11 @@ class BookOasisMateService:
                 "mode": str(mode or "missing"),
                 "search": str(search or ""),
             }
-        book_ids = sorted({int(book_id) for book_id in book_ids if int(book_id or 0) > 0})
-        if not book_ids:
+        if book_ids is not None:
+            book_ids = sorted(
+                {int(book_id) for book_id in book_ids if int(book_id or 0) > 0}
+            )
+        if book_ids == []:
             return {
                 "started": False,
                 "message": "현재 검색 조건에 재스캔할 도서가 없습니다.",
@@ -2130,10 +2257,14 @@ class BookOasisMateService:
                 "source": source,
                 "source_label": source_label,
                 "db_type": db_type,
-                "current": 0,
-                "total": len(book_ids),
+                "current": resume_current if source == "issues" else 0,
+                "total": len(book_ids or []),
                 "started_at": started_at,
-                "message": f"{source_label} 검색 결과를 재스캔할 준비를 하고 있습니다.",
+                "message": (
+                    "문제 도서 재스캔 대상을 백그라운드에서 집계하고 있습니다."
+                    if source == "issues"
+                    else f"{source_label} 검색 결과를 재스캔할 준비를 하고 있습니다."
+                ),
                 "filters": filter_summary,
             }
         )
@@ -2161,7 +2292,6 @@ class BookOasisMateService:
                     "mariadb_write_timeout",
                 )
             },
-            "book_ids": book_ids,
             "source": source,
             "source_label": source_label,
             "bookoasis_url": settings.get("bookoasis_url"),
@@ -2169,6 +2299,22 @@ class BookOasisMateService:
             "bookoasis_password": settings.get("bookoasis_password"),
             "api_timeout": settings.get("api_timeout", 30),
         }
+        if source == "issues":
+            worker_config["issue_filter"] = {
+                "library_id": str(library_id or ""),
+                "issue_type": str(issue_type or "all"),
+                "search": str(search or ""),
+                "after_id": resume_after_id,
+                "batch_size": 500,
+            }
+            worker_config["db_settings"]["check_missing_isbn"] = bool(
+                settings.get("check_missing_isbn")
+            )
+            worker_config["db_settings"]["bookoasis_url"] = settings.get(
+                "bookoasis_url"
+            )
+        else:
+            worker_config["book_ids"] = book_ids
         try:
             process = self._launch_maintenance_worker(
                 paths,
@@ -2198,11 +2344,16 @@ class BookOasisMateService:
             pid=process.pid,
             source=source,
             db_type=db_type,
-            books=len(book_ids),
+            books=len(book_ids or []),
+        )
+        target_count_text = (
+            "백그라운드 집계 후"
+            if source == "issues"
+            else f"{len(book_ids):,}권"
         )
         return {
             "started": True,
-            "message": f"검색 결과 {len(book_ids):,}권의 일괄 재스캔을 시작했습니다.",
+            "message": f"검색 결과 {target_count_text} 일괄 재스캔을 시작했습니다.",
             "status": self.batch_rescan_status(),
         }
 
