@@ -55,11 +55,11 @@ class BookOasisPluginManager:
         },
         {
             "id": "naverkakaoridi",
-            "name": "통합 웹툰/웹소설 검색",
+            "name": "네카리 웹북 검색",
             "description": "네이버·카카오·리디·노벨피아·문피아의 웹툰과 웹소설 메타데이터를 통합 검색해 도서에 적용합니다.",
             "repository": "https://github.com/javara999/naverkakaoridi",
             "ref": "main",
-            "catalog_version": "1.6.2",
+            "catalog_version": "1.6.3",
             "dependencies": [],
         },
         {
@@ -115,6 +115,15 @@ class BookOasisPluginManager:
             "repository": "https://github.com/yume-script/plugin_board",
             "ref": "main",
             "catalog_version": "1.0.0",
+            "dependencies": [],
+        },
+        {
+            "id": "my_reading_summary",
+            "name": "내 독서 요약",
+            "description": "개인별 독서 캘린더와 일간·월간 통계, 연속 독서일, 완독 현황을 전용 탭과 대시보드 위젯으로 표시합니다.",
+            "repository": "https://github.com/grandfoxx/my_reading_summary",
+            "ref": "master",
+            "catalog_version": "1.1.0",
             "dependencies": [],
         },
     )
@@ -601,21 +610,78 @@ class BookOasisPluginManager:
             return str(data.get("plugin version") or data.get("version") or "").strip()
         return str(data or "").strip()
 
+    @staticmethod
+    def _extract_provider_name(source, plugin_id):
+        try:
+            tree = ast.parse(str(source or ""))
+        except (SyntaxError, TypeError, ValueError):
+            return ""
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef):
+                continue
+            values = {}
+            for statement in node.body:
+                if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+                    continue
+                target = statement.targets[0]
+                value = statement.value
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id in {"id", "name"}
+                    and isinstance(value, ast.Constant)
+                    and isinstance(value.value, str)
+                ):
+                    values[target.id] = value.value.strip()
+            if values.get("id") != plugin_id:
+                continue
+            name = values.get("name", "")
+            if not name or len(name) > 200 or any(ord(char) < 32 for char in name):
+                return ""
+            return name
+        return ""
+
+    @classmethod
+    def _fetch_remote_metadata(cls, item):
+        version = cls._fetch_remote_version(item)
+        name = ""
+        try:
+            owner, repository = cls.parse_github_url(item["repository"])
+            ref = cls._validate_ref(item.get("ref"))
+            plugin_id = cls._validate_plugin_id(item.get("id"))
+            source_url = (
+                f"https://raw.githubusercontent.com/{owner}/{repository}/"
+                f"{quote(ref, safe='/')}/{plugin_id}.py"
+            )
+            request = Request(
+                source_url,
+                headers={"User-Agent": "BookOasis-Mate-Plugin-Manager/1"},
+            )
+            with urlopen(request, timeout=8) as response:
+                payload = response.read(524289)
+            if len(payload) <= 524288:
+                name = cls._extract_provider_name(
+                    payload.decode("utf-8-sig"),
+                    plugin_id,
+                )
+        except Exception:
+            name = ""
+        return {"version": version, "name": name}
+
     def catalog(self, settings, refresh_remote=False):
         installed = self._installed_catalog(settings)
         catalog_items = [copy.deepcopy(item) for item in self.CATALOG]
         catalog_items.extend(self._load_custom_catalog(settings))
-        remote_versions = {}
+        remote_metadata = {}
         remote_errors = {}
         if refresh_remote:
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = {
-                    executor.submit(self._fetch_remote_version, item): item["id"]
+                    executor.submit(self._fetch_remote_metadata, item): item["id"]
                     for item in catalog_items
                 }
                 for future, plugin_id in futures.items():
                     try:
-                        remote_versions[plugin_id] = future.result()
+                        remote_metadata[plugin_id] = future.result()
                     except Exception as error:
                         remote_errors[plugin_id] = str(error)[:240]
         result = []
@@ -625,7 +691,10 @@ class BookOasisPluginManager:
             item.update(local)
             item["installed"] = bool(local)
             item["installed_version"] = local.get("installed_version", "")
-            item["latest_version"] = remote_versions.get(item["id"]) or item["catalog_version"]
+            remote = remote_metadata.get(item["id"]) or {}
+            item["latest_version"] = remote.get("version") or item["catalog_version"]
+            if remote.get("name"):
+                item["name"] = remote["name"]
             item["version_error"] = remote_errors.get(item["id"], "")
             item["trusted"] = (
                 bool(item.get("verified"))
