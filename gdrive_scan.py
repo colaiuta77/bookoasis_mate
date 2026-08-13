@@ -212,25 +212,13 @@ def event_vfs_operations(event):
     previous = event.get("mapped_removed_path") or event.get("removed_path") or ""
     operations = []
 
-    def parent_or_self(path):
-        if not path:
-            return ""
-        return path if item_type == "directory" else posixpath.dirname(path) or "/"
-
     if action in {"move", "rename"}:
         if previous:
             operations.append(("forget", previous, item_type))
-            operations.append(("refresh", parent_or_self(previous), "directory"))
-        if current:
-            operations.append(("refresh", parent_or_self(current), "directory"))
     elif action == "delete":
         target = previous or current
         if target:
             operations.append(("forget", target, item_type))
-            operations.append(("refresh", parent_or_self(target), "directory"))
-    else:
-        if current:
-            operations.append(("refresh", parent_or_self(current), "directory"))
     result = []
     seen = set()
     for operation in operations:
@@ -556,6 +544,36 @@ class GDriveScanProcessor:
             for target in event.get("scan_targets", [])
             if not self.path_scan_callback or not target["path"]
         }
+        paths_by_library = {}
+        for event in prepared:
+            for target in event.get("scan_targets", []):
+                library = target["library"]
+                library_key = (library["db_type"], library["id"])
+                if library_key in fallback_libraries or not target["path"]:
+                    continue
+                paths_by_library.setdefault(library_key, set()).add(target["path"])
+
+        path_aliases = {}
+        for library_key, paths in paths_by_library.items():
+            parents = []
+            for relative_path in sorted(
+                paths,
+                key=lambda value: (value.count("/"), len(value), value),
+            ):
+                parent = next(
+                    (
+                        candidate
+                        for candidate in parents
+                        if relative_path == candidate
+                        or relative_path.startswith(f"{candidate.rstrip('/')}/")
+                    ),
+                    None,
+                )
+                if parent is None:
+                    parent = relative_path
+                    parents.append(relative_path)
+                path_aliases[library_key + (relative_path,)] = parent
+
         scan_requests = {}
         event_scan_keys = {}
         for event in prepared:
@@ -566,7 +584,11 @@ class GDriveScanProcessor:
                 if library_key in fallback_libraries:
                     request_key = ("library",) + library_key + ("",)
                 else:
-                    request_key = ("path",) + library_key + (target["path"],)
+                    relative_path = path_aliases.get(
+                        library_key + (target["path"],),
+                        target["path"],
+                    )
+                    request_key = ("path",) + library_key + (relative_path,)
                 scan_requests.setdefault(
                     request_key,
                     {"library": library, "event_ids": set()},
@@ -618,7 +640,7 @@ class GDriveScanProcessor:
                 "success": success,
                 "message": message,
                 "response": response,
-                "mode": mode,
+                "mode": response.get("mode") or mode,
                 "path": relative_path,
             }
 

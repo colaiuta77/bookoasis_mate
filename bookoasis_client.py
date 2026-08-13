@@ -76,7 +76,7 @@ class BookOasisClient:
             self._authenticated = False
             return self._admin_error(f"BookOasis 관리자 로그인 실패: {getattr(error, 'reason', error)}")
 
-    def _admin_request(self, path, method="GET", form=None, payload=None, query=None, retry=True):
+    def _admin_request(self, path, method="GET", form=None, payload=None, query=None, retry=True, timeout=None):
         login = self.login_admin()
         if not login.get("success"):
             return login
@@ -94,14 +94,15 @@ class BookOasisClient:
             headers["Content-Type"] = "application/x-www-form-urlencoded"
         request = Request(url, data=data, headers=headers, method=method)
         try:
-            with self._opener.open(request, timeout=self.timeout) as response:
+            request_timeout = self.timeout if timeout is None else max(1, min(int(timeout), 600))
+            with self._opener.open(request, timeout=request_timeout) as response:
                 return self._response_payload(response)
         except HTTPError as error:
             if error.code == 401 and retry:
                 self._authenticated = False
                 login = self.login_admin(force=True)
                 if login.get("success"):
-                    return self._admin_request(path, method=method, form=form, payload=payload, query=query, retry=False)
+                    return self._admin_request(path, method=method, form=form, payload=payload, query=query, retry=False, timeout=timeout)
             return self._admin_error(
                 self._http_error_message(error),
                 error.code,
@@ -154,6 +155,55 @@ class BookOasisClient:
     def metadata_plugins_manage(self):
         return self._admin_request("api/media/metadata/plugins/manage")
 
+    def plugin_load_status(self, token=""):
+        token = str(token or "").strip()
+        if not token:
+            return self._admin_request("api/media/plugins/load-status")
+        request = Request(
+            urljoin(f"{self.base_url}/", "api/webhook/plugins/status"),
+            headers={"Accept": "application/json", "X-Webhook-Token": token},
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                return self._response_payload(response)
+        except HTTPError as error:
+            return self._admin_error(self._http_error_message(error), error.code)
+        except (URLError, ValueError, OSError) as error:
+            return self._admin_error(
+                f"BookOasis 플러그인 상태 조회 실패: {getattr(error, 'reason', error)}",
+                retryable=True,
+            )
+
+    def toggle_plugin(self, plugin_id, enabled, db_type="general"):
+        plugin_id = str(plugin_id or "").strip()
+        if not plugin_id:
+            return self._admin_error("플러그인 ID가 비어 있습니다.")
+        return self._admin_request(
+            "api/media/metadata/plugins/toggle",
+            method="POST",
+            form={"type": db_type, "plugin_id": plugin_id, "enabled": "1" if enabled else "0"},
+        )
+
+    def save_plugin_config(self, plugin_id, config, db_type="general"):
+        plugin_id = str(plugin_id or "").strip()
+        if not plugin_id or not isinstance(config, dict):
+            return self._admin_error("플러그인 설정 요청이 올바르지 않습니다.")
+        return self._admin_request(
+            "api/media/metadata/plugins/save-config",
+            method="POST",
+            payload={"type": db_type, "plugin_id": plugin_id, "config": config},
+        )
+
+    def sample_update_plugin(self, plugin_id):
+        plugin_id = str(plugin_id or "").strip()
+        if not plugin_id:
+            return self._admin_error("플러그인 ID가 비어 있습니다.")
+        return self._admin_request(
+            "api/media/metadata/plugins/sample-update",
+            method="POST",
+            payload={"plugin_id": plugin_id},
+        )
+
     def permissions(self):
         return self._admin_request("api/admin/permissions")
 
@@ -182,7 +232,14 @@ class BookOasisClient:
             },
         )
 
-    def scan_library_path(self, library_id, relative_path, db_type="general", force=False):
+    def scan_library_path(
+        self,
+        library_id,
+        relative_path,
+        db_type="general",
+        force=False,
+        timeout=None,
+    ):
         library_id, error = self._valid_positive_id(library_id, "보관함 ID")
         if error:
             return error
@@ -207,6 +264,7 @@ class BookOasisClient:
                 "path": relative_path,
                 "force": "true" if force else "false",
             },
+            timeout=timeout,
         )
 
     def scan_all_libraries(self, db_type="general", force=False):
@@ -359,6 +417,53 @@ class BookOasisClient:
             return {"success": False, "message": self._http_error_message(error), "library_id": library_id, "db_type": db_type}
         except (URLError, ValueError, OSError) as error:
             return {"success": False, "message": f"재스캔 요청 실패: {getattr(error, 'reason', error)}", "library_id": library_id, "db_type": db_type}
+
+    def request_scan_path(self, token, library_id, relative_path, db_type="general", force=False, timeout=None):
+        if not self._valid_base_url():
+            return {"success": False, "message": "BookOasis URL이 올바르지 않습니다."}
+        token = str(token or "").strip()
+        if not token:
+            return {"success": False, "message": "WEBHOOK_TOKEN이 설정되지 않았습니다."}
+        library_id, error = self._valid_positive_id(library_id, "보관함 ID")
+        if error:
+            return error
+        db_type = self._valid_library_db_type(db_type)
+        if not db_type:
+            return {"success": False, "message": "DB 유형이 올바르지 않습니다."}
+        relative_path = str(relative_path or "").strip().replace("\\", "/")
+        parts = [part for part in relative_path.split("/") if part]
+        if not relative_path or relative_path.startswith("/") or ".." in parts:
+            return {"success": False, "message": "보관함 기준 상대 디렉터리 경로가 올바르지 않습니다."}
+        relative_path = posixpath.normpath(relative_path)
+        data = urlencode({
+            "token": token,
+            "library_id": library_id,
+            "type": db_type,
+            "force": "1" if force else "0",
+            "path": relative_path,
+        }).encode("utf-8")
+        request = Request(
+            urljoin(f"{self.base_url}/", "api/webhook/scan"),
+            data=data,
+            headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
+        )
+        request_timeout = self.timeout if timeout is None else max(1, min(int(timeout), 600))
+        try:
+            with urlopen(request, timeout=request_timeout) as response:
+                payload = self._response_payload(response)
+            mode = "full_webhook_compat" if "already_queued" in payload else "path_webhook"
+            return {
+                "success": bool(payload.get("success")),
+                "already_queued": bool(payload.get("already_queued")),
+                "message": payload.get("message") or "경로 스캔 요청을 처리했습니다.",
+                "library_id": library_id,
+                "db_type": db_type,
+                "mode": mode,
+            }
+        except HTTPError as error:
+            return {"success": False, "message": self._http_error_message(error), "http_status": error.code, "library_id": library_id, "db_type": db_type, "mode": "path_webhook"}
+        except (URLError, ValueError, OSError) as error:
+            return {"success": False, "message": f"경로 스캔 요청 실패: {getattr(error, 'reason', error)}", "retryable": True, "library_id": library_id, "db_type": db_type, "mode": "path_webhook"}
 
     def inspect_cover(self, relative_path):
         relative = str(relative_path or "").split("?", 1)[0].replace("\\", "/").strip().lstrip("/")

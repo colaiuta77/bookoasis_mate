@@ -15,6 +15,11 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
+try:
+    from .plugin_discovery import GitHubPluginDiscovery
+except ImportError:
+    from plugin_discovery import GitHubPluginDiscovery
+
 
 class PluginManagerError(RuntimeError):
     pass
@@ -171,6 +176,8 @@ class BookOasisPluginManager:
         self._job = None
         self._stop_event = threading.Event()
         self._prepared = {}
+        self._discovery = GitHubPluginDiscovery()
+        self._discovery_job = {"status": "idle", "message": "", "error": "", "started_at": "", "finished_at": ""}
 
     @staticmethod
     def _as_int(value, default, minimum, maximum):
@@ -209,6 +216,14 @@ class BookOasisPluginManager:
             * 1024,
             "max_files": cls._as_int(
                 raw.get("plugin_manager_max_files"), 2000, 10, 20000
+            ),
+            "discovery_topics": [
+                value.strip().lower()
+                for value in re.split(r"[,\r\n]+", str(raw.get("plugin_manager_discovery_topics") or "bookoasis-plugin"))
+                if value.strip()
+            ][:5],
+            "discovery_cache_hours": cls._as_int(
+                raw.get("plugin_manager_discovery_cache_hours"), 6, 1, 168
             ),
         }
 
@@ -301,6 +316,89 @@ class BookOasisPluginManager:
             "plugin_root": normalized["plugin_root"],
             "work_dir": normalized["work_dir"],
         }
+
+    def _discovery_cache_path(self, settings, create=False):
+        normalized = self.normalized_settings(settings)
+        if not normalized["work_dir"]:
+            if create:
+                raise PluginManagerError("플러그인 작업 디렉터리를 설정해 주세요.")
+            return None
+        root = Path(normalized["work_dir"]).expanduser().resolve(strict=False)
+        if create:
+            root.mkdir(parents=True, exist_ok=True)
+        return root / "github_discovery_cache.json"
+
+    def discovery(self, settings):
+        path = self._discovery_cache_path(settings)
+        payload = self._discovery.read_cache(path) if path else {}
+        installed = self._installed_catalog(settings)
+        items = []
+        for raw in payload.get("items", []):
+            if not isinstance(raw, dict) or not raw.get("id"):
+                continue
+            item = copy.deepcopy(raw)
+            local = installed.get(item["id"]) or {}
+            item.update(local)
+            item["installed"] = bool(local)
+            item["installed_version"] = local.get("installed_version", "")
+            items.append(item)
+        fetched_epoch = float(payload.get("fetched_at_epoch") or 0)
+        max_age = self.normalized_settings(settings)["discovery_cache_hours"] * 3600
+        return {
+            "items": items,
+            "topics": payload.get("topics", []),
+            "fetched_at": payload.get("fetched_at", ""),
+            "stale": not fetched_epoch or time.time() - fetched_epoch > max_age,
+        }
+
+    def discovery_status(self):
+        with self._lock:
+            return copy.deepcopy(self._discovery_job)
+
+    def start_discovery_refresh(self, settings):
+        with self._lock:
+            if self._discovery_job.get("status") == "running":
+                return copy.deepcopy(self._discovery_job)
+            self._discovery_job = {
+                "status": "running",
+                "message": "GitHub Topic에서 플러그인 후보를 찾고 있습니다.",
+                "error": "",
+                "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "finished_at": "",
+            }
+        snapshot = dict(settings or {})
+        threading.Thread(
+            target=self._run_discovery_refresh,
+            args=(snapshot,),
+            name="bookoasis-plugin-discovery",
+            daemon=True,
+        ).start()
+        return self.discovery_status()
+
+    def _run_discovery_refresh(self, settings):
+        try:
+            normalized = self.normalized_settings(settings)
+            payload = self._discovery.discover(normalized["discovery_topics"])
+            now = time.time()
+            payload.update({
+                "fetched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "fetched_at_epoch": now,
+            })
+            self._discovery.write_cache(self._discovery_cache_path(settings, create=True), payload)
+            with self._lock:
+                self._discovery_job.update({
+                    "status": "completed",
+                    "message": f"GitHub 플러그인 후보 {len(payload.get('items', []))}개를 확인했습니다.",
+                    "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                })
+        except Exception as error:
+            with self._lock:
+                self._discovery_job.update({
+                    "status": "failed",
+                    "message": "GitHub Topic 발견 작업에 실패했습니다.",
+                    "error": str(error)[:500],
+                    "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                })
 
     def _custom_catalog_path(self, settings, create=False):
         normalized = self.normalized_settings(settings)

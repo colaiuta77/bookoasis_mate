@@ -1486,6 +1486,112 @@ class BookOasisMateService:
         )
         return data
 
+    @staticmethod
+    def _plugin_secret_field(field):
+        key = str(field.get("key") or "").lower()
+        field_type = str(field.get("type") or "").lower()
+        return field_type in {"password", "secret"} or any(
+            marker in key for marker in ("password", "passwd", "token", "secret", "api_key", "apikey")
+        )
+
+    def plugin_management(self):
+        started = time.monotonic()
+        client = self.admin_client()
+        managed = client.metadata_plugins_manage()
+        if not managed.get("success"):
+            return managed
+        settings = self.settings()
+        load_data = client.plugin_load_status(settings.get("webhook_token"))
+        if not load_data.get("success") and str(settings.get("webhook_token") or "").strip():
+            admin_load_data = client.plugin_load_status()
+            if admin_load_data.get("success"):
+                load_data = admin_load_data
+        load_by_id = {
+            str(item.get("plugin_id") or ""): item
+            for item in load_data.get("statuses", [])
+            if isinstance(item, dict) and item.get("plugin_id")
+        }
+        plugins = []
+        for item in managed.get("plugins", []):
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            plugin_id = str(item["id"])
+            config = item.get("config") if isinstance(item.get("config"), dict) else {}
+            fields = []
+            secret_configured = False
+            schema = item.get("config_schema") if isinstance(item.get("config_schema"), list) else []
+            for raw_field in schema:
+                if not isinstance(raw_field, dict) or not raw_field.get("key"):
+                    continue
+                field = {
+                    key: raw_field.get(key)
+                    for key in ("key", "label", "type", "required", "description", "options", "placeholder", "default")
+                    if key in raw_field
+                }
+                key = str(raw_field["key"])
+                is_secret = self._plugin_secret_field(raw_field)
+                field["secret"] = is_secret
+                field["configured"] = bool(config.get(key))
+                field["value"] = "" if is_secret else config.get(key, raw_field.get("default", ""))
+                secret_configured = secret_configured or (is_secret and bool(config.get(key)))
+                fields.append(field)
+            load = load_by_id.get(plugin_id, {})
+            plugins.append({
+                "id": plugin_id,
+                "name": str(item.get("name") or plugin_id),
+                "enabled": bool(item.get("enabled")),
+                "is_searchable": bool(item.get("is_searchable", True)),
+                "load_status": str(load.get("status") or "unknown"),
+                "load_message": str(load.get("message") or ""),
+                "load_occurred_at": str(load.get("occurred_at") or ""),
+                "config_fields": fields,
+                "secret_configured": secret_configured,
+                "update_supported": bool(item.get("update_manifest")),
+                "custom_settings_ui": bool(item.get("settings_ui")),
+            })
+        result = {
+            "success": True,
+            "plugins": plugins,
+            "load_status_supported": bool(load_data.get("success")),
+            "load_error_count": int(load_data.get("error_count") or 0),
+            "recent_events": load_data.get("recent_events", [])[:50] if load_data.get("success") else [],
+        }
+        self._debug(
+            "플러그인 관리 상태 조회 완료",
+            plugins=len(plugins),
+            load_status_supported=str(result["load_status_supported"]).lower(),
+            duration_ms=self._duration_ms(started),
+        )
+        return result
+
+    def toggle_plugin(self, plugin_id, enabled):
+        return self.admin_client().toggle_plugin(plugin_id, enabled, "general")
+
+    def save_plugin_config(self, plugin_id, changes, clear_keys=None):
+        client = self.admin_client()
+        managed = client.metadata_plugins_manage()
+        if not managed.get("success"):
+            return managed
+        target = next(
+            (item for item in managed.get("plugins", []) if str(item.get("id") or "") == str(plugin_id or "")),
+            None,
+        )
+        if target is None:
+            return {"success": False, "message": "설정할 플러그인을 찾을 수 없습니다."}
+        schema = target.get("config_schema") if isinstance(target.get("config_schema"), list) else []
+        allowed = {str(field.get("key")) for field in schema if isinstance(field, dict) and field.get("key")}
+        merged = dict(target.get("config") or {})
+        for key, value in (changes or {}).items():
+            if key in allowed:
+                merged[key] = value
+        for key in clear_keys or []:
+            if key in allowed:
+                merged[key] = ""
+        return client.save_plugin_config(str(plugin_id or ""), merged, "general")
+
+    def sample_update_plugin(self, plugin_id):
+        return self.admin_client().sample_update_plugin(plugin_id)
+
     def search_metadata(self, query, source=None, db_type="general"):
         started = time.monotonic()
         data = self.admin_client().search_metadata(query, source, db_type)

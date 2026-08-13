@@ -23,6 +23,7 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_path_mappings": "/GDRIVE => /mnt/gds/GDRIVE",
             "gdrive_scan_vfs_rules": "/mnt/gds/GDRIVE|/GDRIVE|http://127.0.0.1:5572",
             "gdrive_scan_rc_timeout": "30",
+            "gdrive_scan_path_timeout": "120",
             "gdrive_scan_history_limit": "200",
             "gdrive_scan_retention_days": "30",
             "gdrive_scan_auto_cleanup": "True",
@@ -91,6 +92,9 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_vfs_rules": model.get("gdrive_scan_vfs_rules"),
             "gdrive_scan_rc_timeout": self._as_int(
                 model.get("gdrive_scan_rc_timeout"), 30, 1, 300
+            ),
+            "gdrive_scan_path_timeout": self._as_int(
+                model.get("gdrive_scan_path_timeout"), 120, 10, 600
             ),
             "gdrive_scan_history_limit": self._as_int(
                 model.get("gdrive_scan_history_limit"), 200, 10, 1000
@@ -297,16 +301,37 @@ class ModuleGDriveScan(PluginModuleBase):
             username=settings["bookoasis_username"],
             password=settings["bookoasis_password"],
         )
-        response = client.scan_library_path(
+        response = client.request_scan_path(
+            settings["webhook_token"],
             library_id,
             relative_path,
             db_type=db_type,
             force=False,
+            timeout=settings["gdrive_scan_path_timeout"],
         )
+        if not response.get("success") and response.get("http_status") in {404, 405}:
+            admin_response = client.scan_library_path(
+                library_id,
+                relative_path,
+                db_type=db_type,
+                force=False,
+                timeout=settings["gdrive_scan_path_timeout"],
+            )
+            if admin_response.get("success"):
+                response = {**admin_response, "mode": "admin_scan_path"}
+            elif response.get("http_status") in {404, 405} and admin_response.get("http_status") in {404, 405}:
+                full_response = client.request_scan(
+                    settings["webhook_token"],
+                    library_id,
+                    db_type=db_type,
+                    force=False,
+                )
+                response = {**full_response, "mode": "full_webhook_fallback"}
         P.logger.info(
             "[BookOasisMate] BookOasis 개별 경로 스캔 결과 "
             f"db={db_type} library_id={library_id} library={library_name} "
             f"path={relative_path} "
+            f"mode={response.get('mode', 'unknown')} "
             f"success={str(bool(response.get('success'))).lower()}"
         )
         return response

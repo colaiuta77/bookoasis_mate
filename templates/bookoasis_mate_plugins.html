@@ -28,6 +28,8 @@
     {{ macros.setting_input_int('plugin_manager_max_archive_mb', 'ZIP 최대 크기(MB)', value=arg.get('plugin_manager_max_archive_mb', '100'), desc=['업로드와 GitHub 다운로드 압축 파일에 적용합니다.']) }}
     {{ macros.setting_input_int('plugin_manager_max_extracted_mb', '해제 후 최대 크기(MB)', value=arg.get('plugin_manager_max_extracted_mb', '500'), desc=['ZIP 폭탄과 비정상 패키지를 차단합니다.']) }}
     {{ macros.setting_input_int('plugin_manager_max_files', '최대 파일 수', value=arg.get('plugin_manager_max_files', '2000'), desc=['10~20,000개']) }}
+    {{ macros.setting_input_text('plugin_manager_discovery_topics', 'GitHub 탐색 Topic', value=arg.get('plugin_manager_discovery_topics', 'bookoasis-plugin'), desc=['쉼표로 구분하며 최대 5개까지 사용합니다.', '기본값 bookoasis-plugin']) }}
+    {{ macros.setting_input_int('plugin_manager_discovery_cache_hours', 'Topic 탐색 캐시(시간)', value=arg.get('plugin_manager_discovery_cache_hours', '6'), desc=['1~168시간']) }}
   </form>
   <div class="doctor-plugin-effective-paths">
     <div><strong>적용 플러그인 경로</strong><span id="plugin_effective_root" class="doctor-path">{{ arg.get('effective_paths', {}).get('plugin_root', '') or '미설정' }}</span></div>
@@ -37,7 +39,9 @@
 
 <ul class="nav nav-tabs doctor-setting-tabs doctor-plugin-tabs" role="tablist">
   <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#plugin_catalog_tab" role="tab">카탈로그</a></li>
+  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_discovery_tab" role="tab">Topic 탐색</a></li>
   <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_installed_tab" role="tab">설치됨</a></li>
+  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_runtime_tab" role="tab">실행 상태</a></li>
   <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_github_tab" role="tab">GitHub 설치</a></li>
   <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_zip_tab" role="tab">ZIP 설치</a></li>
   <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_history_tab" role="tab">작업 이력</a></li>
@@ -78,12 +82,33 @@
     <div id="plugin_catalog" class="doctor-plugin-grid"></div>
   </div>
 
+  <div id="plugin_discovery_tab" class="tab-pane fade" role="tabpanel">
+    <div class="doctor-plugin-toolbar">
+      <div>
+        <p class="mb-0">GitHub Topic에서 공개 플러그인 후보를 탐색합니다.</p>
+        <small class="doctor-muted">후보는 자동 설치하지 않으며 VERSION·플러그인 ID를 검사한 뒤 패키지 검사 단계로 연결합니다.</small>
+      </div>
+      <button id="plugin_discovery_refresh" type="button" class="btn btn-sm btn-outline-primary">백그라운드 새로고침</button>
+    </div>
+    <div id="plugin_discovery_status" class="doctor-query-status"></div>
+    <div id="plugin_discovery" class="doctor-plugin-grid"></div>
+  </div>
+
   <div id="plugin_installed_tab" class="tab-pane fade" role="tabpanel">
     <div class="doctor-plugin-toolbar">
       <p class="doctor-muted mb-0">설정된 경로에서 발견한 BookOasis 플러그인입니다.</p>
       <button id="plugin_installed_refresh" type="button" class="btn btn-sm btn-outline-primary">새로고침</button>
     </div>
     <div id="plugin_installed" class="doctor-plugin-grid"></div>
+  </div>
+
+  <div id="plugin_runtime_tab" class="tab-pane fade" role="tabpanel">
+    <div class="doctor-plugin-toolbar">
+      <p class="doctor-muted mb-0">BookOasis가 실제로 발견한 플러그인의 활성화·로드 상태·설정을 관리합니다.</p>
+      <button id="plugin_runtime_refresh" type="button" class="btn btn-sm btn-outline-primary">상태 새로고침</button>
+    </div>
+    <div id="plugin_runtime_status" class="doctor-query-status"></div>
+    <div id="plugin_runtime" class="doctor-plugin-grid"></div>
   </div>
 
   <div id="plugin_github_tab" class="tab-pane fade" role="tabpanel">
@@ -132,9 +157,20 @@
   <div id="plugin_job_logs" class="doctor-plugin-logs"></div>
 </section>
 
+<div class="modal fade" id="plugin_config_modal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-lg" role="document"><div class="modal-content">
+    <div class="modal-header"><h5 id="plugin_config_title" class="modal-title">플러그인 설정</h5><button type="button" class="close" data-dismiss="modal" aria-label="닫기"><span aria-hidden="true">&times;</span></button></div>
+    <div class="modal-body"><div id="plugin_config_fields"></div><p class="doctor-muted">비밀번호·토큰 필드는 현재 값을 표시하지 않습니다. 비워 두면 기존 값을 유지하고, 삭제 체크 시에만 초기화합니다.</p></div>
+    <div class="modal-footer"><button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button><button id="plugin_config_save" type="button" class="btn btn-primary">설정 저장</button></div>
+  </div></div>
+</div>
+
 <script>
 var pluginManagerPollTimer = null;
 var pluginManagerInspectJobId = '';
+var pluginDiscoveryPollTimer = null;
+var pluginRuntimeItems = {};
+var pluginRuntimeConfigId = '';
 
 function pluginManagerText(tag, className, value) {
   return bookoasisMateText(tag, className, value);
@@ -162,10 +198,11 @@ function pluginManagerRenderCards(targetId, items, catalogMode) {
     card.appendChild(header);
     card.appendChild(pluginManagerText('p', 'doctor-plugin-description', item.description || '설명 정보가 없습니다.'));
     var badges = pluginManagerText('div', 'doctor-plugin-badges', '');
-    badges.appendChild(pluginManagerBadge(item.trusted ? '검증 카탈로그' : (item.custom ? '사용자 카탈로그' : (item.managed ? '자동 업데이트 지원' : '업데이트 관리 안 됨')), item.trusted ? 'doctor-plugin-badge-trusted' : ''));
+    badges.appendChild(pluginManagerBadge(item.trusted ? '검증 카탈로그' : (item.discovered ? (item.validation_status === 'validated' ? 'Topic 구조 확인' : 'Topic 후보') : (item.custom ? '사용자 카탈로그' : (item.managed ? '자동 업데이트 지원' : '업데이트 관리 안 됨'))), item.trusted ? 'doctor-plugin-badge-trusted' : ''));
     if (item.installed) badges.appendChild(pluginManagerBadge('설치됨 ' + (item.installed_version || '버전 미상'), 'doctor-plugin-badge-installed'));
     if (item.update_available) badges.appendChild(pluginManagerBadge('업데이트 ' + item.latest_version, 'doctor-plugin-badge-update'));
     if (item.version_error) badges.appendChild(pluginManagerBadge('VERSION 확인 실패', 'doctor-plugin-badge-warning'));
+    if (item.validation_error) badges.appendChild(pluginManagerBadge('구조 확인 필요', 'doctor-plugin-badge-warning'));
     (item.dependencies || []).forEach(function(value) { badges.appendChild(pluginManagerBadge('필수 ' + value, '')); });
     card.appendChild(badges);
     var footer = pluginManagerText('div', 'doctor-plugin-card-footer', '');
@@ -180,7 +217,7 @@ function pluginManagerRenderCards(targetId, items, catalogMode) {
       button.dataset.repository = item.repository || ''; button.dataset.ref = item.ref || 'main';
       button.addEventListener('click', item.custom ? pluginManagerInspectCatalog : pluginManagerInstallCatalog);
       footer.appendChild(button);
-      if (item.custom) {
+      if (item.custom && !item.discovered) {
         var removeButton = pluginManagerText('button', 'btn btn-sm btn-outline-danger', '목록 삭제');
         removeButton.type = 'button'; removeButton.dataset.pluginId = item.id; removeButton.dataset.pluginName = item.name || item.id;
         removeButton.addEventListener('click', pluginManagerDeleteCustomCatalog);
@@ -208,6 +245,95 @@ function pluginManagerLoadCatalog(refreshRemote) {
 function pluginManagerLoadInstalled() {
   bookoasisMateAjax('plugins', 'installed', {}, function(ret) { pluginManagerRenderCards('plugin_installed', ret.data || [], false); }, null, {global:false});
 }
+
+function pluginManagerRenderDiscovery(payload) {
+  payload = payload || {};
+  pluginManagerRenderCards('plugin_discovery', payload.items || [], true);
+  var topics = (payload.topics || []).join(', ') || 'bookoasis-plugin';
+  var message = 'Topic ' + topics + ' · 후보 ' + Number((payload.items || []).length).toLocaleString() + '개';
+  if (payload.fetched_at) message += ' · 캐시 ' + payload.fetched_at;
+  if (payload.stale) message += ' · 갱신 필요';
+  $('#plugin_discovery_status').removeClass('doctor-query-status-active').text(message);
+}
+
+function pluginManagerLoadDiscovery() {
+  $('#plugin_discovery_status').addClass('doctor-query-status-active').text('Topic 탐색 캐시 불러오는 중');
+  bookoasisMateAjax('plugins', 'discovery', {}, function(ret) { pluginManagerRenderDiscovery(ret.data || {}); }, function() { $('#plugin_discovery_status').removeClass('doctor-query-status-active'); }, {global:false});
+}
+
+function pluginManagerStopDiscoveryPolling() {
+  if (pluginDiscoveryPollTimer) { clearInterval(pluginDiscoveryPollTimer); pluginDiscoveryPollTimer = null; }
+}
+
+function pluginManagerDiscoveryStatus() {
+  bookoasisMateAjax('plugins', 'discovery_status', {}, function(ret) {
+    var job = ret.data || {};
+    if (job.status === 'running') { $('#plugin_discovery_status').addClass('doctor-query-status-active').text(job.message || 'GitHub Topic 탐색 중'); return; }
+    pluginManagerStopDiscoveryPolling();
+    if (job.status === 'failed') { $('#plugin_discovery_status').removeClass('doctor-query-status-active').text(job.error || 'Topic 탐색에 실패했습니다.'); return; }
+    pluginManagerLoadDiscovery();
+  }, function() { pluginManagerStopDiscoveryPolling(); $('#plugin_discovery_status').removeClass('doctor-query-status-active'); }, {global:false, silent:true});
+}
+
+function pluginManagerStartDiscoveryRefresh() {
+  $('#plugin_discovery_status').addClass('doctor-query-status-active').text('GitHub Topic 탐색을 시작하는 중');
+  bookoasisMateAjax('plugins', 'discovery_refresh', {}, function(ret) {
+    var job = ret.data || {};
+    if (job.status === 'failed') { $('#plugin_discovery_status').removeClass('doctor-query-status-active').text(job.error || 'Topic 탐색을 시작하지 못했습니다.'); return; }
+    if (!pluginDiscoveryPollTimer) pluginDiscoveryPollTimer = setInterval(pluginManagerDiscoveryStatus, 1000);
+    pluginManagerDiscoveryStatus();
+  });
+}
+
+function pluginManagerRenderRuntime(items) {
+  var target = document.getElementById('plugin_runtime'); bookoasisMateClear(target); pluginRuntimeItems = {};
+  if (!items || !items.length) { target.appendChild(pluginManagerText('div', 'doctor-empty', 'BookOasis에서 발견한 플러그인이 없습니다.')); return; }
+  items.forEach(function(item) {
+    pluginRuntimeItems[item.id] = item;
+    var card = pluginManagerText('article', 'doctor-card doctor-plugin-card', '');
+    var header = pluginManagerText('div', 'doctor-plugin-card-head', '');
+    header.appendChild(pluginManagerText('div', 'doctor-plugin-icon', '⚙'));
+    var title = pluginManagerText('div', '', ''); title.appendChild(pluginManagerText('h4', '', item.name || item.id)); title.appendChild(pluginManagerText('code', 'doctor-plugin-id', item.id)); header.appendChild(title); card.appendChild(header);
+    var badges = pluginManagerText('div', 'doctor-plugin-badges', '');
+    badges.appendChild(pluginManagerBadge(item.enabled ? '활성화' : '비활성화', item.enabled ? 'doctor-plugin-badge-installed' : 'doctor-plugin-badge-warning'));
+    badges.appendChild(pluginManagerBadge(item.load_status === 'success' ? '로드 성공' : (item.load_status === 'unknown' ? '로드 상태 미확인' : '로드 실패'), item.load_status === 'success' ? 'doctor-plugin-badge-installed' : 'doctor-plugin-badge-warning'));
+    if (item.update_supported) badges.appendChild(pluginManagerBadge('네이티브 업데이트 지원', 'doctor-plugin-badge-update'));
+    card.appendChild(badges);
+    if (item.load_message) card.appendChild(pluginManagerText('p', 'doctor-plugin-description', item.load_message));
+    var footer = pluginManagerText('div', 'doctor-plugin-card-footer', '');
+    var toggle = pluginManagerText('button', 'btn btn-sm btn-outline-primary', item.enabled ? '비활성화' : '활성화'); toggle.type='button'; toggle.dataset.pluginId=item.id; toggle.dataset.enabled=item.enabled ? 'false' : 'true'; toggle.addEventListener('click', pluginRuntimeToggle); footer.appendChild(toggle);
+    if ((item.config_fields || []).length) { var config = pluginManagerText('button', 'btn btn-sm btn-outline-secondary', '설정'); config.type='button'; config.dataset.pluginId=item.id; config.addEventListener('click', pluginRuntimeOpenConfig); footer.appendChild(config); }
+    if (item.update_supported) { var update = pluginManagerText('button', 'btn btn-sm btn-outline-success', '네이티브 업데이트'); update.type='button'; update.dataset.pluginId=item.id; update.addEventListener('click', pluginRuntimeUpdate); footer.appendChild(update); }
+    card.appendChild(footer); target.appendChild(card);
+  });
+}
+
+function pluginManagerLoadRuntime() {
+  $('#plugin_runtime_status').addClass('doctor-query-status-active').text('BookOasis 실행 상태 조회 중');
+  bookoasisMateAjax('plugins', 'runtime', {}, function(ret) { pluginManagerRenderRuntime((ret.data || {}).plugins || []); $('#plugin_runtime_status').removeClass('doctor-query-status-active').text((ret.data || {}).load_status_supported ? '' : '로드 이력 API를 사용할 수 없습니다.'); }, function() { $('#plugin_runtime_status').removeClass('doctor-query-status-active'); }, {global:false});
+}
+
+function pluginRuntimeToggle(event) { var button=event.currentTarget; bookoasisMateAjax('plugins','runtime_toggle',{plugin_id:button.dataset.pluginId,enabled:button.dataset.enabled},function(ret){ if(ret.msg) notify(ret.msg,ret.ret||'info'); pluginManagerLoadRuntime(); }); }
+function pluginRuntimeUpdate(event) { var id=event.currentTarget.dataset.pluginId; if(!confirm(id+' 플러그인의 네이티브 업데이트를 실행할까요?')) return; bookoasisMateAjax('plugins','runtime_update',{plugin_id:id},function(ret){ if(ret.msg) notify(ret.msg,ret.ret||'info'); pluginManagerLoadRuntime(); }); }
+function pluginRuntimeOpenConfig(event) {
+  var item=pluginRuntimeItems[event.currentTarget.dataset.pluginId]; if(!item) return; pluginRuntimeConfigId=item.id; $('#plugin_config_title').text((item.name||item.id)+' 설정'); var target=document.getElementById('plugin_config_fields'); bookoasisMateClear(target);
+  (item.config_fields||[]).forEach(function(field){
+    var group=pluginManagerText('div','form-group',''); group.dataset.key=field.key; group.dataset.secret=field.secret?'true':'false'; group.dataset.type=field.type||'text'; group.appendChild(pluginManagerText('label','',field.label||field.key));
+    var input;
+    if(field.type==='select') {
+      input=document.createElement('select'); input.className='form-control';
+      (field.options||[]).forEach(function(option){ var node=document.createElement('option'); var value=typeof option==='object'?option.value:option; node.value=value===null||value===undefined?'':String(value); node.textContent=typeof option==='object'?(option.label||node.value):node.value; input.appendChild(node); });
+      input.value=field.value===null||field.value===undefined?'':String(field.value);
+    } else {
+      input=document.createElement('input'); input.className='form-control'; input.type=field.secret?'password':(field.type==='number'?'number':(field.type==='checkbox'?'checkbox':'text'));
+      if(field.type==='checkbox') input.checked=field.value===true||String(field.value).toLowerCase()==='true'||String(field.value)==='1';
+      else input.value=field.value===null||field.value===undefined?'':String(field.value);
+      input.placeholder=field.secret&&field.configured?'기존 값 유지':(field.placeholder||'');
+    }
+    group.appendChild(input); if(field.description) group.appendChild(pluginManagerText('small','form-text text-muted',field.description)); if(field.secret&&field.configured){ var clear=pluginManagerText('label','doctor-muted',''); var check=document.createElement('input'); check.type='checkbox'; check.className='plugin-secret-clear'; clear.appendChild(check); clear.appendChild(document.createTextNode(' 저장된 값 삭제')); group.appendChild(clear); } target.appendChild(group);
+  }); $('#plugin_config_modal').modal('show');
+}
+$('#plugin_config_save').click(function(){ var changes={},clearKeys=[]; $('#plugin_config_fields .form-group').each(function(){ var key=this.dataset.key,input=this.querySelector('.form-control'),clear=this.querySelector('.plugin-secret-clear'); if(clear&&clear.checked) clearKeys.push(key); else if(this.dataset.secret!=='true'||String(input.value||'')!=='') changes[key]=this.dataset.type==='checkbox'?!!input.checked:(input.type==='number'&&input.value!==''?Number(input.value):input.value); }); bookoasisMateAjax('plugins','runtime_config_save',{plugin_id:pluginRuntimeConfigId,changes:JSON.stringify(changes),clear_keys:JSON.stringify(clearKeys)},function(ret){ if(ret.msg) notify(ret.msg,ret.ret||'info'); $('#plugin_config_modal').modal('hide'); pluginManagerLoadRuntime(); }); });
 
 function pluginManagerInstallCatalog(event) {
   var button = event.currentTarget;
@@ -328,6 +454,7 @@ $('#plugin_settings_save').click(function() {
   }});
 });
 $('#plugin_catalog_refresh').click(function() { pluginManagerLoadCatalog(true); });
+$('#plugin_discovery_refresh').click(pluginManagerStartDiscoveryRefresh);
 $('#plugin_custom_save').click(function() {
   bookoasisMateAjax('plugins', 'custom_catalog_save', {
     repository:$('#plugin_custom_repository').val(),
@@ -345,6 +472,7 @@ $('#plugin_custom_save').click(function() {
   });
 });
 $('#plugin_installed_refresh').click(pluginManagerLoadInstalled);
+$('#plugin_runtime_refresh').click(pluginManagerLoadRuntime);
 $('#plugin_history_refresh').click(pluginManagerLoadHistory);
 
 $('#plugin_github_inspect').click(function() {
@@ -374,7 +502,9 @@ $('#plugin_job_stop').click(function() { bookoasisMateAjax('plugins', 'stop', {}
 
 $(function() {
   pluginManagerLoadCatalog(false);
+  pluginManagerLoadDiscovery();
   pluginManagerLoadInstalled();
+  pluginManagerLoadRuntime();
   pluginManagerLoadHistory();
   pluginManagerRequestStatus();
 });
