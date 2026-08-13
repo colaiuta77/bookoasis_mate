@@ -27,6 +27,58 @@ class ModulePlugins(PluginModuleBase):
     def _settings(self):
         return P.ModelSetting.to_dict()
 
+    def _installed_overview(self, settings):
+        local_plugins = self.manager.installed(settings)
+        runtime_data = {}
+        runtime_available = False
+        runtime_message = ""
+        try:
+            runtime_data = P.bookoasis_mate_service.plugin_management() or {}
+            runtime_available = bool(runtime_data.get("success"))
+            runtime_message = str(
+                runtime_data.get("message") or runtime_data.get("error") or ""
+            )
+        except Exception as error:
+            runtime_message = "BookOasis 실행 상태를 조회하지 못했습니다."
+            P.logger.warning(
+                "[BookOasisMate] 플러그인 실행 상태 조회 실패: "
+                f"{type(error).__name__}"
+            )
+
+        runtime_by_id = {
+            str(item.get("id") or ""): item
+            for item in runtime_data.get("plugins") or []
+            if item.get("id")
+        }
+        merged = []
+        for local_item in local_plugins:
+            item = dict(local_item)
+            runtime = runtime_by_id.get(str(item.get("id") or ""))
+            item.update(
+                {
+                    "runtime_available": bool(runtime_available and runtime),
+                    "enabled": runtime.get("enabled") if runtime else None,
+                    "load_status": runtime.get("load_status") if runtime else "unknown",
+                    "load_message": runtime.get("load_message") if runtime else "",
+                    "config_fields": runtime.get("config_fields") if runtime else [],
+                    "update_supported": bool(
+                        runtime and runtime.get("update_supported")
+                    ),
+                    "custom_settings_ui": bool(
+                        runtime and runtime.get("custom_settings_ui")
+                    ),
+                }
+            )
+            merged.append(item)
+        return {
+            "plugins": merged,
+            "runtime_available": runtime_available,
+            "runtime_message": runtime_message,
+            "load_status_supported": bool(
+                runtime_data.get("load_status_supported")
+            ),
+        }
+
     def process_menu(self, page, req):
         P.logger.debug("[BookOasisMate] BookOasis 플러그인 관리 메뉴 열기")
         arg = self._settings()
@@ -53,7 +105,7 @@ class ModulePlugins(PluginModuleBase):
                 )
             if command == "installed":
                 return jsonify(
-                    {"ret": "success", "data": self.manager.installed(settings)}
+                    {"ret": "success", "data": self._installed_overview(settings)}
                 )
             if command == "runtime":
                 data = P.bookoasis_mate_service.plugin_management()
