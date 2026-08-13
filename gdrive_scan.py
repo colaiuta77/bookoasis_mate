@@ -238,7 +238,7 @@ def read_bookoasis_libraries(db_type, settings, optional=False):
     try:
         connection = adapter.connect(target)
     except BookOasisDatabaseError:
-        if optional and adapter.engine == "sqlite":
+        if optional:
             return []
         raise
     with closing(connection):
