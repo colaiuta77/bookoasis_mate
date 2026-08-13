@@ -7,7 +7,7 @@ from datetime import datetime
 from flask import jsonify, render_template
 
 from .bookoasis_client import BookOasisClient
-from .discord_notifier import DiscordWebhookNotifier
+from .discord_notifier import DiscordWebhookError, DiscordWebhookNotifier
 from .gdrive_scan import GDriveScanProcessor, parse_extensions, validate_event
 from .setup import *
 
@@ -421,6 +421,11 @@ class ModuleGDriveScan(PluginModuleBase):
                 DiscordWebhookNotifier(
                     settings["gdrive_scan_discord_webhook_url"]
                 ).send_batch(events, results, statuses)
+            except DiscordWebhookError as error:
+                P.logger.warning(
+                    "[BookOasisMate] Discord 변경 요약 전송 실패: "
+                    f"{error}"
+                )
             except Exception as error:
                 P.logger.warning(
                     "[BookOasisMate] Discord 변경 요약 전송 실패: "

@@ -1,6 +1,7 @@
 # Google Drive 변경 이벤트를 Discord 웹훅 배치 요약으로 전송합니다.
 import json
 from collections import Counter
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
@@ -10,6 +11,7 @@ class DiscordWebhookError(RuntimeError):
 
 
 class DiscordWebhookNotifier:
+    USER_AGENT = "BookOasisMate/1.0"
     ALLOWED_HOSTS = {
         "discord.com",
         "discordapp.com",
@@ -60,15 +62,33 @@ class DiscordWebhookNotifier:
         request = Request(
             url,
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": DiscordWebhookNotifier.USER_AGENT,
+            },
             method="POST",
         )
-        with urlopen(request, timeout=timeout) as response:
-            status = int(getattr(response, "status", 204) or 204)
-            if status < 200 or status >= 300:
-                raise DiscordWebhookError(
-                    f"Discord 알림 전송이 HTTP {status}로 실패했습니다."
-                )
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                status = int(getattr(response, "status", 204) or 204)
+                if status < 200 or status >= 300:
+                    raise DiscordWebhookError(
+                        f"Discord 알림 전송이 HTTP {status}로 실패했습니다."
+                    )
+        except HTTPError as error:
+            raise DiscordWebhookError(
+                f"Discord 알림 전송이 HTTP {int(error.code)}로 실패했습니다."
+            ) from None
+        except URLError as error:
+            reason = getattr(error, "reason", None)
+            reason_type = type(reason).__name__ if reason is not None else "URLError"
+            raise DiscordWebhookError(
+                f"Discord 알림 연결에 실패했습니다. ({reason_type})"
+            ) from None
+        except TimeoutError:
+            raise DiscordWebhookError(
+                "Discord 알림 연결에 실패했습니다. (TimeoutError)"
+            ) from None
 
     @staticmethod
     def _basename(value):
