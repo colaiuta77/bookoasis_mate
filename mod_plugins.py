@@ -27,6 +27,48 @@ class ModulePlugins(PluginModuleBase):
     def _settings(self):
         return P.ModelSetting.to_dict()
 
+    def _catalog_overview(self, settings, refresh_remote=False):
+        catalog_items = self.manager.catalog(
+            settings,
+            refresh_remote=refresh_remote,
+        )
+        try:
+            discovery = self.manager.discovery(settings) or {}
+        except Exception as error:
+            P.logger.warning(
+                "[BookOasisMate] Topic 카탈로그 캐시 조회 실패: "
+                f"{type(error).__name__}"
+            )
+            discovery = {}
+
+        merged = []
+        known_ids = set()
+        for source_item in catalog_items:
+            item = dict(source_item)
+            plugin_id = str(item.get("id") or "").strip()
+            if not plugin_id or item.get("installed") or plugin_id in known_ids:
+                continue
+            known_ids.add(plugin_id)
+            merged.append(item)
+
+        topic_count = 0
+        for source_item in discovery.get("items") or []:
+            item = dict(source_item)
+            plugin_id = str(item.get("id") or "").strip()
+            if not plugin_id or item.get("installed") or plugin_id in known_ids:
+                continue
+            known_ids.add(plugin_id)
+            merged.append(item)
+            topic_count += 1
+
+        return {
+            "items": merged,
+            "topics": list(discovery.get("topics") or []),
+            "fetched_at": discovery.get("fetched_at") or "",
+            "stale": bool(discovery.get("stale")),
+            "topic_count": topic_count,
+        }
+
     def _installed_overview(self, settings):
         local_plugins = self.manager.installed(settings)
         runtime_data = {}
@@ -53,6 +95,7 @@ class ModulePlugins(PluginModuleBase):
         merged = []
         for local_item in local_plugins:
             item = dict(local_item)
+            item.pop("path", None)
             runtime = runtime_by_id.get(str(item.get("id") or ""))
             item.update(
                 {
@@ -97,7 +140,7 @@ class ModulePlugins(PluginModuleBase):
                 return jsonify(
                     {
                         "ret": "success",
-                        "data": self.manager.catalog(
+                        "data": self._catalog_overview(
                             settings,
                             refresh_remote=req.form.get("refresh_remote") == "true",
                         ),
