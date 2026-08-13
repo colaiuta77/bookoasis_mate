@@ -387,6 +387,8 @@
 .doctor-plugin-card { display:flex; flex-direction:column; min-height:230px; padding:18px; }
 .doctor-plugin-card-head { display:flex; align-items:center; gap:12px; }
 .doctor-plugin-card-head h4 { margin:0 0 2px; font-size:1.05rem; }
+.doctor-plugin-card-title { min-width:0; }
+.doctor-plugin-current-version { flex:none; margin-left:auto; color:#4338ca; background:#eef2ff; }
 .doctor-plugin-icon { display:flex; align-items:center; justify-content:center; width:42px; height:42px; border-radius:12px; background:rgba(111,66,193,.12); font-size:1.3rem; }
 .doctor-plugin-id { color:#6c757d; background:transparent; padding:0; }
 .doctor-plugin-description { flex:1; margin:14px 0 10px; color:#495057; line-height:1.55; }

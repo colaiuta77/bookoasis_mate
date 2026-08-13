@@ -57,6 +57,8 @@ class ModulePlugins(PluginModuleBase):
             plugin_id = str(item.get("id") or "").strip()
             if not plugin_id or item.get("installed") or plugin_id in known_ids:
                 continue
+            item["trusted"] = True
+            item["verified"] = True
             known_ids.add(plugin_id)
             merged.append(item)
             topic_count += 1
@@ -69,7 +71,12 @@ class ModulePlugins(PluginModuleBase):
             "topic_count": topic_count,
         }
 
-    def _installed_overview(self, settings):
+    def _installed_overview(self, settings, auto_check=False):
+        update_check = self.manager.installed_update_status(settings)
+        if auto_check and update_check.get("stale"):
+            update_check = self.manager.start_installed_update_refresh(
+                settings, force=False
+            )
         local_plugins = self.manager.installed(settings)
         runtime_data = {}
         runtime_available = False
@@ -120,6 +127,7 @@ class ModulePlugins(PluginModuleBase):
             "load_status_supported": bool(
                 runtime_data.get("load_status_supported")
             ),
+            "update_check": update_check,
         }
 
     def process_menu(self, page, req):
@@ -148,7 +156,30 @@ class ModulePlugins(PluginModuleBase):
                 )
             if command == "installed":
                 return jsonify(
-                    {"ret": "success", "data": self._installed_overview(settings)}
+                    {
+                        "ret": "success",
+                        "data": self._installed_overview(
+                            settings,
+                            auto_check=req.form.get("auto_check") == "true",
+                        ),
+                    }
+                )
+            if command == "installed_update_refresh":
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "data": self.manager.start_installed_update_refresh(
+                            settings,
+                            force=req.form.get("force") == "true",
+                        ),
+                    }
+                )
+            if command == "installed_update_status":
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "data": self.manager.installed_update_status(settings),
+                    }
                 )
             if command == "runtime":
                 data = P.bookoasis_mate_service.plugin_management()
