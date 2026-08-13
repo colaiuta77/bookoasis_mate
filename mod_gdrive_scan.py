@@ -7,6 +7,7 @@ from datetime import datetime
 from flask import jsonify, render_template
 
 from .bookoasis_client import BookOasisClient
+from .discord_notifier import DiscordWebhookNotifier
 from .gdrive_scan import GDriveScanProcessor, parse_extensions, validate_event
 from .setup import *
 
@@ -27,6 +28,7 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_history_limit": "200",
             "gdrive_scan_retention_days": "30",
             "gdrive_scan_auto_cleanup": "True",
+            "gdrive_scan_discord_webhook_url": "",
         }
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
@@ -103,6 +105,9 @@ class ModuleGDriveScan(PluginModuleBase):
                 model.get("gdrive_scan_retention_days"), 30, 1, 3650
             ),
             "gdrive_scan_auto_cleanup": model.get_bool("gdrive_scan_auto_cleanup"),
+            "gdrive_scan_discord_webhook_url": str(
+                model.get("gdrive_scan_discord_webhook_url") or ""
+            ).strip(),
         }
 
     def process_menu(self, page, req):
@@ -110,6 +115,8 @@ class ModuleGDriveScan(PluginModuleBase):
         P.logger.debug(f"[BookOasisMate] Google Drive 연동 메뉴 열기 page={page}")
         arg = P.ModelSetting.to_dict()
         arg["gdrive_scan_extensions"] = self._settings()["gdrive_scan_extensions"]
+        webhook_url = str(arg.pop("gdrive_scan_discord_webhook_url", "") or "")
+        arg["gdrive_scan_discord_webhook_configured"] = bool(webhook_url.strip())
         arg["page"] = page
         return render_template(
             f"{P.package_name}_{self.name}_{page}.html",
@@ -175,6 +182,28 @@ class ModuleGDriveScan(PluginModuleBase):
 
     def process_ajax(self, command, req):
         try:
+            if command == "discord_webhook_save":
+                webhook_url = str(req.form.get("webhook_url") or "").strip()
+                DiscordWebhookNotifier(webhook_url)
+                P.ModelSetting.set("gdrive_scan_discord_webhook_url", webhook_url)
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "msg": "Discord 웹훅 설정을 저장했습니다."
+                        if webhook_url
+                        else "Discord 알림을 비활성화했습니다.",
+                        "data": {"configured": bool(webhook_url)},
+                    }
+                )
+            if command == "discord_webhook_clear":
+                P.ModelSetting.set("gdrive_scan_discord_webhook_url", "")
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "msg": "Discord 웹훅 설정을 삭제했습니다.",
+                        "data": {"configured": False},
+                    }
+                )
             if command == "path_preview":
                 settings = self._settings()
                 settings["gdrive_scan_path_mappings"] = req.form.get(
@@ -373,6 +402,7 @@ class ModuleGDriveScan(PluginModuleBase):
             }
         try:
             max_attempts = settings["gdrive_scan_max_attempts"]
+            statuses = {}
             for event in events:
                 result = results.get(
                     int(event["id"]),
@@ -380,12 +410,22 @@ class ModuleGDriveScan(PluginModuleBase):
                 )
                 if result.get("success"):
                     self.model.finish(event["id"], result)
+                    statuses[int(event["id"])] = "completed"
                 else:
-                    self.model.fail_or_retry(
+                    statuses[int(event["id"])] = self.model.fail_or_retry(
                         event,
                         result.get("message"),
                         max_attempts=max_attempts,
                     )
+            try:
+                DiscordWebhookNotifier(
+                    settings["gdrive_scan_discord_webhook_url"]
+                ).send_batch(events, results, statuses)
+            except Exception as error:
+                P.logger.warning(
+                    "[BookOasisMate] Discord 변경 요약 전송 실패: "
+                    f"{type(error).__name__}"
+                )
             P.logger.info(
                 f"[BookOasisMate] Google Drive 변경 이벤트 {len(events)}건 처리를 마쳤습니다."
             )

@@ -51,6 +51,17 @@
 </form>
 
 <div class="doctor-section doctor-card">
+  <h4>Discord 변경 요약 알림</h4>
+  <p class="doctor-muted">Mate 작업자가 버퍼 단위 처리를 마친 뒤 변경 수량·처리 결과·대상 보관함·실제 스캔 방식을 한 번만 요약해 전송합니다. 전송 실패는 Google Drive 스캔 결과에 영향을 주지 않습니다.</p>
+  <div class="doctor-toolbar">
+    <input type="password" class="form-control" id="gdrive_scan_discord_webhook_url" style="flex:1 1 560px" autocomplete="new-password" placeholder="https://discord.com/api/webhooks/...">
+    <button type="button" class="btn btn-outline-primary" id="gdrive_scan_discord_save">저장</button>
+    <button type="button" class="btn btn-outline-danger" id="gdrive_scan_discord_clear">삭제</button>
+  </div>
+  <small id="gdrive_scan_discord_status" class="form-text text-muted">{{ '웹훅이 설정되어 있습니다. 새 값을 입력하지 않으면 기존 값은 표시되지 않습니다.' if arg.get('gdrive_scan_discord_webhook_configured') else '웹훅 URL이 비어 있으면 Discord 알림을 사용하지 않습니다.' }}</small>
+</div>
+
+<div class="doctor-section doctor-card">
   <h4>이벤트 API</h4>
   <p><code>/bookoasis_mate/api/gdrive_scan/event</code></p>
   <p class="doctor-muted">FlaskFarm 전역 API 키가 필요합니다. 개별 경로 스캔은 상단 설정 메뉴의 BookOasis 관리자 계정을 사용하며, 보관함 루트 폴백은 스캔 웹훅 토큰을 사용합니다.</p>
@@ -73,6 +84,29 @@ $('#setting_save_btn').click(function(e) {
 $('#gdrive_scan_wake_btn').click(function(e) {
   e.preventDefault();
   bookoasisMateAjax('gdrive_scan', 'wake', {}, function() {});
+});
+
+$('#gdrive_scan_discord_save').click(function() {
+  var input = document.getElementById('gdrive_scan_discord_webhook_url');
+  var value = String(input.value || '').trim();
+  if (!value) {
+    notify('저장할 Discord 웹훅 URL을 입력해 주세요.', 'warning');
+    return;
+  }
+  bookoasisMateAjax('gdrive_scan', 'discord_webhook_save', {webhook_url:value}, function(ret) {
+    input.value = '';
+    $('#gdrive_scan_discord_status').text('웹훅이 설정되어 있습니다. 저장된 URL은 화면에 다시 표시하지 않습니다.');
+    if (ret.msg) notify(ret.msg, ret.ret || 'info');
+  });
+});
+
+$('#gdrive_scan_discord_clear').click(function() {
+  if (!confirm('저장된 Discord 웹훅을 삭제하고 알림을 비활성화할까요?')) return;
+  bookoasisMateAjax('gdrive_scan', 'discord_webhook_clear', {}, function(ret) {
+    $('#gdrive_scan_discord_webhook_url').val('');
+    $('#gdrive_scan_discord_status').text('웹훅 URL이 비어 있으면 Discord 알림을 사용하지 않습니다.');
+    if (ret.msg) notify(ret.msg, ret.ret || 'info');
+  });
 });
 
 function gdriveScanPreviewCard(label, value) {
