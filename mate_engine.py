@@ -158,7 +158,7 @@ class BookOasisMateEngine:
         alias = alias or column
         return f"b.{column} AS {alias}" if column in columns else f"NULL AS {alias}"
 
-    def _book_query_parts(self, connection):
+    def _book_query_parts(self, connection, include_duplicate_isbn=False):
         tables = self._tables(connection)
         if "books" not in tables:
             raise RuntimeError("books 테이블이 없습니다.")
@@ -169,7 +169,11 @@ class BookOasisMateEngine:
         if missing:
             raise RuntimeError("books 필수 컬럼이 없습니다: " + ", ".join(missing))
 
-        active = "COALESCE(b.is_deleted, 0) = 0" if "is_deleted" in columns else "1 = 1"
+        active = (
+            "(b.is_deleted = 0 OR b.is_deleted IS NULL)"
+            if "is_deleted" in columns
+            else "1 = 1"
+        )
         expressions = {}
         if "cover_image" in columns:
             expressions["cover"] = "TRIM(COALESCE(b.cover_image, '')) = ''"
@@ -189,7 +193,7 @@ class BookOasisMateEngine:
         duplicate_cte = ""
         duplicate_join = ""
         duplicate_count = "0"
-        if "isbn" in columns:
+        if include_duplicate_isbn and "isbn" in columns:
             duplicate_cte = """
                 WITH isbn_counts AS (
                     SELECT TRIM(isbn) AS normalized_isbn, COUNT(*) AS item_count
@@ -200,7 +204,11 @@ class BookOasisMateEngine:
                     HAVING COUNT(*) > 1
                 )
             """.format(
-                active_unaliased="COALESCE(is_deleted, 0) = 0" if "is_deleted" in columns else "1 = 1"
+                active_unaliased=(
+                    "(is_deleted = 0 OR is_deleted IS NULL)"
+                    if "is_deleted" in columns
+                    else "1 = 1"
+                )
             )
             duplicate_join = "LEFT JOIN isbn_counts ic ON ic.normalized_isbn = TRIM(COALESCE(b.isbn, ''))"
             duplicate_count = "COALESCE(ic.item_count, 0)"
@@ -248,7 +256,7 @@ class BookOasisMateEngine:
         }
 
     def _book_summary(self, connection):
-        parts = self._book_query_parts(connection)
+        parts = self._book_query_parts(connection, include_duplicate_isbn=False)
         expressions = parts["expressions"]
         select_items = ["COUNT(*) AS total_books"]
         for issue_type in ISSUE_LABELS:
@@ -271,22 +279,53 @@ class BookOasisMateEngine:
             f"SUM(CASE WHEN {problem_expression} THEN 1 ELSE 0 END) AS problem_books"
         )
         query = f"""
-            {parts['duplicate_cte']}
             SELECT {', '.join(select_items)}
             FROM books b
-            {parts['duplicate_join']}
             {parts['library_join']}
             WHERE {parts['active']}
         """
         row = connection.execute(query).fetchone()
-        return {key: int(row[key] or 0) for key in row.keys()}
+        result = {key: int(row[key] or 0) for key in row.keys()}
+
+        if "isbn" in parts["columns"]:
+            duplicate_parts = self._book_query_parts(
+                connection,
+                include_duplicate_isbn=True,
+            )
+            duplicate_expression = duplicate_parts["expressions"]["duplicate_isbn"]
+            base_problem_expression = " OR ".join(expressions.values()) or "0"
+            duplicate_row = connection.execute(
+                f"""
+                {duplicate_parts['duplicate_cte']}
+                SELECT
+                    SUM(CASE WHEN {duplicate_expression} THEN 1 ELSE 0 END)
+                        AS duplicate_isbn,
+                    SUM(CASE WHEN {duplicate_expression}
+                                  AND NOT ({base_problem_expression})
+                             THEN 1 ELSE 0 END) AS duplicate_only
+                FROM books b
+                {duplicate_parts['duplicate_join']}
+                {duplicate_parts['library_join']}
+                WHERE {duplicate_parts['active']}
+                """
+            ).fetchone()
+            result["duplicate_isbn"] = int(duplicate_row["duplicate_isbn"] or 0)
+            result["problem_books"] += int(duplicate_row["duplicate_only"] or 0)
+
+        for issue_type in ISSUE_LABELS:
+            result.setdefault(issue_type, 0)
+        return result
 
     def _audiobook_summary(self, connection):
         tables = self._tables(connection)
         if "audiobooks" not in tables:
             raise RuntimeError("audiobooks 테이블이 없습니다.")
         columns = self._columns(connection, "audiobooks")
-        active = "COALESCE(a.is_deleted, 0) = 0" if "is_deleted" in columns else "1 = 1"
+        active = (
+            "(a.is_deleted = 0 OR a.is_deleted IS NULL)"
+            if "is_deleted" in columns
+            else "1 = 1"
+        )
 
         def missing(column):
             return f"TRIM(COALESCE(a.{column}, '')) = ''" if column in columns else "0"
@@ -316,29 +355,24 @@ class BookOasisMateEngine:
         result["track_file_size_missing"] = 0
         if "audiobook_tracks" in tables:
             track_columns = self._columns(connection, "audiobook_tracks")
-            result["total_tracks"] = int(
-                connection.execute(
-                    f"""
-                    SELECT COUNT(*)
-                    FROM audiobook_tracks t
-                    JOIN audiobooks a ON a.id = t.audiobook_id
-                    WHERE {active}
-                    """
-                ).fetchone()[0]
-                or 0
+            missing_size = (
+                "SUM(CASE WHEN COALESCE(t.file_size, 0) <= 0 THEN 1 ELSE 0 END)"
+                if "file_size" in track_columns
+                else "0"
             )
-            if "file_size" in track_columns:
-                result["track_file_size_missing"] = int(
-                    connection.execute(
-                        f"""
-                        SELECT COUNT(*)
-                        FROM audiobook_tracks t
-                        JOIN audiobooks a ON a.id = t.audiobook_id
-                        WHERE {active} AND COALESCE(t.file_size, 0) <= 0
-                        """
-                    ).fetchone()[0]
-                    or 0
-                )
+            track_row = connection.execute(
+                f"""
+                SELECT COUNT(*) AS total_tracks,
+                       {missing_size} AS track_file_size_missing
+                FROM audiobook_tracks t
+                JOIN audiobooks a ON a.id = t.audiobook_id
+                WHERE {active}
+                """
+            ).fetchone()
+            result["total_tracks"] = int(track_row["total_tracks"] or 0)
+            result["track_file_size_missing"] = int(
+                track_row["track_file_size_missing"] or 0
+            )
         return result
 
     def _issue_diagnostics(self, item, issue_keys):
@@ -370,7 +404,7 @@ class BookOasisMateEngine:
             "classification": {
                 "active_filter": {
                     "rule": "삭제되지 않은 활성 도서",
-                    "sql": "COALESCE(books.is_deleted, 0) = 0",
+                    "sql": "books.is_deleted = 0 OR books.is_deleted IS NULL",
                     "matched": True,
                 },
                 "matched_issue_count": len(reasons),
@@ -628,10 +662,14 @@ class BookOasisMateEngine:
             "check_missing_isbn": self.check_missing_isbn,
         }
 
-    def list_issues(self, db_type="general", library_id=None, issue_type="all", search="", page=1, page_size=50):
-        target = self.get_target(db_type)
-        page = _as_int(page, 1, 1, 100000)
-        page_size = _as_int(page_size, 50, 10, 200)
+    def _issue_query_context(
+        self,
+        connection,
+        library_id=None,
+        issue_type="all",
+        search="",
+        include_duplicate_isbn=None,
+    ):
         search = str(search or "").strip()
         issue_type = issue_type if issue_type in PROBLEM_BOOK_LABELS else "all"
         selected_library_id = None
@@ -643,29 +681,189 @@ class BookOasisMateEngine:
             if selected_library_id <= 0:
                 raise ValueError("보관함 ID가 올바르지 않습니다.")
 
-        with closing(self._connect(target)) as connection:
-            parts = self._book_query_parts(connection)
-            expressions = {
-                key: value
-                for key, value in parts["expressions"].items()
-                if key in PROBLEM_BOOK_LABELS
-            }
-            if issue_type != "all" and issue_type not in expressions:
-                return {"items": [], "total": 0, "page": page, "page_size": page_size, "pages": 0}
-            if selected_library_id is not None and "library_id" not in parts["columns"]:
-                return {"items": [], "total": 0, "page": page, "page_size": page_size, "pages": 0}
+        include_duplicate = (
+            issue_type in {"all", "duplicate_isbn"}
+            if include_duplicate_isbn is None
+            else bool(include_duplicate_isbn)
+        )
+        parts = self._book_query_parts(
+            connection,
+            include_duplicate_isbn=include_duplicate,
+        )
+        expressions = {
+            key: value
+            for key, value in parts["expressions"].items()
+            if key in PROBLEM_BOOK_LABELS
+        }
+        if issue_type != "all" and issue_type not in expressions:
+            return None
+        if selected_library_id is not None and "library_id" not in parts["columns"]:
+            return None
+        if not expressions:
+            return None
 
-            conditions = [parts["active"]]
-            conditions.append(expressions[issue_type] if issue_type != "all" else "(" + " OR ".join(expressions.values()) + ")")
-            params = []
-            if selected_library_id is not None:
-                conditions.append("b.library_id = ?")
-                params.append(selected_library_id)
-            if search:
-                search_fields = [f"COALESCE(b.{name}, '')" for name in ("title", "series_name", "author") if name in parts["columns"]]
-                if search_fields:
-                    conditions.append("(" + " OR ".join(f"{field} LIKE ?" for field in search_fields) + ")")
-                    params.extend([f"%{search}%"] * len(search_fields))
+        conditions = [parts["active"]]
+        conditions.append(
+            expressions[issue_type]
+            if issue_type != "all"
+            else "(" + " OR ".join(expressions.values()) + ")"
+        )
+        params = []
+        if selected_library_id is not None:
+            conditions.append("b.library_id = ?")
+            params.append(selected_library_id)
+        if search:
+            search_fields = [
+                f"COALESCE(b.{name}, '')"
+                for name in ("title", "series_name", "author")
+                if name in parts["columns"]
+            ]
+            if search_fields:
+                conditions.append(
+                    "(" + " OR ".join(f"{field} LIKE ?" for field in search_fields) + ")"
+                )
+                params.extend([f"%{search}%"] * len(search_fields))
+        return {
+            "parts": parts,
+            "expressions": expressions,
+            "conditions": conditions,
+            "params": params,
+            "where": " AND ".join(conditions),
+            "base_from": (
+                f"FROM books b {parts['duplicate_join']} {parts['library_join']}"
+            ),
+        }
+
+    def count_issues(
+        self,
+        db_type="general",
+        library_id=None,
+        issue_type="all",
+        search="",
+    ):
+        target = self.get_target(db_type)
+        with closing(self._connect(target)) as connection:
+            normalized_issue_type = (
+                issue_type if issue_type in PROBLEM_BOOK_LABELS else "all"
+            )
+            if normalized_issue_type == "all":
+                base_context = self._issue_query_context(
+                    connection,
+                    library_id=library_id,
+                    issue_type=issue_type,
+                    search=search,
+                    include_duplicate_isbn=False,
+                )
+                total = 0
+                if base_context is not None:
+                    base_row = connection.execute(
+                        f"""
+                        SELECT COUNT(*) AS filtered_total
+                        {base_context['base_from']}
+                        WHERE {base_context['where']}
+                        """,
+                        base_context["params"],
+                    ).fetchone()
+                    total = int(base_row["filtered_total"] or 0)
+
+                duplicate_context = self._issue_query_context(
+                    connection,
+                    library_id=library_id,
+                    issue_type="duplicate_isbn",
+                    search=search,
+                )
+                if duplicate_context is None:
+                    return total
+                duplicate_parts = duplicate_context["parts"]
+                base_problem = (
+                    " OR ".join(base_context["expressions"].values())
+                    if base_context is not None
+                    else "0"
+                ) or "0"
+                duplicate_row = connection.execute(
+                    f"""
+                    {duplicate_parts['duplicate_cte']}
+                    SELECT COUNT(*) AS filtered_total
+                    {duplicate_context['base_from']}
+                    WHERE {duplicate_context['where']}
+                      AND NOT ({base_problem})
+                    """,
+                    duplicate_context["params"],
+                ).fetchone()
+                return total + int(duplicate_row["filtered_total"] or 0)
+
+            context = self._issue_query_context(
+                connection,
+                library_id=library_id,
+                issue_type=issue_type,
+                search=search,
+            )
+            if context is None:
+                return 0
+            parts = context["parts"]
+            row = connection.execute(
+                f"""
+                {parts['duplicate_cte']}
+                SELECT COUNT(*) AS filtered_total
+                {context['base_from']}
+                WHERE {context['where']}
+                """,
+                context["params"],
+            ).fetchone()
+            return int(row["filtered_total"] or 0)
+
+    def list_issues(
+        self,
+        db_type="general",
+        library_id=None,
+        issue_type="all",
+        search="",
+        page=1,
+        page_size=50,
+        known_total=None,
+        skip_count=False,
+    ):
+        target = self.get_target(db_type)
+        page = _as_int(page, 1, 1, 100000)
+        page_size = _as_int(page_size, 50, 10, 200)
+        with closing(self._connect(target)) as connection:
+            context = self._issue_query_context(
+                connection,
+                library_id=library_id,
+                issue_type=issue_type,
+                search=search,
+            )
+            if context is None:
+                return {
+                    "items": [],
+                    "total": 0,
+                    "total_exact": True,
+                    "count_status": "exact",
+                    "has_more": False,
+                    "page": page,
+                    "page_size": page_size,
+                    "pages": 0,
+                }
+            parts = context["parts"]
+            expressions = context["expressions"]
+            if known_total is None and not skip_count:
+                total_row = connection.execute(
+                    f"""
+                    {parts['duplicate_cte']}
+                    SELECT COUNT(*) AS filtered_total
+                    {context['base_from']}
+                    WHERE {context['where']}
+                    """,
+                    context["params"],
+                ).fetchone()
+                total = int(total_row["filtered_total"] or 0)
+                count_status = "exact"
+            elif known_total is None:
+                total = None
+                count_status = "unavailable"
+            else:
+                total = max(0, int(known_total or 0))
+                count_status = "exact"
 
             flag_select = [
                 f"CASE WHEN {expressions[key]} THEN 1 ELSE 0 END AS issue_{key}"
@@ -677,36 +875,27 @@ class BookOasisMateEngine:
                 self._value_expr(parts["columns"], name)
                 for name in ("id", "title", "series_name", "library_id", "author", "publisher", "isbn", "cover_image", "total_pages", "file_size", "created_at", "metadata_locked")
             ]
-            where = " AND ".join(conditions)
-            base_from = f"FROM books b {parts['duplicate_join']} {parts['library_join']}"
             rows = connection.execute(
                 f"""
                 {parts['duplicate_cte']}
                 SELECT {', '.join(value_select)}, {parts['library_name']},
                        {parts['duplicate_count']} AS isbn_count,
-                       {', '.join(flag_select)},
-                       COUNT(*) OVER() AS filtered_total
-                {base_from}
-                WHERE {where}
+                       {', '.join(flag_select)}
+                {context['base_from']}
+                WHERE {context['where']}
                 ORDER BY {('b.created_at DESC,' if 'created_at' in parts['columns'] else '')} b.id DESC
                 LIMIT ? OFFSET ?
                 """,
-                [*params, page_size, (page - 1) * page_size],
+                [*context["params"], page_size + 1, (page - 1) * page_size],
             ).fetchall()
-            total = int(rows[0]["filtered_total"] or 0) if rows else 0
-            if not rows and page > 1:
-                total = int(
-                    connection.execute(
-                        f"{parts['duplicate_cte']} SELECT COUNT(*) {base_from} WHERE {where}",
-                        params,
-                    ).fetchone()[0]
-                    or 0
-                )
+
+        has_more = len(rows) > page_size
+        if has_more:
+            rows = rows[:page_size]
 
         items = []
         for row in rows:
             item = dict(row)
-            item.pop("filtered_total", None)
             issue_keys = [key for key in PROBLEM_BOOK_LABELS if item.pop(f"issue_{key}", 0)]
             item["issues"] = [{"type": key, "label": PROBLEM_BOOK_LABELS[key]} for key in issue_keys]
             item["db_type"] = db_type
@@ -714,69 +903,96 @@ class BookOasisMateEngine:
             cover = str(item.get("cover_image") or "").replace("\\", "/").lstrip("/")
             item["cover_url"] = f"{self.bookoasis_url}/covers/{quote(cover, safe='/')}" if cover and self.bookoasis_url else ""
             items.append(item)
-        pages = (int(total) + page_size - 1) // page_size
-        return {"items": items, "total": int(total), "page": page, "page_size": page_size, "pages": pages}
+        pages = (
+            (int(total) + page_size - 1) // page_size
+            if total is not None
+            else page + (1 if has_more else 0)
+        )
+        return {
+            "items": items,
+            "total": int(total) if total is not None else None,
+            "total_exact": total is not None,
+            "count_status": count_status,
+            "has_more": has_more,
+            "page": page,
+            "page_size": page_size,
+            "pages": pages,
+        }
 
-    def issue_book_ids(self, db_type="general", library_id=None, issue_type="all", search=""):
+    def issue_book_batch(
+        self,
+        db_type="general",
+        library_id=None,
+        issue_type="all",
+        search="",
+        after_id=0,
+        batch_size=500,
+    ):
         target = self.get_target(db_type)
-        search = str(search or "").strip()
-        issue_type = issue_type if issue_type in PROBLEM_BOOK_LABELS else "all"
-        selected_library_id = None
-        if str(library_id or "").strip():
-            try:
-                selected_library_id = int(library_id)
-            except (TypeError, ValueError):
-                raise ValueError("보관함 ID가 올바르지 않습니다.")
-            if selected_library_id <= 0:
-                raise ValueError("보관함 ID가 올바르지 않습니다.")
-
+        after_id = _as_int(after_id, 0, 0, 2147483647)
+        batch_size = _as_int(batch_size, 500, 1, 2000)
         with closing(self._connect(target)) as connection:
-            parts = self._book_query_parts(connection)
-            expressions = {
-                key: value
-                for key, value in parts["expressions"].items()
-                if key in PROBLEM_BOOK_LABELS
-            }
-            if issue_type != "all" and issue_type not in expressions:
-                return []
-            if selected_library_id is not None and "library_id" not in parts["columns"]:
-                return []
-
-            conditions = [parts["active"]]
-            conditions.append(
-                expressions[issue_type]
-                if issue_type != "all"
-                else "(" + " OR ".join(expressions.values()) + ")"
+            context = self._issue_query_context(
+                connection,
+                library_id=library_id,
+                issue_type=issue_type,
+                search=search,
             )
-            params = []
-            if selected_library_id is not None:
-                conditions.append("b.library_id = ?")
-                params.append(selected_library_id)
-            if search:
-                search_fields = [
-                    f"COALESCE(b.{name}, '')"
-                    for name in ("title", "series_name", "author")
-                    if name in parts["columns"]
-                ]
-                if search_fields:
-                    conditions.append(
-                        "(" + " OR ".join(f"{field} LIKE ?" for field in search_fields) + ")"
-                    )
-                    params.extend([f"%{search}%"] * len(search_fields))
-
+            if context is None:
+                return []
+            parts = context["parts"]
             rows = connection.execute(
                 f"""
                 {parts['duplicate_cte']}
-                SELECT b.id
-                FROM books b
-                {parts['duplicate_join']}
-                {parts['library_join']}
-                WHERE {' AND '.join(conditions)}
+                SELECT b.id, b.title
+                {context['base_from']}
+                WHERE {context['where']} AND b.id > ?
                 ORDER BY b.id
+                LIMIT ?
                 """,
-                params,
+                [*context["params"], after_id, batch_size],
+            ).fetchall()
+            return [
+                {"id": int(row["id"]), "title": str(row["title"] or "")}
+                for row in rows
+                if int(row["id"] or 0) > 0
+            ]
+
+    def iter_issue_book_batches(
+        self,
+        db_type="general",
+        library_id=None,
+        issue_type="all",
+        search="",
+        after_id=0,
+        batch_size=500,
+    ):
+        last_id = max(0, int(after_id or 0))
+        while True:
+            batch = self.issue_book_batch(
+                db_type=db_type,
+                library_id=library_id,
+                issue_type=issue_type,
+                search=search,
+                after_id=last_id,
+                batch_size=batch_size,
             )
-            return [int(row[0]) for row in rows if int(row[0] or 0) > 0]
+            if not batch:
+                break
+            yield batch
+            last_id = int(batch[-1]["id"])
+
+    def issue_book_ids(self, db_type="general", library_id=None, issue_type="all", search=""):
+        return [
+            int(item["id"])
+            for batch in self.iter_issue_book_batches(
+                db_type=db_type,
+                library_id=library_id,
+                issue_type=issue_type,
+                search=search,
+            )
+            for item in batch
+        ]
 
     def scanner_status(self, db_type="general", limit=100):
         target = self.get_target(db_type)
@@ -870,18 +1086,46 @@ class BookOasisMateEngine:
                     search_fields.append("COALESCE(l.name, '')")
                 conditions.append("(" + " OR ".join(f"{field} LIKE ?" for field in search_fields) + ")")
                 params.extend([f"%{search}%"] * len(search_fields))
-            rows = [dict(row) for row in connection.execute(
+            cursor = connection.execute(
                 f"""
                 SELECT b.id, b.title, b.series_name, {library_id_expr} AS library_id,
                        {file_path} AS file_path, {cover_image}, {parts['library_name']}
                 FROM books b
                 {parts['library_join']}
                 WHERE {' AND '.join(conditions)}
-                ORDER BY b.series_name, b.id
+                ORDER BY {('b.library_id,' if 'library_id' in parts['columns'] else '')}
+                         b.series_name, b.id
                 """,
                 params,
-            ).fetchall()]
-        items = find_series_gaps(rows)
+            )
+            items = []
+            analyzed_books = 0
+            current_key = None
+            current_rows = []
+            while True:
+                rows = cursor.fetchmany(2000)
+                if not rows:
+                    break
+                for raw_row in rows:
+                    row = dict(raw_row)
+                    key = (
+                        row.get("library_id"),
+                        str(row.get("series_name") or "").strip(),
+                    )
+                    if current_key is not None and key != current_key:
+                        items.extend(find_series_gaps(current_rows))
+                        current_rows = []
+                    current_key = key
+                    current_rows.append(row)
+                    analyzed_books += 1
+            if current_rows:
+                items.extend(find_series_gaps(current_rows))
+        items.sort(
+            key=lambda item: (
+                -len(item.get("missing") or []),
+                str(item.get("series_name") or "").lower(),
+            )
+        )
         for item in items:
             relative = normalize_cover_path(item.get("cover_image"))
             item["cover_url"] = (
@@ -895,7 +1139,7 @@ class BookOasisMateEngine:
         return {
             "items": items,
             "total": total,
-            "analyzed_books": len(rows),
+            "analyzed_books": analyzed_books,
             "duration_ms": round((time.monotonic() - started) * 1000),
         }
 

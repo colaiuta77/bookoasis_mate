@@ -57,7 +57,7 @@
 
       <div id="mariadb_database_settings" class="doctor-section doctor-card">
         <h4>MariaDB 연결</h4>
-        {{ macros.setting_input_text('mariadb_host', 'MariaDB 호스트', value=arg.get('mariadb_host', ''), desc=['FF 컨테이너에서 접근 가능한 MariaDB 호스트 또는 IP입니다.', '예: 172.17.0.1']) }}
+        {{ macros.setting_input_text('mariadb_host', 'MariaDB 호스트', value=arg.get('mariadb_host', ''), desc=['FF 컨테이너에서 접근 가능한 MariaDB 호스트 또는 IP입니다.', '컨테이너가 분리되어 있으면 127.0.0.1은 FF 컨테이너 자신이므로 MariaDB 서버 주소를 입력해야 합니다.', 'MariaDB 계정의 Host 허용 범위에는 FF가 실제로 접속하는 원본 IP가 포함되어야 합니다.', '예: 172.17.0.1']) }}
         {{ macros.setting_input_int('mariadb_port', 'MariaDB 포트', value=arg.get('mariadb_port', '3306'), desc=['기본값 3306']) }}
         {{ macros.setting_input_text('mariadb_user', 'MariaDB 사용자', value=arg.get('mariadb_user', ''), desc=['진단만 사용할 때는 media_general·media_adult·media_audiobook 읽기 권한이 필요합니다.', '카테고리·Kavita·통DB 실제 이관에는 대상 DB 쓰기와 논리 백업·복원 권한이 필요하므로 BookOasis와 같은 수준의 계정을 권장합니다.']) }}
         {{ macros.setting_input_text('mariadb_password', 'MariaDB 비밀번호', value=arg.get('mariadb_password', ''), type='password', desc=['로그나 연결 결과에 표시하지 않습니다.']) }}

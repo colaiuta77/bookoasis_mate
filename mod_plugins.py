@@ -1,4 +1,5 @@
 # BookOasis 플러그인 카탈로그와 GitHub·ZIP 설치 관리 화면을 제공합니다.
+import json
 import time
 import traceback
 
@@ -18,11 +19,116 @@ class ModulePlugins(PluginModuleBase):
             "plugin_manager_max_archive_mb": "100",
             "plugin_manager_max_extracted_mb": "500",
             "plugin_manager_max_files": "2000",
+            "plugin_manager_discovery_topics": "bookoasis-plugin",
+            "plugin_manager_discovery_cache_hours": "6",
         }
         self.manager = BookOasisPluginManager(P.logger)
 
     def _settings(self):
         return P.ModelSetting.to_dict()
+
+    def _catalog_overview(self, settings, refresh_remote=False):
+        catalog_items = self.manager.catalog(
+            settings,
+            refresh_remote=refresh_remote,
+        )
+        try:
+            discovery = self.manager.discovery(settings) or {}
+        except Exception as error:
+            P.logger.warning(
+                "[BookOasisMate] Topic 카탈로그 캐시 조회 실패: "
+                f"{type(error).__name__}"
+            )
+            discovery = {}
+
+        merged = []
+        known_ids = set()
+        for source_item in catalog_items:
+            item = dict(source_item)
+            plugin_id = str(item.get("id") or "").strip()
+            if not plugin_id or item.get("installed") or plugin_id in known_ids:
+                continue
+            known_ids.add(plugin_id)
+            merged.append(item)
+
+        topic_count = 0
+        for source_item in discovery.get("items") or []:
+            item = dict(source_item)
+            plugin_id = str(item.get("id") or "").strip()
+            if not plugin_id or item.get("installed") or plugin_id in known_ids:
+                continue
+            item["trusted"] = True
+            item["verified"] = True
+            known_ids.add(plugin_id)
+            merged.append(item)
+            topic_count += 1
+
+        return {
+            "items": merged,
+            "topics": list(discovery.get("topics") or []),
+            "fetched_at": discovery.get("fetched_at") or "",
+            "stale": bool(discovery.get("stale")),
+            "topic_count": topic_count,
+        }
+
+    def _installed_overview(self, settings, auto_check=False):
+        update_check = self.manager.installed_update_status(settings)
+        if auto_check and update_check.get("stale"):
+            update_check = self.manager.start_installed_update_refresh(
+                settings, force=False
+            )
+        local_plugins = self.manager.installed(settings)
+        runtime_data = {}
+        runtime_available = False
+        runtime_message = ""
+        try:
+            runtime_data = P.bookoasis_mate_service.plugin_management() or {}
+            runtime_available = bool(runtime_data.get("success"))
+            runtime_message = str(
+                runtime_data.get("message") or runtime_data.get("error") or ""
+            )
+        except Exception as error:
+            runtime_message = "BookOasis 실행 상태를 조회하지 못했습니다."
+            P.logger.warning(
+                "[BookOasisMate] 플러그인 실행 상태 조회 실패: "
+                f"{type(error).__name__}"
+            )
+
+        runtime_by_id = {
+            str(item.get("id") or ""): item
+            for item in runtime_data.get("plugins") or []
+            if item.get("id")
+        }
+        merged = []
+        for local_item in local_plugins:
+            item = dict(local_item)
+            item.pop("path", None)
+            runtime = runtime_by_id.get(str(item.get("id") or ""))
+            item.update(
+                {
+                    "runtime_available": bool(runtime_available and runtime),
+                    "enabled": runtime.get("enabled") if runtime else None,
+                    "load_status": runtime.get("load_status") if runtime else "unknown",
+                    "load_message": runtime.get("load_message") if runtime else "",
+                    "config_fields": runtime.get("config_fields") if runtime else [],
+                    "update_supported": bool(
+                        runtime and runtime.get("update_supported")
+                    ),
+                    "custom_settings_ui": bool(
+                        runtime and runtime.get("custom_settings_ui")
+                    ),
+                }
+            )
+            merged.append(item)
+        return {
+            "plugins": merged,
+            "runtime_available": runtime_available,
+            "runtime_message": runtime_message,
+            "load_status_supported": bool(
+                runtime_data.get("load_status_supported")
+            ),
+            "update_check": update_check,
+        }
 
     def process_menu(self, page, req):
         P.logger.debug("[BookOasisMate] BookOasis 플러그인 관리 메뉴 열기")
@@ -42,7 +148,7 @@ class ModulePlugins(PluginModuleBase):
                 return jsonify(
                     {
                         "ret": "success",
-                        "data": self.manager.catalog(
+                        "data": self._catalog_overview(
                             settings,
                             refresh_remote=req.form.get("refresh_remote") == "true",
                         ),
@@ -50,8 +156,62 @@ class ModulePlugins(PluginModuleBase):
                 )
             if command == "installed":
                 return jsonify(
-                    {"ret": "success", "data": self.manager.installed(settings)}
+                    {
+                        "ret": "success",
+                        "data": self._installed_overview(
+                            settings,
+                            auto_check=req.form.get("auto_check") == "true",
+                        ),
+                    }
                 )
+            if command == "installed_update_refresh":
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "data": self.manager.start_installed_update_refresh(
+                            settings,
+                            force=req.form.get("force") == "true",
+                        ),
+                    }
+                )
+            if command == "installed_update_status":
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "data": self.manager.installed_update_status(settings),
+                    }
+                )
+            if command == "runtime":
+                data = P.bookoasis_mate_service.plugin_management()
+                return jsonify({
+                    "ret": "success" if data.get("success") else "warning",
+                    "msg": data.get("message") or data.get("error") or "",
+                    "data": data,
+                })
+            if command == "runtime_toggle":
+                data = P.bookoasis_mate_service.toggle_plugin(
+                    req.form.get("plugin_id"),
+                    str(req.form.get("enabled") or "").lower() == "true",
+                )
+                return jsonify({"ret": "success" if data.get("success") else "warning", "msg": data.get("message") or data.get("error") or "", "data": data})
+            if command == "runtime_config_save":
+                changes = json.loads(req.form.get("changes") or "{}")
+                clear_keys = json.loads(req.form.get("clear_keys") or "[]")
+                if not isinstance(changes, dict) or not isinstance(clear_keys, list):
+                    raise PluginManagerError("플러그인 설정 데이터가 올바르지 않습니다.")
+                data = P.bookoasis_mate_service.save_plugin_config(
+                    req.form.get("plugin_id"), changes, clear_keys
+                )
+                return jsonify({"ret": "success" if data.get("success") else "warning", "msg": data.get("message") or data.get("error") or "", "data": data})
+            if command == "runtime_update":
+                data = P.bookoasis_mate_service.sample_update_plugin(req.form.get("plugin_id"))
+                return jsonify({"ret": "success" if data.get("success") else "warning", "msg": data.get("message") or data.get("error") or "", "data": data})
+            if command == "discovery":
+                return jsonify({"ret": "success", "data": self.manager.discovery(settings)})
+            if command == "discovery_refresh":
+                return jsonify({"ret": "success", "data": self.manager.start_discovery_refresh(settings)})
+            if command == "discovery_status":
+                return jsonify({"ret": "success", "data": self.manager.discovery_status()})
             if command == "installed_delete":
                 if req.form.get("confirm_delete") != "true":
                     raise PluginManagerError("설치 플러그인 삭제 확인이 필요합니다.")

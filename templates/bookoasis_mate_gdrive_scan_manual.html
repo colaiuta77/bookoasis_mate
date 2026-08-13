@@ -32,7 +32,8 @@
 <div class="doctor-section doctor-card">
   <h4>2. Mate 사전 설정</h4>
   <ol>
-    <li>BookOasis Mate 설정에서 현재 DB 엔진과 연결 정보를 설정하고 BookOasis URL과 스캔 웹훅 토큰을 입력합니다. SQLite는 사용할 일반·성인·오디오북 DB 경로를 확인하고 MariaDB는 접속 정보를 입력합니다.</li>
+    <li>BookOasis Mate 설정에서 현재 DB 엔진과 연결 정보를 설정하고 BookOasis URL, 관리자 계정과 스캔 웹훅 토큰을 입력합니다. 개별 경로와 루트 스캔은 웹훅 토큰을 우선 사용하며, 구버전 호환 경로만 관리자 세션을 사용합니다.</li>
+    <li><code>/api/webhook/scan</code>의 <code>path</code> 요청을 지원하는 최신 BookOasis 사용을 권장합니다. SQLite는 사용할 일반·성인·오디오북 DB 경로를 확인하고 MariaDB는 접속 정보를 입력합니다.</li>
     <li>Google Drive 연동 설정에서 경로 매핑과 rclone VFS 규칙을 실제 컨테이너 경로에 맞춥니다.</li>
     <li>FlaskFarm 시스템 설정에서 전역 API 키를 확인합니다.</li>
     <li>gd-poller 컨테이너에서 래퍼 파일과 Python 3를 실행할 수 있어야 합니다.</li>
@@ -67,7 +68,7 @@
   <p><code>CommandDispatcher</code>는 명령 뒤에 <code>action</code>, <code>file|directory</code>, 현재 경로, 이전 경로를 순서대로 자동 추가합니다.</p>
   <p><code>GOOGLE_DRIVE_FOLDER_ID</code>, <code>FLASKFARM_IP</code>와 <code>FLASKFARM_API_KEY</code>를 실제 값으로 바꿉니다. 이 방식은 전용 Dispatcher가 추가되기 전까지 사용하는 임시 방식입니다.</p>
   <p><strong>주의:</strong> API 키가 gd-poller <code>Command</code> 로그와 운영체제 프로세스 목록에 노출될 수 있습니다. 설정 파일과 로그의 접근 권한을 제한하고 외부에 공유하지 마세요.</p>
-  <p>실제 60초 버퍼와 동일 보관함 중복 제거는 BookOasis Mate의 이벤트 버퍼 설정이 담당합니다.</p>
+  <p>기본 60초 버퍼와 동일 보관함 중복 제거는 BookOasis Mate가 담당합니다. 같은 버퍼에 상위·하위 경로가 함께 들어오면 상위 경로 한 번으로 통합합니다.</p>
 </div>
 
 <div class="doctor-section doctor-card">
@@ -90,6 +91,7 @@
   <p>gd-poller가 <code>/GDRIVE/READING/만화/A.cbz</code>를 보내면 <code>/mnt/gds/GDRIVE/READING/만화/A.cbz</code>로 해석합니다. 대상 접두사는 BookOasis DB의 <code>libraries.physical_path</code>에 저장된 보관함 경로와 같아야 하며 FlaskFarm 파일시스템에 실제로 존재할 필요는 없습니다.</p>
   <p>gd-poller의 문법은 <code>원본:대상</code>이고 Mate의 문법은 <code>원본 =&gt; 대상</code>입니다. 두 설정을 동시에 사용하지 마세요.</p>
   <p>Mate 연동 설정의 <strong>경로 매핑 검사</strong>에 실제 수신 예상 경로를 입력하면 Mate 변환 경로, BookOasis 보관함과 VFS 규칙을 저장 전에 확인할 수 있습니다.</p>
+  <p>Mate는 최종 경로에서 가장 길게 일치하는 보관함 루트를 제거해 <strong>보관함 기준 상대 디렉터리</strong>를 만듭니다. 예를 들어 보관함 루트가 <code>/mnt/gds/GDRIVE/READING/만화</code>이고 변경 파일이 <code>.../만화/작품/A.cbz</code>라면 BookOasis에는 <code>작품</code>을 전달합니다.</p>
 </div>
 
 <div class="doctor-section doctor-card">
@@ -100,20 +102,24 @@
 /mnt/gds/GDRIVE|/GDRIVE|http://172.17.0.1:5572#vfs|RCLONE_USER|RCLONE_PASSWORD</code></pre>
   </div>
   <p>인증정보가 필요하면 URL에 포함하지 말고 네 번째·다섯 번째 필드에 사용자명과 비밀번호를 입력합니다. 실제 값이 포함된 설정이나 로그는 외부에 공유하지 마세요.</p>
-  <p>이동·이름 변경은 이전 경로 forget과 이전·현재 부모 경로 refresh를 실행합니다. 생성·수정·복원은 현재 부모 경로를 refresh하고, 삭제는 대상 forget 후 부모를 refresh합니다.</p>
+  <p>BookOasis의 개별 경로 스캔이 현재 경로의 VFS 갱신을 수행하므로 Mate는 생성·수정·복원 시 별도 refresh를 보내지 않습니다. 이동·이름 변경·삭제는 사라진 이전 항목만 forget하여 같은 경로의 중복 VFS 갱신을 줄입니다.</p>
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>동작 범위와 주의 사항</h4>
+  <h4>개별 경로 스캔 동작과 주의 사항</h4>
   <ul>
-    <li>BookOasis 공개 웹훅은 개별 파일 경로를 받지 않으므로, 정확한 변경 폴더의 VFS를 갱신한 뒤 해당 보관함의 비강제 증분 스캔을 요청합니다.</li>
-    <li>같은 버퍼 구간에 여러 파일이 변경되어도 동일 DB·보관함의 스캔 요청은 한 번만 보냅니다.</li>
-    <li>경로에 맞는 VFS 규칙이 없거나 refresh가 실패하면 BookOasis 스캔을 보류하고 이벤트를 재시도합니다.</li>
+    <li>Mate는 최신 토큰 기반 <code>/api/webhook/scan</code>의 <code>path</code> 계약을 우선 사용합니다. 지원되지 않으면 관리자 <code>scan-path</code> API를 사용하고, 두 경로 API가 모두 없는 구버전에서만 보관함 전체 웹훅으로 폴백합니다.</li>
+    <li>파일 생성·수정·복원은 파일의 상위 폴더를, 폴더 생성·수정은 해당 폴더를 개별 경로 스캔합니다.</li>
+    <li>파일 이동·이름 변경은 이전·현재 상위 폴더를 각각 처리합니다. 삭제된 폴더는 존재하지 않으므로 그 상위 폴더를 처리합니다.</li>
+    <li>같은 버퍼 구간에 여러 파일이 변경되어도 동일 DB·보관함·상대 폴더의 개별 경로 스캔은 한 번만 보냅니다. 상위 폴더 스캔이 하위 폴더를 포함하면 하위 요청도 상위 요청에 합칩니다.</li>
+    <li>보관함 루트 바로 아래의 파일 변경처럼 상대 폴더가 비어 있으면 <code>scan-path</code>를 호출할 수 없으므로 기존 웹훅으로 보관함 전체 비강제 증분 스캔을 요청합니다.</li>
+    <li>인증 실패·일시적 네트워크 오류는 전체 보관함 스캔으로 전환하지 않고 이벤트 재시도 정책을 적용합니다.</li>
+    <li>생성·수정·복원은 BookOasis 경로 스캔이 현재 VFS를 갱신하므로 Mate가 별도 refresh를 중복 호출하지 않습니다. 이동·이름 변경·삭제의 이전 항목 forget에 필요한 VFS 규칙이 없거나 호출에 실패하면 스캔을 보류하고 이벤트를 재시도합니다.</li>
     <li>FlaskFarm이 재시작되면 처리 중이던 이벤트는 재시도 대기로 복구합니다.</li>
     <li>재시도는 이벤트를 받을 때 저장한 원본 경로에 현재 Mate 매핑 설정을 다시 적용합니다. gd-poller가 이미 중복된 경로를 보낸 기존 실패 이벤트는 원래 경로를 복원할 수 없으므로 삭제하고 새 이벤트를 받아야 합니다.</li>
     <li>Mate는 합법적인 반복 디렉터리 이름을 훼손하지 않기 위해 중복 접두사를 자동 삭제하지 않습니다. 중복이 의심되면 원인과 설정 조치 방법을 오류로 표시합니다.</li>
     <li>지원 확장자가 아닌 파일 이벤트는 정상 응답 후 무시합니다. 디렉터리 이벤트와 스캔 범위를 변경하는 <code>.bookoasisignore</code> 파일 이벤트는 항상 처리합니다.</li>
-    <li>BookOasis도 원격 보관함 스캔 시작 시 VFS를 갱신할 수 있어 Mate의 변경 부모 경로 갱신과 중복될 수 있습니다. 현재 공개 API에는 내부 VFS 갱신 생략 옵션이 없으므로 두 동작의 로그를 함께 확인합니다.</li>
+    <li>처리 결과의 <code>mode</code>에는 <code>path_webhook</code>, <code>admin_scan_path</code>, <code>full_webhook_fallback</code> 중 실제 사용한 경로가 기록됩니다.</li>
   </ul>
 </div>
 {% endblock %}

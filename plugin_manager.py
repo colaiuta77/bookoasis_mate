@@ -15,6 +15,11 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
+try:
+    from .plugin_discovery import GitHubPluginDiscovery
+except ImportError:
+    from plugin_discovery import GitHubPluginDiscovery
+
 
 class PluginManagerError(RuntimeError):
     pass
@@ -55,11 +60,11 @@ class BookOasisPluginManager:
         },
         {
             "id": "naverkakaoridi",
-            "name": "통합 웹툰/웹소설 검색",
+            "name": "네카리 웹북 검색",
             "description": "네이버·카카오·리디·노벨피아·문피아의 웹툰과 웹소설 메타데이터를 통합 검색해 도서에 적용합니다.",
             "repository": "https://github.com/javara999/naverkakaoridi",
             "ref": "main",
-            "catalog_version": "1.6.2",
+            "catalog_version": "1.6.3",
             "dependencies": [],
         },
         {
@@ -117,6 +122,15 @@ class BookOasisPluginManager:
             "catalog_version": "1.0.0",
             "dependencies": [],
         },
+        {
+            "id": "my_reading_summary",
+            "name": "내 독서 요약",
+            "description": "개인별 독서 캘린더와 일간·월간 통계, 연속 독서일, 완독 현황을 전용 탭과 대시보드 위젯으로 표시합니다.",
+            "repository": "https://github.com/grandfoxx/my_reading_summary",
+            "ref": "master",
+            "catalog_version": "1.1.0",
+            "dependencies": [],
+        },
     )
     PLUGIN_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
     GITHUB_COMPONENT_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
@@ -162,6 +176,15 @@ class BookOasisPluginManager:
         self._job = None
         self._stop_event = threading.Event()
         self._prepared = {}
+        self._discovery = GitHubPluginDiscovery()
+        self._discovery_job = {"status": "idle", "message": "", "error": "", "started_at": "", "finished_at": ""}
+        self._installed_update_job = {
+            "status": "idle",
+            "message": "",
+            "error": "",
+            "started_at": "",
+            "finished_at": "",
+        }
 
     @staticmethod
     def _as_int(value, default, minimum, maximum):
@@ -200,6 +223,14 @@ class BookOasisPluginManager:
             * 1024,
             "max_files": cls._as_int(
                 raw.get("plugin_manager_max_files"), 2000, 10, 20000
+            ),
+            "discovery_topics": [
+                value.strip().lower()
+                for value in re.split(r"[,\r\n]+", str(raw.get("plugin_manager_discovery_topics") or "bookoasis-plugin"))
+                if value.strip()
+            ][:5],
+            "discovery_cache_hours": cls._as_int(
+                raw.get("plugin_manager_discovery_cache_hours"), 6, 1, 168
             ),
         }
 
@@ -292,6 +323,163 @@ class BookOasisPluginManager:
             "plugin_root": normalized["plugin_root"],
             "work_dir": normalized["work_dir"],
         }
+
+    def _discovery_cache_path(self, settings, create=False):
+        normalized = self.normalized_settings(settings)
+        if not normalized["work_dir"]:
+            if create:
+                raise PluginManagerError("플러그인 작업 디렉터리를 설정해 주세요.")
+            return None
+        root = Path(normalized["work_dir"]).expanduser().resolve(strict=False)
+        if create:
+            root.mkdir(parents=True, exist_ok=True)
+        return root / "github_discovery_cache.json"
+
+    def _installed_update_cache_path(self, settings, create=False):
+        normalized = self.normalized_settings(settings)
+        if not normalized["work_dir"]:
+            if create:
+                raise PluginManagerError("플러그인 작업 디렉터리를 설정해 주세요.")
+            return None
+        root = Path(normalized["work_dir"]).expanduser().resolve(strict=False)
+        if create:
+            root.mkdir(parents=True, exist_ok=True)
+        return root / "installed_update_cache.json"
+
+    def _read_installed_update_cache(self, settings):
+        path = self._installed_update_cache_path(settings)
+        if path is None or not path.is_file() or path.is_symlink():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _write_installed_update_cache(self, settings, payload):
+        path = self._installed_update_cache_path(settings, create=True)
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _discovered_catalog_items(self, settings):
+        path = self._discovery_cache_path(settings)
+        payload = self._discovery.read_cache(path) if path else {}
+        result = []
+        for raw in payload.get("items", []):
+            if not isinstance(raw, dict):
+                continue
+            try:
+                owner, repository_name = self.parse_github_url(raw.get("repository"))
+                plugin_id = self._validate_plugin_id(raw.get("id") or repository_name)
+                ref = self._validate_ref(raw.get("ref"))
+            except PluginManagerError:
+                continue
+            result.append(
+                {
+                    "id": plugin_id,
+                    "name": str(raw.get("name") or plugin_id).strip(),
+                    "description": str(
+                        raw.get("description")
+                        or "GitHub Topic에서 확인한 BookOasis 플러그인입니다."
+                    ).strip(),
+                    "repository": f"https://github.com/{owner}/{repository_name}",
+                    "ref": ref,
+                    "catalog_version": str(raw.get("catalog_version") or "").strip(),
+                    "dependencies": [],
+                    "discovered": True,
+                    "verified": True,
+                    "trusted": True,
+                }
+            )
+        return result
+
+    def _known_catalog_items(self, settings, include_discovery=True):
+        by_id = {item["id"]: copy.deepcopy(item) for item in self.CATALOG}
+        for item in self._load_custom_catalog(settings):
+            by_id.setdefault(item["id"], copy.deepcopy(item))
+        if include_discovery:
+            for item in self._discovered_catalog_items(settings):
+                by_id.setdefault(item["id"], item)
+        return by_id
+
+    def discovery(self, settings):
+        path = self._discovery_cache_path(settings)
+        payload = self._discovery.read_cache(path) if path else {}
+        installed = self._installed_catalog(settings)
+        items = []
+        for raw in payload.get("items", []):
+            if not isinstance(raw, dict) or not raw.get("id"):
+                continue
+            item = copy.deepcopy(raw)
+            local = installed.get(item["id"]) or {}
+            item.update(local)
+            item["installed"] = bool(local)
+            item["installed_version"] = local.get("installed_version", "")
+            items.append(item)
+        fetched_epoch = float(payload.get("fetched_at_epoch") or 0)
+        max_age = self.normalized_settings(settings)["discovery_cache_hours"] * 3600
+        return {
+            "items": items,
+            "topics": payload.get("topics", []),
+            "fetched_at": payload.get("fetched_at", ""),
+            "stale": not fetched_epoch or time.time() - fetched_epoch > max_age,
+        }
+
+    def discovery_status(self):
+        with self._lock:
+            return copy.deepcopy(self._discovery_job)
+
+    def start_discovery_refresh(self, settings):
+        with self._lock:
+            if self._discovery_job.get("status") == "running":
+                return copy.deepcopy(self._discovery_job)
+            self._discovery_job = {
+                "status": "running",
+                "message": "GitHub Topic에서 플러그인 후보를 찾고 있습니다.",
+                "error": "",
+                "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "finished_at": "",
+            }
+        snapshot = dict(settings or {})
+        threading.Thread(
+            target=self._run_discovery_refresh,
+            args=(snapshot,),
+            name="bookoasis-plugin-discovery",
+            daemon=True,
+        ).start()
+        return self.discovery_status()
+
+    def _run_discovery_refresh(self, settings):
+        try:
+            normalized = self.normalized_settings(settings)
+            payload = self._discovery.discover(normalized["discovery_topics"])
+            now = time.time()
+            payload.update({
+                "fetched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "fetched_at_epoch": now,
+            })
+            self._discovery.write_cache(self._discovery_cache_path(settings, create=True), payload)
+            with self._lock:
+                self._discovery_job.update({
+                    "status": "completed",
+                    "message": f"GitHub 플러그인 후보 {len(payload.get('items', []))}개를 확인했습니다.",
+                    "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                })
+        except Exception as error:
+            with self._lock:
+                self._discovery_job.update({
+                    "status": "failed",
+                    "message": "GitHub Topic 발견 작업에 실패했습니다.",
+                    "error": str(error)[:500],
+                    "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                })
 
     def _custom_catalog_path(self, settings, create=False):
         normalized = self.normalized_settings(settings)
@@ -468,10 +656,8 @@ class BookOasisPluginManager:
         return result
 
     def installed(self, settings):
-        catalog_by_id = {item["id"]: item for item in self.CATALOG}
-        catalog_by_id.update(
-            {item["id"]: item for item in self._load_custom_catalog(settings)}
-        )
+        catalog_by_id = self._known_catalog_items(settings)
+        update_items = self._read_installed_update_cache(settings).get("items") or {}
         result = []
         for plugin_id, installed in self._installed_catalog(settings).items():
             item = dict(catalog_by_id.get(plugin_id) or {})
@@ -479,8 +665,12 @@ class BookOasisPluginManager:
             item.setdefault("name", plugin_id)
             item.setdefault("description", "카탈로그에 등록되지 않은 로컬 플러그인입니다.")
             item.setdefault("repository", "")
-            latest = item.get("latest_version") or item.get("catalog_version") or ""
+            remote = update_items.get(plugin_id) or {}
+            if remote.get("name"):
+                item["name"] = remote["name"]
+            latest = str(remote.get("version") or "").strip()
             item["latest_version"] = latest
+            item["version_error"] = str(remote.get("error") or "")
             item["update_available"] = bool(
                 latest
                 and installed.get("installed_version")
@@ -489,6 +679,97 @@ class BookOasisPluginManager:
             )
             result.append(item)
         return result
+
+    def installed_update_status(self, settings):
+        cache = self._read_installed_update_cache(settings)
+        fetched_epoch = float(cache.get("fetched_at_epoch") or 0)
+        max_age = self.normalized_settings(settings)["discovery_cache_hours"] * 3600
+        with self._lock:
+            status = copy.deepcopy(self._installed_update_job)
+        status["fetched_at"] = str(cache.get("fetched_at") or "")
+        status["stale"] = not fetched_epoch or time.time() - fetched_epoch > max_age
+        if status["status"] == "idle" and fetched_epoch:
+            status["status"] = "completed"
+        return status
+
+    def start_installed_update_refresh(self, settings, force=False):
+        current = self.installed_update_status(settings)
+        with self._lock:
+            if self._installed_update_job.get("status") == "running":
+                return copy.deepcopy(current)
+            if not force and not current["stale"]:
+                return current
+            self._installed_update_job = {
+                "status": "running",
+                "message": "설치 플러그인의 최신 버전을 확인하고 있습니다.",
+                "error": "",
+                "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "finished_at": "",
+            }
+            snapshot = copy.deepcopy(self._installed_update_job)
+        threading.Thread(
+            target=self._run_installed_update_refresh,
+            args=(dict(settings or {}),),
+            name="bookoasis-installed-plugin-update-check",
+            daemon=True,
+        ).start()
+        snapshot["stale"] = current["stale"]
+        snapshot["fetched_at"] = current.get("fetched_at", "")
+        return snapshot
+
+    def _run_installed_update_refresh(self, settings):
+        errors = {}
+        remote_items = {}
+        try:
+            installed_ids = set(self._installed_catalog(settings))
+            catalog_by_id = self._known_catalog_items(settings)
+            targets = [
+                item
+                for plugin_id, item in catalog_by_id.items()
+                if plugin_id in installed_ids and item.get("repository")
+            ]
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {
+                    executor.submit(self._fetch_remote_metadata, item): item["id"]
+                    for item in targets
+                }
+                for future, plugin_id in futures.items():
+                    try:
+                        remote_items[plugin_id] = future.result()
+                    except Exception as error:
+                        errors[plugin_id] = str(error)[:240]
+                        remote_items[plugin_id] = {"version": "", "name": ""}
+            for plugin_id, error in errors.items():
+                remote_items[plugin_id]["error"] = error
+            now = time.time()
+            payload = {
+                "items": remote_items,
+                "fetched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "fetched_at_epoch": now,
+            }
+            self._write_installed_update_cache(settings, payload)
+            with self._lock:
+                self._installed_update_job.update(
+                    {
+                        "status": "completed",
+                        "message": (
+                            f"설치 플러그인 {len(targets)}개의 최신 버전을 확인했습니다."
+                            + (f" · 실패 {len(errors)}개" if errors else "")
+                        ),
+                        "error": "",
+                        "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                )
+        except Exception as error:
+            with self._lock:
+                self._installed_update_job.update(
+                    {
+                        "status": "failed",
+                        "message": "설치 플러그인 업데이트 확인에 실패했습니다.",
+                        "error": str(error)[:500],
+                        "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                )
 
     @staticmethod
     def _dependency_id(value):
@@ -601,21 +882,78 @@ class BookOasisPluginManager:
             return str(data.get("plugin version") or data.get("version") or "").strip()
         return str(data or "").strip()
 
+    @staticmethod
+    def _extract_provider_name(source, plugin_id):
+        try:
+            tree = ast.parse(str(source or ""))
+        except (SyntaxError, TypeError, ValueError):
+            return ""
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef):
+                continue
+            values = {}
+            for statement in node.body:
+                if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+                    continue
+                target = statement.targets[0]
+                value = statement.value
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id in {"id", "name"}
+                    and isinstance(value, ast.Constant)
+                    and isinstance(value.value, str)
+                ):
+                    values[target.id] = value.value.strip()
+            if values.get("id") != plugin_id:
+                continue
+            name = values.get("name", "")
+            if not name or len(name) > 200 or any(ord(char) < 32 for char in name):
+                return ""
+            return name
+        return ""
+
+    @classmethod
+    def _fetch_remote_metadata(cls, item):
+        version = cls._fetch_remote_version(item)
+        name = ""
+        try:
+            owner, repository = cls.parse_github_url(item["repository"])
+            ref = cls._validate_ref(item.get("ref"))
+            plugin_id = cls._validate_plugin_id(item.get("id"))
+            source_url = (
+                f"https://raw.githubusercontent.com/{owner}/{repository}/"
+                f"{quote(ref, safe='/')}/{plugin_id}.py"
+            )
+            request = Request(
+                source_url,
+                headers={"User-Agent": "BookOasis-Mate-Plugin-Manager/1"},
+            )
+            with urlopen(request, timeout=8) as response:
+                payload = response.read(524289)
+            if len(payload) <= 524288:
+                name = cls._extract_provider_name(
+                    payload.decode("utf-8-sig"),
+                    plugin_id,
+                )
+        except Exception:
+            name = ""
+        return {"version": version, "name": name}
+
     def catalog(self, settings, refresh_remote=False):
         installed = self._installed_catalog(settings)
         catalog_items = [copy.deepcopy(item) for item in self.CATALOG]
         catalog_items.extend(self._load_custom_catalog(settings))
-        remote_versions = {}
+        remote_metadata = {}
         remote_errors = {}
         if refresh_remote:
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = {
-                    executor.submit(self._fetch_remote_version, item): item["id"]
+                    executor.submit(self._fetch_remote_metadata, item): item["id"]
                     for item in catalog_items
                 }
                 for future, plugin_id in futures.items():
                     try:
-                        remote_versions[plugin_id] = future.result()
+                        remote_metadata[plugin_id] = future.result()
                     except Exception as error:
                         remote_errors[plugin_id] = str(error)[:240]
         result = []
@@ -625,7 +963,10 @@ class BookOasisPluginManager:
             item.update(local)
             item["installed"] = bool(local)
             item["installed_version"] = local.get("installed_version", "")
-            item["latest_version"] = remote_versions.get(item["id"]) or item["catalog_version"]
+            remote = remote_metadata.get(item["id"]) or {}
+            item["latest_version"] = remote.get("version") or item["catalog_version"]
+            if remote.get("name"):
+                item["name"] = remote["name"]
             item["version_error"] = remote_errors.get(item["id"], "")
             item["trusted"] = (
                 bool(item.get("verified"))
@@ -723,11 +1064,21 @@ class BookOasisPluginManager:
         thread.start()
         return snapshot
 
-    def _catalog_item(self, plugin_id):
+    def _catalog_item(self, plugin_id, settings=None):
         plugin_id = self._validate_plugin_id(plugin_id)
-        for item in self.CATALOG:
-            if item["id"] == plugin_id:
-                return copy.deepcopy(item)
+        catalog = (
+            self._known_catalog_items(settings)
+            if settings is not None
+            else {item["id"]: copy.deepcopy(item) for item in self.CATALOG}
+        )
+        if plugin_id in catalog:
+            item = copy.deepcopy(catalog[plugin_id])
+            item["trusted"] = bool(
+                item.get("trusted")
+                or item.get("verified")
+                or not item.get("custom")
+            )
+            return item
         raise PluginManagerError("카탈로그에서 플러그인을 찾을 수 없습니다.")
 
     def _validate_catalog_dependencies(self, item, settings):
@@ -767,14 +1118,14 @@ class BookOasisPluginManager:
             )
 
     def start_catalog_install(self, plugin_id, settings):
-        item = self._catalog_item(plugin_id)
+        item = self._catalog_item(plugin_id, settings)
         self._validate_catalog_dependencies(item, settings)
         spec = {
             "kind": "github",
             "repository": item["repository"],
             "ref": item["ref"],
             "plugin_id": item["id"],
-            "trusted": True,
+            "trusted": bool(item.get("trusted")),
             "ignored_archive_files": list(item.get("ignored_archive_files") or []),
         }
         return self._begin_job(

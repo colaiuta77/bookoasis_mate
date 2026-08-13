@@ -140,7 +140,18 @@ RUN apt-get update \
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>8. 기능별 안내 위치</h4>
+  <h4>8. 네이티브 플러그인 관리</h4>
+  <ul>
+    <li><strong>카탈로그</strong>는 Mate에서 확인한 저장소와 사용자가 등록한 저장소를 관리하며, 실제 설치 전에 ZIP 구조와 Python 패키지를 검사합니다.</li>
+    <li><strong>실행 상태</strong>는 최신 BookOasis 관리 API에서 설치 발견 여부, 활성화 여부와 실제 로드 성공·오류를 구분해 표시합니다.</li>
+    <li>플러그인이 <code>config_schema</code>를 제공하면 Mate에서 설정할 수 있습니다. 비밀번호·토큰 값은 브라우저에 반환하지 않으며 비워 두면 기존 값을 유지합니다.</li>
+    <li>네이티브 업데이트 계약을 지원하는 플러그인은 BookOasis 업데이트 API를 사용합니다. GitHub 직접 설치·업데이트와는 별도 기능입니다.</li>
+    <li><strong>Topic 탐색</strong>은 GitHub의 <code>bookoasis-plugin</code> Topic 후보를 백그라운드에서 수집하고 캐시합니다. 후보는 자동 설치하지 않으며 VERSION과 플러그인 ID 확인 후 기존 패키지 검사로 넘깁니다.</li>
+  </ul>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>9. 기능별 안내 위치</h4>
   <div class="doctor-guide-grid">
     <div><strong>라이브러리 진단</strong><span>판정 기준, 스캔 상태, 표지·고아 파일 동작 방식.</span></div>
     <div><strong>카테고리 이관</strong><span>내보내기, 신규 가져오기, 기존 카테고리 병합.</span></div>

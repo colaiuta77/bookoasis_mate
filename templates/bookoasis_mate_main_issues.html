@@ -66,6 +66,7 @@
 <script>
 var issuePage = 1;
 var issuePages = 1;
+var issueHasMore = false;
 var issueLibrariesReady = false;
 var issueBatchRescan = null;
 var issueLoading = false;
@@ -74,7 +75,7 @@ var issueLoadingTimer = null;
 function updateIssueControls() {
   $('#db_type,#issue_library_id,#issue_type,#search,#search_btn').prop('disabled', issueLoading || !issueLibrariesReady);
   $('#prev_btn').prop('disabled', issueLoading || issuePage <= 1);
-  $('#next_btn').prop('disabled', issueLoading || issuePage >= issuePages);
+  $('#next_btn').prop('disabled', issueLoading || !issueHasMore);
 }
 function setIssueLoading(loading, message) {
   issueLoading = loading;
@@ -112,6 +113,7 @@ function resetIssueResults() {
   bookoasisMateClear(document.getElementById('issue_rows'));
   issuePage = 1;
   issuePages = 1;
+  issueHasMore = false;
   $('#issue_count').text('');
   $('#issue_progress').removeClass('doctor-query-status-active').text('');
   $('.doctor-table-wrap').hide();
@@ -124,8 +126,17 @@ function resetIssueResults() {
 function renderIssues(data) {
   var body = document.getElementById('issue_rows');
   bookoasisMateClear(body);
-  $('#issue_count').text('총 ' + data.total + '권');
-  if (issueBatchRescan) issueBatchRescan.setAvailableCount(data.total);
+  var hasTotal = data.total !== null && data.total !== undefined;
+  if (data.count_status === 'stale' && hasTotal) {
+    $('#issue_count').text('최근 집계 ' + Number(data.total).toLocaleString() + '권');
+  } else if (hasTotal) {
+    $('#issue_count').text('총 ' + Number(data.total).toLocaleString() + '권');
+  } else {
+    $('#issue_count').text('전체 건수 미집계 · 현재 페이지 ' + data.items.length.toLocaleString() + '권');
+  }
+  if (issueBatchRescan) {
+    issueBatchRescan.setAvailableCount(hasTotal ? data.total : data.items.length, data.total_exact !== false);
+  }
   $('#issue_empty').text('문제 도서가 없습니다.').toggle(data.items.length === 0);
   $('.doctor-table-wrap').toggle(data.items.length > 0);
   $('#issue_pagination').toggle(data.items.length > 0);
@@ -158,8 +169,10 @@ function renderIssues(data) {
     bookoasisMateBindBookActions(row, item, function() { loadIssues(issuePage); });
     body.appendChild(row);
   });
-  issuePage = data.page; issuePages = Math.max(1, data.pages || 1);
-  $('#page_info').text(issuePage + ' / ' + issuePages);
+  issuePage = data.page;
+  issuePages = Math.max(1, data.pages || 1);
+  issueHasMore = Boolean(data.has_more);
+  $('#page_info').text(data.total_exact === false ? (issuePage + ' 페이지') : (issuePage + ' / ' + issuePages));
   updateIssueControls();
 }
 function loadIssues(page) {

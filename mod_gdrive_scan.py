@@ -7,6 +7,7 @@ from datetime import datetime
 from flask import jsonify, render_template
 
 from .bookoasis_client import BookOasisClient
+from .discord_notifier import DiscordWebhookError, DiscordWebhookNotifier
 from .gdrive_scan import GDriveScanProcessor, parse_extensions, validate_event
 from .setup import *
 
@@ -23,9 +24,11 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_path_mappings": "/GDRIVE => /mnt/gds/GDRIVE",
             "gdrive_scan_vfs_rules": "/mnt/gds/GDRIVE|/GDRIVE|http://127.0.0.1:5572",
             "gdrive_scan_rc_timeout": "30",
+            "gdrive_scan_path_timeout": "120",
             "gdrive_scan_history_limit": "200",
             "gdrive_scan_retention_days": "30",
             "gdrive_scan_auto_cleanup": "True",
+            "gdrive_scan_discord_webhook_url": "",
         }
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
@@ -72,6 +75,8 @@ class ModuleGDriveScan(PluginModuleBase):
             "mariadb_read_timeout": model.get("mariadb_read_timeout"),
             "mariadb_write_timeout": model.get("mariadb_write_timeout"),
             "bookoasis_url": model.get("bookoasis_url"),
+            "bookoasis_username": model.get("bookoasis_username"),
+            "bookoasis_password": model.get("bookoasis_password"),
             "webhook_token": model.get("webhook_token"),
             "api_timeout": self._as_int(model.get("api_timeout"), 30, 1, 30),
             "gdrive_scan_enabled": model.get_bool("gdrive_scan_enabled"),
@@ -90,6 +95,9 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_rc_timeout": self._as_int(
                 model.get("gdrive_scan_rc_timeout"), 30, 1, 300
             ),
+            "gdrive_scan_path_timeout": self._as_int(
+                model.get("gdrive_scan_path_timeout"), 120, 10, 600
+            ),
             "gdrive_scan_history_limit": self._as_int(
                 model.get("gdrive_scan_history_limit"), 200, 10, 1000
             ),
@@ -97,6 +105,9 @@ class ModuleGDriveScan(PluginModuleBase):
                 model.get("gdrive_scan_retention_days"), 30, 1, 3650
             ),
             "gdrive_scan_auto_cleanup": model.get_bool("gdrive_scan_auto_cleanup"),
+            "gdrive_scan_discord_webhook_url": str(
+                model.get("gdrive_scan_discord_webhook_url") or ""
+            ).strip(),
         }
 
     def process_menu(self, page, req):
@@ -104,6 +115,8 @@ class ModuleGDriveScan(PluginModuleBase):
         P.logger.debug(f"[BookOasisMate] Google Drive 연동 메뉴 열기 page={page}")
         arg = P.ModelSetting.to_dict()
         arg["gdrive_scan_extensions"] = self._settings()["gdrive_scan_extensions"]
+        webhook_url = str(arg.pop("gdrive_scan_discord_webhook_url", "") or "")
+        arg["gdrive_scan_discord_webhook_configured"] = bool(webhook_url.strip())
         arg["page"] = page
         return render_template(
             f"{P.package_name}_{self.name}_{page}.html",
@@ -169,6 +182,28 @@ class ModuleGDriveScan(PluginModuleBase):
 
     def process_ajax(self, command, req):
         try:
+            if command == "discord_webhook_save":
+                webhook_url = str(req.form.get("webhook_url") or "").strip()
+                DiscordWebhookNotifier(webhook_url)
+                P.ModelSetting.set("gdrive_scan_discord_webhook_url", webhook_url)
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "msg": "Discord 웹훅 설정을 저장했습니다."
+                        if webhook_url
+                        else "Discord 알림을 비활성화했습니다.",
+                        "data": {"configured": bool(webhook_url)},
+                    }
+                )
+            if command == "discord_webhook_clear":
+                P.ModelSetting.set("gdrive_scan_discord_webhook_url", "")
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "msg": "Discord 웹훅 설정을 삭제했습니다.",
+                        "data": {"configured": False},
+                    }
+                )
             if command == "path_preview":
                 settings = self._settings()
                 settings["gdrive_scan_path_mappings"] = req.form.get(
@@ -287,6 +322,49 @@ class ModuleGDriveScan(PluginModuleBase):
         )
         return response
 
+    def _path_scan_callback(self, db_type, library_id, library_name, relative_path):
+        settings = self._settings()
+        client = BookOasisClient(
+            settings["bookoasis_url"],
+            settings["api_timeout"],
+            username=settings["bookoasis_username"],
+            password=settings["bookoasis_password"],
+        )
+        response = client.request_scan_path(
+            settings["webhook_token"],
+            library_id,
+            relative_path,
+            db_type=db_type,
+            force=False,
+            timeout=settings["gdrive_scan_path_timeout"],
+        )
+        if not response.get("success") and response.get("http_status") in {404, 405}:
+            admin_response = client.scan_library_path(
+                library_id,
+                relative_path,
+                db_type=db_type,
+                force=False,
+                timeout=settings["gdrive_scan_path_timeout"],
+            )
+            if admin_response.get("success"):
+                response = {**admin_response, "mode": "admin_scan_path"}
+            elif response.get("http_status") in {404, 405} and admin_response.get("http_status") in {404, 405}:
+                full_response = client.request_scan(
+                    settings["webhook_token"],
+                    library_id,
+                    db_type=db_type,
+                    force=False,
+                )
+                response = {**full_response, "mode": "full_webhook_fallback"}
+        P.logger.info(
+            "[BookOasisMate] BookOasis 개별 경로 스캔 결과 "
+            f"db={db_type} library_id={library_id} library={library_name} "
+            f"path={relative_path} "
+            f"mode={response.get('mode', 'unknown')} "
+            f"success={str(bool(response.get('success'))).lower()}"
+        )
+        return response
+
     def _process_once(self):
         settings = self._settings()
         if not settings["gdrive_scan_enabled"] or self.model is None:
@@ -308,6 +386,7 @@ class ModuleGDriveScan(PluginModuleBase):
             processor = GDriveScanProcessor(
                 settings,
                 scan_callback=self._scan_callback,
+                path_scan_callback=self._path_scan_callback,
                 logger=P.logger,
             )
             results = processor.process_batch(events)
@@ -323,6 +402,7 @@ class ModuleGDriveScan(PluginModuleBase):
             }
         try:
             max_attempts = settings["gdrive_scan_max_attempts"]
+            statuses = {}
             for event in events:
                 result = results.get(
                     int(event["id"]),
@@ -330,12 +410,27 @@ class ModuleGDriveScan(PluginModuleBase):
                 )
                 if result.get("success"):
                     self.model.finish(event["id"], result)
+                    statuses[int(event["id"])] = "completed"
                 else:
-                    self.model.fail_or_retry(
+                    statuses[int(event["id"])] = self.model.fail_or_retry(
                         event,
                         result.get("message"),
                         max_attempts=max_attempts,
                     )
+            try:
+                DiscordWebhookNotifier(
+                    settings["gdrive_scan_discord_webhook_url"]
+                ).send_batch(events, results, statuses)
+            except DiscordWebhookError as error:
+                P.logger.warning(
+                    "[BookOasisMate] Discord 변경 요약 전송 실패: "
+                    f"{error}"
+                )
+            except Exception as error:
+                P.logger.warning(
+                    "[BookOasisMate] Discord 변경 요약 전송 실패: "
+                    f"{type(error).__name__}"
+                )
             P.logger.info(
                 f"[BookOasisMate] Google Drive 변경 이벤트 {len(events)}건 처리를 마쳤습니다."
             )

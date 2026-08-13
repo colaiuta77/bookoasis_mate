@@ -463,6 +463,7 @@ function bookoasisMateBatchRescanController(options) {
   options = options || {};
   var pollTimer = null;
   var availableCount = 0;
+  var availableCountExact = true;
   var running = false;
   var belongsToPage = true;
   var lastRenderKey = '';
@@ -588,8 +589,11 @@ function bookoasisMateBatchRescanController(options) {
 
   function start() {
     if (running || availableCount <= 0) return;
-    var message = '현재 검색 조건의 전체 결과 ' + availableCount.toLocaleString() +
-      '권을 순차 재스캔하시겠습니까? 대량 작업은 오래 걸릴 수 있으며 중지할 수 있습니다.';
+    var targetText = availableCountExact
+      ? ('전체 결과 ' + availableCount.toLocaleString() + '권')
+      : '검색 결과 전체';
+    var message = '현재 검색 조건의 ' + targetText +
+      '을 순차 재스캔하시겠습니까? 대량 작업은 오래 걸릴 수 있으며 중지할 수 있습니다.';
     if (!confirm(message)) return;
     var payload = options.getPayload ? options.getPayload() : {};
     bookoasisMateAjax('main', 'batch_rescan_start', payload, function(ret) {
@@ -616,8 +620,9 @@ function bookoasisMateBatchRescanController(options) {
   return {
     refresh: refresh,
     render: render,
-    setAvailableCount: function(value) {
+    setAvailableCount: function(value, exact) {
       availableCount = Math.max(0, Number(value || 0));
+      availableCountExact = exact !== false;
       updateButtons();
     },
     destroy: stopPolling
