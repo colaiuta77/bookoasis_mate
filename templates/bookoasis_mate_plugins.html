@@ -53,7 +53,7 @@
       <p class="doctor-muted mb-0">Mate에서 호환성을 확인한 공개 플러그인 목록입니다.</p>
       <button id="plugin_catalog_refresh" type="button" class="btn btn-sm btn-outline-primary">최신 버전 확인</button>
     </div>
-    <details class="doctor-card doctor-plugin-catalog-editor">
+    <details id="plugin_custom_catalog_editor" class="doctor-card doctor-plugin-catalog-editor">
       <summary>사용자 GitHub 플러그인 추가</summary>
       <p class="doctor-muted">새 플러그인의 공개 GitHub 주소를 저장해 카탈로그에서 계속 관리합니다. 사용자 항목은 반드시 패키지 검사 후 설치합니다.</p>
       <div class="form-group">
@@ -212,6 +212,14 @@ function pluginManagerRenderCards(targetId, items, catalogMode) {
       footer.appendChild(link);
     }
     if (catalogMode) {
+      if (item.discovered) {
+        var catalogButton = pluginManagerText('button', 'btn btn-sm btn-outline-primary', '카탈로그 추가');
+        catalogButton.type = 'button'; catalogButton.dataset.pluginId = item.id; catalogButton.dataset.pluginName = item.name || item.id;
+        catalogButton.dataset.repository = item.repository || ''; catalogButton.dataset.ref = item.ref || 'main';
+        catalogButton.dataset.description = item.description || '';
+        catalogButton.addEventListener('click', pluginManagerPrepareCatalogCandidate);
+        footer.appendChild(catalogButton);
+      }
       var button = pluginManagerText('button', 'btn btn-sm btn-primary', item.custom ? '패키지 검사' : (item.installed ? '안전 업데이트' : '설치'));
       button.type = 'button'; button.dataset.pluginId = item.id; button.dataset.pluginName = item.name || item.id;
       button.dataset.repository = item.repository || ''; button.dataset.ref = item.ref || 'main';
@@ -244,6 +252,25 @@ function pluginManagerLoadCatalog(refreshRemote) {
 
 function pluginManagerLoadInstalled() {
   bookoasisMateAjax('plugins', 'installed', {}, function(ret) { pluginManagerRenderCards('plugin_installed', ret.data || [], false); }, null, {global:false});
+}
+
+function pluginManagerPrepareCatalogCandidate(event) {
+  var button = event.currentTarget;
+  $('#plugin_custom_repository').val(button.dataset.repository || '');
+  $('#plugin_custom_ref').val(button.dataset.ref || 'main');
+  $('#plugin_custom_id').val(button.dataset.pluginId || '');
+  $('#plugin_custom_name').val(button.dataset.pluginName || button.dataset.pluginId || '');
+  $('#plugin_custom_description').val(button.dataset.description || '');
+  $('#plugin_custom_verified').val('false');
+  $('a[href="#plugin_catalog_tab"]').tab('show');
+  var editor = document.getElementById('plugin_custom_catalog_editor');
+  if (editor) {
+    editor.open = true;
+    setTimeout(function() {
+      editor.scrollIntoView({behavior:'smooth', block:'start'});
+      $('#plugin_custom_verified').focus();
+    }, 100);
+  }
 }
 
 function pluginManagerRenderDiscovery(payload) {
