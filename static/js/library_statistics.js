@@ -18,6 +18,13 @@
     return bookoasisMateBytes(Number(value || 0));
   }
 
+  function gigabytes(value) {
+    var amount = Number(value || 0) / (1024 * 1024 * 1024);
+    return amount.toLocaleString('ko-KR', {
+      maximumFractionDigits: amount > 0 && amount < 1 ? 2 : 1
+    }) + ' GB';
+  }
+
   function duration(value) {
     var seconds = Math.max(0, Number(value || 0));
     if (!seconds) return '0분';
@@ -85,7 +92,7 @@
         }
       },
       scales: config.scales === false ? undefined : {
-        x: {beginAtZero: true, ticks: {color: textColor, precision: 0}, grid: {color: 'rgba(148,163,184,.18)'}},
+        x: {beginAtZero: true, ticks: {color: textColor, precision: 0, callback: config.xTick}, grid: {color: 'rgba(148,163,184,.18)'}},
         y: {beginAtZero: true, ticks: {color: textColor, precision: 0}, grid: {color: 'rgba(148,163,184,.18)'}}
       }
     };
@@ -210,7 +217,8 @@
     });
     renderChart('statistics_format_size', 'statistics_format_size_empty', result.formats, {
       type: 'bar', indexAxis: 'y', legend: false, datasetLabel: '용량',
-      label: function(item) { return item.label; }, value: function(item) { return item.size_bytes; }, tooltip: bytes
+      label: function(item) { return item.label; }, value: function(item) { return item.size_bytes; },
+      xTick: gigabytes, tooltip: bytes
     });
     deferChart('statistics_libraries', 'statistics_libraries_empty', result.libraries, {
       type: 'bar', legend: false, datasetLabel: '자료 수',
