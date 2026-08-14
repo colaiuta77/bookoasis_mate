@@ -121,3 +121,4 @@ def build_cached_statistics_status(snapshot):
 
 
 DEFAULT_STATISTICS_WIDGET_CACHE = StatisticsWidgetCache()
+DEFAULT_SUMMARY_TARGET_CACHE = StatisticsWidgetCache(ttl_seconds=60, max_entries=16)

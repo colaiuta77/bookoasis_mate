@@ -96,6 +96,15 @@ except Exception as error:
     P.logger.error(f"BookOasis Mate 통계 스냅샷 모델을 초기화하지 못했습니다: {error}")
     P.logger.error(traceback.format_exc())
 
+P.summary_snapshot_model = None
+try:
+    from .model_summary_snapshot import ModelSummarySnapshot
+
+    P.summary_snapshot_model = ModelSummarySnapshot
+except Exception as error:
+    P.logger.error(f"BookOasis Mate 상태 요약 스냅샷 모델을 초기화하지 못했습니다: {error}")
+    P.logger.error(traceback.format_exc())
+
 from .mod_main import ModuleMain
 from .mod_database_migration import ModuleDatabaseMigration
 from .mod_gdrive_scan import ModuleGDriveScan

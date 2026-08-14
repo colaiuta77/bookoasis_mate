@@ -1,6 +1,10 @@
 # BookOasis DB를 읽기 전용으로 검사하고 진단 결과를 생성합니다.
+import hashlib
+import json
+import os
 import time
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlparse
@@ -9,10 +13,12 @@ try:
     from .bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
     from .cover_inspector import normalize_cover_path
     from .series_gap import find_series_gaps
+    from .statistics_cache import DEFAULT_SUMMARY_TARGET_CACHE
 except ImportError:
     from bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
     from cover_inspector import normalize_cover_path
     from series_gap import find_series_gaps
+    from statistics_cache import DEFAULT_SUMMARY_TARGET_CACHE
 
 
 ISSUE_LABELS = {
@@ -563,8 +569,110 @@ class BookOasisMateEngine:
                 "duration_ms": round((datetime.now(timezone.utc) - started).total_seconds() * 1000),
             }
 
-    def build_report(self):
-        databases = [self.inspect_target(target) for target in self.targets()]
+    def _target_source_fingerprint(self, target):
+        if target.engine == "sqlite":
+            try:
+                stat = os.stat(target.path)
+                payload = {
+                    "size": int(stat.st_size),
+                    "mtime_ns": int(stat.st_mtime_ns),
+                }
+            except OSError as error:
+                payload = {"error": type(error).__name__}
+        else:
+            try:
+                with closing(self._connect(target)) as connection:
+                    rows = connection.execute(
+                        """
+                        SELECT table_name, table_rows, update_time,
+                               data_length, index_length
+                        FROM information_schema.tables
+                        WHERE table_schema = ?
+                          AND table_name IN (
+                            'books', 'audiobooks', 'audiobook_tracks',
+                            'libraries', 'scanner_tasks'
+                          )
+                        ORDER BY table_name
+                        """,
+                        (target.database,),
+                    ).fetchall()
+                payload = [dict(row) for row in rows]
+            except (BookOasisDatabaseError, RuntimeError, ValueError) as error:
+                payload = {"error": str(error)}
+        encoded = json.dumps(
+            {
+                "db_type": target.db_type,
+                "engine": target.engine,
+                "database": target.database or target.path,
+                "source": payload,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def source_fingerprint(self):
+        targets = self.targets()
+        worker_count = max(1, min(3, len(targets)))
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="bookoasis-summary-source",
+        ) as executor:
+            futures = {
+                target.db_type: executor.submit(
+                    self._target_source_fingerprint,
+                    target,
+                )
+                for target in targets
+            }
+            target_fingerprints = {
+                target.db_type: futures[target.db_type].result()
+                for target in targets
+            }
+        encoded = json.dumps(
+            target_fingerprints,
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
+        return {
+            "fingerprint": hashlib.sha256(encoded).hexdigest(),
+            "targets": target_fingerprints,
+        }
+
+    def build_report(self, source=None, target_cache=None, force=False):
+        targets = self.targets()
+        source = source or self.source_fingerprint()
+        target_cache = target_cache or DEFAULT_SUMMARY_TARGET_CACHE
+
+        def inspect(target):
+            if force:
+                return self.inspect_target(target)
+            key = (
+                "summary-target",
+                target.db_type,
+                str((source.get("targets") or {}).get(target.db_type) or ""),
+                bool(self.check_missing_isbn),
+                int(self.stale_days),
+            )
+            return target_cache.get_or_compute(
+                key,
+                lambda: self.inspect_target(target),
+            )
+
+        worker_count = max(1, min(3, len(targets)))
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="bookoasis-summary",
+        ) as executor:
+            futures = {
+                target.db_type: executor.submit(inspect, target)
+                for target in targets
+            }
+            databases = [
+                futures[target.db_type].result()
+                for target in targets
+            ]
         totals = {
             key: 0
             for key in [
