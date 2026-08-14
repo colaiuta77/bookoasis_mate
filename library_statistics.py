@@ -185,8 +185,14 @@ class LibraryStatisticsEngine:
                 "library_id" if "library_id" in columns else "",
                 selected_library_id,
             )
-            version_select = ["COUNT(*) AS source_rows", f"MAX({alias}.id) AS max_id"]
-            for column in ("created_at", "cover_updated_at", "file_mtime"):
+            version_select = [f"MAX({alias}.id) AS max_id"]
+            for column in (
+                "created_at",
+                "updated_at",
+                "metadata_updated_at",
+                "cover_updated_at",
+                "file_mtime",
+            ):
                 if column in columns:
                     version_select.append(f"MAX({alias}.{column}) AS max_{column}")
             row = connection.execute(
@@ -212,20 +218,59 @@ class LibraryStatisticsEngine:
                     )
             if progress_table in tables:
                 progress_columns = connection.columns(progress_table)
+                progress_select = []
+                if "id" in progress_columns:
+                    progress_select.append("MAX(p.id) AS max_progress_id")
                 if progress_time in progress_columns:
+                    progress_select.append(
+                        f"MAX(p.{progress_time}) AS latest_progress"
+                    )
+                if progress_select:
+                    if selected_library_id is None:
+                        progress_from = f"{progress_table} p"
+                        progress_where = ""
+                        progress_params = ()
+                    else:
+                        item_key = (
+                            "audiobook_id" if table == "audiobooks" else "book_id"
+                        )
+                        progress_from = (
+                            f"{progress_table} p JOIN {table} {alias} "
+                            f"ON {alias}.id = p.{item_key}"
+                        )
+                        progress_where = f" WHERE {where_sql}"
+                        progress_params = params
                     progress_row = connection.execute(
-                        f"SELECT COUNT(*) AS progress_rows, "
-                        f"MAX({progress_time}) AS latest_progress FROM {progress_table}"
+                        f"SELECT {', '.join(progress_select)} "
+                        f"FROM {progress_from}{progress_where}",
+                        progress_params,
                     ).fetchone()
-                    payload["progress_rows"] = progress_row["progress_rows"]
-                    payload["latest_progress"] = progress_row["latest_progress"]
+                    for key in progress_row.keys():
+                        payload[key] = progress_row[key]
             if table == "audiobooks" and "audiobook_tracks" in tables:
+                track_columns = connection.columns("audiobook_tracks")
+                track_select = ["MAX(t.id) AS max_track_id"]
+                for column in ("created_at", "file_mtime"):
+                    if column in track_columns:
+                        track_select.append(f"MAX(t.{column}) AS max_track_{column}")
+                if selected_library_id is None:
+                    track_from = "audiobook_tracks t"
+                    track_where = ""
+                    track_params = ()
+                else:
+                    track_from = (
+                        "audiobook_tracks t JOIN audiobooks a "
+                        "ON a.id = t.audiobook_id"
+                    )
+                    track_where = f" WHERE {where_sql}"
+                    track_params = params
                 track_row = connection.execute(
-                    "SELECT COUNT(*) AS track_rows, MAX(id) AS max_track_id "
-                    "FROM audiobook_tracks"
+                    f"SELECT {', '.join(track_select)} "
+                    f"FROM {track_from}{track_where}",
+                    track_params,
                 ).fetchone()
-                payload["track_rows"] = track_row["track_rows"]
-                payload["max_track_id"] = track_row["max_track_id"]
+                for key in track_row.keys():
+                    payload[key] = track_row[key]
 
         identity = {
             "engine": target.engine,
@@ -242,7 +287,7 @@ class LibraryStatisticsEngine:
         ).encode("utf-8")
         return {
             **identity,
-            "source_rows": int(payload.get("source_rows") or 0),
+            "source_rows": int(payload.get("max_id") or 0),
             "fingerprint": hashlib.sha256(encoded).hexdigest(),
         }
 
@@ -478,14 +523,29 @@ class LibraryStatisticsEngine:
         include_taxonomy=False,
         year_column="",
         distinct_fields=(),
+        collect_book_statistics=False,
+        library_labels=None,
     ):
         available = [field for field in fields if field[0] in columns]
         if not available:
-            return [], [], [], [], [], {}
+            return [], [], [], [], [], {}, {
+                "formats": [],
+                "libraries": [],
+                "added_over_time": [],
+                "storage_bytes": 0,
+                "added_this_year": 0,
+            }
+        selected_names = {field[0] for field in available}
         select_columns = [f"{alias}.{name} AS {name}" for name, unused_label, unused_type in available]
         if year_column and year_column in columns and year_column not in {field[0] for field in available}:
             select_columns.append(f"{alias}.{year_column} AS {year_column}")
-        cursor = connection.execute(
+            selected_names.add(year_column)
+        if collect_book_statistics:
+            for name in ("file_format", "file_size", "created_at", "library_id"):
+                if name in columns and name not in selected_names:
+                    select_columns.append(f"{alias}.{name} AS {name}")
+                    selected_names.add(name)
+        cursor = connection.execute_stream(
             f"SELECT {', '.join(select_columns)} FROM {table} {alias} WHERE {where_sql}",
             params,
         )
@@ -501,51 +561,81 @@ class LibraryStatisticsEngine:
             for name in distinct_fields
             if name in columns
         }
+        format_counts = Counter()
+        format_sizes = Counter()
+        library_counts = Counter()
+        library_sizes = Counter()
+        timeline_counts = Counter()
+        storage_bytes = 0
+        added_this_year = 0
+        current_year = str(datetime.now().year)
         current = 0
         denominator = max(1, len(available))
-        while True:
-            rows = cursor.fetchmany(2000)
-            if not rows:
-                break
-            for row in rows:
-                present = 0
-                for name, label, value_type in available:
-                    if _metadata_present(row.get(name), value_type):
-                        present += 1
-                    else:
-                        missing_counts[label] += 1
-                score = round(present / denominator * 100)
-                for minimum, maximum, bucket_label in SCORE_BUCKETS:
-                    if minimum <= score <= maximum:
-                        score_counts[bucket_label] += 1
-                        break
-                if include_taxonomy:
-                    for token in _split_tokens(row.get("genre")):
-                        key = token.casefold()
-                        genre_labels.setdefault(key, token)
-                        genre_counter[key] += 1
-                    for token in _split_tokens(row.get("tags")):
-                        key = token.casefold()
-                        tag_labels.setdefault(key, token)
-                        tag_counter[key] += 1
-                if year_column:
-                    year = _year_from_value(row.get(year_column))
-                    if year:
-                        year_counter[year] += 1
-                for name, values in distinct_values.items():
-                    value = str(row.get(name) or "").strip()
-                    if value:
-                        values.add(value)
-            current += len(rows)
-            self._check_cancel(should_stop)
-            percent = 20 + round((current / max(1, total)) * 50)
-            self._notify(
-                on_progress,
-                "metadata",
-                percent,
-                100,
-                f"메타데이터 {current:,}/{total:,}건을 분석했습니다.",
-            )
+        try:
+            while True:
+                rows = cursor.fetchmany(2000)
+                if not rows:
+                    break
+                for row in rows:
+                    if collect_book_statistics:
+                        size_bytes = int(row.get("file_size") or 0)
+                        if "file_format" in columns:
+                            format_name = str(
+                                row.get("file_format") or ""
+                            ).strip().upper()
+                            format_name = format_name or "알 수 없음"
+                            format_counts[format_name] += 1
+                            format_sizes[format_name] += size_bytes
+                        storage_bytes += size_bytes
+                        library_id = row.get("library_id")
+                        if library_id in (library_labels or {}):
+                            library_counts[library_id] += 1
+                            library_sizes[library_id] += size_bytes
+                        period = str(row.get("created_at") or "")[:7]
+                        if re.fullmatch(r"\d{4}-\d{2}", period):
+                            timeline_counts[period] += 1
+                            if period.startswith(current_year + "-"):
+                                added_this_year += 1
+                    present = 0
+                    for name, label, value_type in available:
+                        if _metadata_present(row.get(name), value_type):
+                            present += 1
+                        else:
+                            missing_counts[label] += 1
+                    score = round(present / denominator * 100)
+                    for minimum, maximum, bucket_label in SCORE_BUCKETS:
+                        if minimum <= score <= maximum:
+                            score_counts[bucket_label] += 1
+                            break
+                    if include_taxonomy:
+                        for token in _split_tokens(row.get("genre")):
+                            key = token.casefold()
+                            genre_labels.setdefault(key, token)
+                            genre_counter[key] += 1
+                        for token in _split_tokens(row.get("tags")):
+                            key = token.casefold()
+                            tag_labels.setdefault(key, token)
+                            tag_counter[key] += 1
+                    if year_column:
+                        year = _year_from_value(row.get(year_column))
+                        if year:
+                            year_counter[year] += 1
+                    for name, values in distinct_values.items():
+                        value = str(row.get(name) or "").strip()
+                        if value:
+                            values.add(value)
+                current += len(rows)
+                self._check_cancel(should_stop)
+                percent = 20 + round((current / max(1, total)) * 50)
+                self._notify(
+                    on_progress,
+                    "metadata",
+                    percent,
+                    100,
+                    f"메타데이터 {current:,}/{total:,}건을 분석했습니다.",
+                )
+        finally:
+            cursor.close()
         score_rows = [
             {"label": label, "count": int(score_counts[label])}
             for unused_minimum, unused_maximum, label in SCORE_BUCKETS
@@ -558,6 +648,42 @@ class LibraryStatisticsEngine:
             {"label": year, "count": int(count)}
             for year, count in sorted(year_counter.items())
         ]
+        format_rows = [
+            {
+                "label": label,
+                "count": int(format_counts[label]),
+                "size_bytes": int(format_sizes[label]),
+            }
+            for label in sorted(
+                format_counts,
+                key=lambda item: (-format_counts[item], item),
+            )
+        ]
+        library_rows = [
+            {
+                "id": int(library_id),
+                "name": str((library_labels or {})[library_id]),
+                "count": int(library_counts[library_id]),
+                "size_bytes": int(library_sizes[library_id]),
+            }
+            for library_id in sorted(
+                library_counts,
+                key=lambda item: (
+                    -library_counts[item],
+                    str((library_labels or {})[item]),
+                ),
+            )
+        ]
+        stream_statistics = {
+            "formats": format_rows,
+            "libraries": library_rows,
+            "added_over_time": [
+                {"period": period, "count": int(timeline_counts[period])}
+                for period in sorted(timeline_counts)
+            ][-60:],
+            "storage_bytes": int(storage_bytes),
+            "added_this_year": int(added_this_year),
+        }
         return (
             score_rows,
             missing_rows,
@@ -565,6 +691,7 @@ class LibraryStatisticsEngine:
             _top_tokens(tag_counter, tag_labels, limit=20),
             year_rows,
             {name: len(values) for name, values in distinct_values.items()},
+            stream_statistics,
         )
 
     def _analyze_books(self, connection, target, library_id, on_progress, should_stop):
@@ -573,65 +700,35 @@ class LibraryStatisticsEngine:
         library_column = "library_id" if "library_id" in columns else ""
         where_sql, params = self._where("b", active_column, library_column, library_id)
         library_name = self._resolve_library(connection, library_id)
-        storage = "COALESCE(SUM(COALESCE(b.file_size, 0)), 0)" if "file_size" in columns else "0"
-        current_year = str(datetime.now().year)
-        added_this_year = (
-            "SUM(CASE WHEN b.created_at >= ? THEN 1 ELSE 0 END)"
-            if "created_at" in columns
-            else "0"
-        )
-        summary_params = []
-        if "created_at" in columns:
-            summary_params.append(f"{current_year}-01-01 00:00:00")
-        summary_params.extend(params)
-        self._notify(on_progress, "summary", 3, 100, "도서 수와 저장 용량을 집계하고 있습니다.")
+        self._notify(on_progress, "summary", 3, 100, "도서 수를 집계하고 있습니다.")
         row = connection.execute(
             f"""
             SELECT COUNT(*) AS total_items,
                    0 AS total_authors,
                    0 AS total_publishers,
-                   {storage} AS storage_bytes,
-                   {added_this_year} AS added_this_year
+                   0 AS storage_bytes,
+                   0 AS added_this_year
             FROM books b
             WHERE {where_sql}
             """,
-            summary_params,
+            params,
         ).fetchone()
         summary = {key: int(row[key] or 0) for key in row.keys()}
         summary["total_series"] = self._series_count(connection, library_id)
         total = summary["total_items"]
-        self._notify(on_progress, "distribution", 10, 100, "포맷과 보관함 분포를 집계하고 있습니다.")
-        format_rows = []
-        if "file_format" in columns:
-            size_expr = "COALESCE(SUM(COALESCE(b.file_size, 0)), 0)" if "file_size" in columns else "0"
-            format_rows = [
-                {
-                    "label": str(item["format_name"] or "알 수 없음").upper(),
-                    "count": int(item["item_count"] or 0),
-                    "size_bytes": int(item["size_bytes"] or 0),
+        self._notify(on_progress, "distribution", 10, 100, "도서 행을 한 번 순회해 분포를 집계하고 있습니다.")
+        library_labels = {}
+        if "libraries" in connection.tables() and "library_id" in columns:
+            library_columns = connection.columns("libraries")
+            if {"id", "name"}.issubset(library_columns):
+                library_labels = {
+                    row["id"]: str(row["name"] or "")
+                    for row in connection.execute(
+                        "SELECT id, name FROM libraries ORDER BY id"
+                    ).fetchall()
                 }
-                for item in connection.execute(
-                    f"""
-                    SELECT LOWER(TRIM(COALESCE(b.file_format, ''))) AS format_name,
-                           COUNT(*) AS item_count, {size_expr} AS size_bytes
-                    FROM books b
-                    WHERE {where_sql}
-                    GROUP BY LOWER(TRIM(COALESCE(b.file_format, '')))
-                    ORDER BY item_count DESC, format_name
-                    """,
-                    params,
-                ).fetchall()
-            ]
-        library_rows = self._library_distribution(
-            connection,
-            "books",
-            "b",
-            where_sql,
-            params,
-            "COALESCE(SUM(COALESCE(b.file_size, 0)), 0)" if "file_size" in columns else "0",
-        )
         self._check_cancel(should_stop)
-        metadata, missing, genres, tags, years, distinct_counts = self._metadata_stream(
+        metadata, missing, genres, tags, years, distinct_counts, stream_statistics = self._metadata_stream(
             connection,
             "books",
             "b",
@@ -645,9 +742,15 @@ class LibraryStatisticsEngine:
             include_taxonomy=True,
             year_column="release_date",
             distinct_fields=("author", "publisher"),
+            collect_book_statistics=True,
+            library_labels=library_labels,
         )
         summary["total_authors"] = int(distinct_counts.get("author") or 0)
         summary["total_publishers"] = int(distinct_counts.get("publisher") or 0)
+        summary["storage_bytes"] = int(stream_statistics["storage_bytes"])
+        summary["added_this_year"] = int(stream_statistics["added_this_year"])
+        format_rows = stream_statistics["formats"]
+        library_rows = stream_statistics["libraries"]
         self._notify(on_progress, "ranking", 80, 100, "대용량 도서와 독서 진행 상태를 집계하고 있습니다.")
         title_expr = "b.title" if "title" in columns else "''"
         series_expr = "b.series_name" if "series_name" in columns else "''"
@@ -681,7 +784,7 @@ class LibraryStatisticsEngine:
             ).fetchall()
         ]
         progress = self._progress_funnel(connection, "book", where_sql, params)
-        timeline = self._added_timeline(connection, "books", "b", columns, where_sql, params)
+        timeline = stream_statistics["added_over_time"]
         self._check_cancel(should_stop)
         return {
             "db_type": target.db_type,
@@ -807,7 +910,7 @@ class LibraryStatisticsEngine:
                         params,
                     ).fetchall()
                 ]
-        metadata, missing, unused_genres, unused_tags, years, distinct_counts = self._metadata_stream(
+        metadata, missing, unused_genres, unused_tags, years, distinct_counts, unused_stream_statistics = self._metadata_stream(
             connection,
             "audiobooks",
             "a",
