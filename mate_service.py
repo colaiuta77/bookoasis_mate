@@ -33,6 +33,10 @@ from .library_statistics import (
     LibraryStatisticsCancelled,
     LibraryStatisticsEngine,
 )
+from .statistics_cache import (
+    DEFAULT_STATISTICS_WIDGET_CACHE,
+    build_cached_statistics_status,
+)
 from .mate_engine import BookOasisMateEngine, _as_bool, _as_int
 from .font_manager import CustomFontManager
 
@@ -181,6 +185,8 @@ class BookOasisMateService:
         self._library_statistics_started_monotonic = None
         self._library_statistics_status = self._empty_library_statistics_status()
         self._library_statistics_snapshot_checked = False
+        self._library_statistics_validation_thread = None
+        self._library_statistics_validation_token = 0
         self._migration_stop = threading.Event()
         self._migration_process = None
         self._migration_status_path = None
@@ -318,6 +324,10 @@ class BookOasisMateService:
             "error": "",
             "stopped": False,
             "cached": False,
+            "stale": False,
+            "validation_pending": False,
+            "validation_error": "",
+            "snapshot_id": 0,
         }
 
     def _debug(self, event, **fields):
@@ -477,6 +487,7 @@ class BookOasisMateService:
         )
 
     def invalidate(self):
+        DEFAULT_STATISTICS_WIDGET_CACHE.clear()
         with self._lock:
             self._cached_report = None
             self._cached_at = 0.0
@@ -491,6 +502,7 @@ class BookOasisMateService:
             if self._library_statistics_status.get("is_working") != "run":
                 self._library_statistics_status = self._empty_library_statistics_status()
                 self._library_statistics_snapshot_checked = False
+                self._library_statistics_validation_token += 1
         snapshot_model = getattr(self.P, "library_statistics_model", None)
         if snapshot_model is not None and snapshot_model.available():
             try:
@@ -545,43 +557,91 @@ class BookOasisMateService:
             age_seconds = max(0, (datetime.now() - created_at).total_seconds())
             if age_seconds > LIBRARY_STATISTICS_SNAPSHOT_SECONDS:
                 return
-            source = LibraryStatisticsEngine(self.settings()).source_fingerprint(
-                db_type=snapshot.get("db_type") or "general",
-                library_id=snapshot.get("library_id") or None,
-            )
-            if source.get("fingerprint") != snapshot.get("source_fingerprint"):
-                return
-            result = snapshot["result"]
-            restored = self._empty_library_statistics_status()
-            restored.update(
-                {
-                    "is_working": "done",
-                    "db_type": snapshot.get("db_type") or "general",
-                    "library_id": snapshot.get("library_id") or "",
-                    "library_name": result.get("library_name") or "전체 보관함",
-                    "stage": "complete",
-                    "current": 100,
-                    "total": 100,
-                    "progress_percent": 100,
-                    "finished_at": snapshot.get("created_at") or "",
-                    "message": "저장된 라이브러리 통계 결과를 표시합니다.",
-                    "result": result,
-                    "cached": True,
-                }
-            )
+            restored = build_cached_statistics_status(snapshot)
             with self._lock:
                 if self._library_statistics_status.get("is_working") == "wait":
                     self._library_statistics_status = restored
+                    self._library_statistics_validation_token += 1
+                    validation_token = self._library_statistics_validation_token
+                else:
+                    return
             self._debug(
-                "라이브러리 통계 스냅샷 복원",
+                "라이브러리 통계 스냅샷 즉시 복원",
                 db_type=restored["db_type"],
                 library_id=restored["library_id"] or "all",
                 age_seconds=round(age_seconds, 1),
+            )
+            self._start_library_statistics_validation(
+                snapshot,
+                validation_token,
             )
         except Exception as error:
             self.P.logger.warning(
                 f"BookOasis Mate 통계 스냅샷 복원 실패: {error}"
             )
+
+    def _start_library_statistics_validation(self, snapshot, validation_token):
+        with self._lock:
+            thread = self._library_statistics_validation_thread
+            if thread is not None and thread.is_alive():
+                return
+            thread = threading.Thread(
+                target=self._validate_library_statistics_snapshot,
+                args=(copy.deepcopy(snapshot), validation_token),
+                name="bookoasis-mate-statistics-validation",
+                daemon=True,
+            )
+            self._library_statistics_validation_thread = thread
+            thread.start()
+
+    def _validate_library_statistics_snapshot(self, snapshot, validation_token):
+        try:
+            source = LibraryStatisticsEngine(self.settings()).source_fingerprint(
+                db_type=snapshot.get("db_type") or "general",
+                library_id=snapshot.get("library_id") or None,
+            )
+            stale = source.get("fingerprint") != snapshot.get("source_fingerprint")
+            with self._lock:
+                status = self._library_statistics_status
+                if (
+                    validation_token != self._library_statistics_validation_token
+                    or status.get("snapshot_id") != int(snapshot.get("id") or 0)
+                    or not status.get("cached")
+                ):
+                    return
+                status["validation_pending"] = False
+                status["stale"] = stale
+                status["stage"] = "stale" if stale else "complete"
+                status["message"] = (
+                    "원본 DB 변경을 감지했습니다. 분석 버튼을 눌러 최신 통계를 생성해 주세요."
+                    if stale
+                    else "저장된 통계가 현재 원본 DB와 일치합니다."
+                )
+            self._debug(
+                "라이브러리 통계 스냅샷 검증 완료",
+                db_type=snapshot.get("db_type") or "general",
+                library_id=snapshot.get("library_id") or "all",
+                stale=str(stale).lower(),
+            )
+        except Exception as error:
+            with self._lock:
+                status = self._library_statistics_status
+                if (
+                    validation_token == self._library_statistics_validation_token
+                    and status.get("snapshot_id") == int(snapshot.get("id") or 0)
+                    and status.get("cached")
+                ):
+                    status["validation_pending"] = False
+                    status["validation_error"] = str(error)
+                    status["message"] = (
+                        "저장된 통계를 표시했습니다. 원본 변경 여부 확인에는 실패했습니다."
+                    )
+            self.P.logger.warning(
+                f"BookOasis Mate 통계 스냅샷 검증 실패: {error}"
+            )
+        finally:
+            with self._lock:
+                self._library_statistics_validation_thread = None
 
     def _library_statistics_progress(self, stage, current, total, message):
         with self._lock:
@@ -600,15 +660,16 @@ class BookOasisMateService:
     def _run_library_statistics(self, settings, db_type, library_id):
         try:
             engine = LibraryStatisticsEngine(settings)
+            source = engine.source_fingerprint(
+                db_type=db_type,
+                library_id=library_id,
+            )
             result = engine.analyze(
                 db_type=db_type,
                 library_id=library_id,
                 on_progress=self._library_statistics_progress,
                 should_stop=self._library_statistics_stop.is_set,
-            )
-            source = engine.source_fingerprint(
-                db_type=db_type,
-                library_id=library_id,
+                source=source,
             )
             snapshot_model = getattr(self.P, "library_statistics_model", None)
             if snapshot_model is not None and snapshot_model.available():
@@ -718,6 +779,7 @@ class BookOasisMateService:
         with self._lock:
             self._library_statistics_status = initial
             self._library_statistics_snapshot_checked = True
+            self._library_statistics_validation_token += 1
             self._library_statistics_started_monotonic = time.monotonic()
             thread = threading.Thread(
                 target=self._run_library_statistics,

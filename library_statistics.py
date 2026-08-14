@@ -9,8 +9,16 @@ from datetime import datetime
 
 try:
     from .bookoasis_db import BookOasisDatabaseAdapter
+    from .statistics_cache import (
+        DEFAULT_STATISTICS_WIDGET_CACHE,
+        run_widget_tasks,
+    )
 except ImportError:
     from bookoasis_db import BookOasisDatabaseAdapter
+    from statistics_cache import (
+        DEFAULT_STATISTICS_WIDGET_CACHE,
+        run_widget_tasks,
+    )
 
 
 BOOK_METADATA_FIELDS = (
@@ -291,10 +299,20 @@ class LibraryStatisticsEngine:
             "fingerprint": hashlib.sha256(encoded).hexdigest(),
         }
 
-    def analyze(self, db_type="general", library_id=None, on_progress=None, should_stop=None):
+    def analyze(
+        self,
+        db_type="general",
+        library_id=None,
+        on_progress=None,
+        should_stop=None,
+        source=None,
+        widget_cache=None,
+    ):
         started = time.monotonic()
         target = self._target(db_type)
         selected_library_id = self._selected_library_id(library_id)
+        source = source or self.source_fingerprint(db_type, selected_library_id)
+        widget_cache = widget_cache or DEFAULT_STATISTICS_WIDGET_CACHE
         self._notify(on_progress, "connect", 0, 100, "BookOasis DB에 연결하고 있습니다.")
         with closing(self.database_adapter.connect(target)) as connection:
             tables = connection.tables()
@@ -306,6 +324,8 @@ class LibraryStatisticsEngine:
                     selected_library_id,
                     on_progress,
                     should_stop,
+                    source,
+                    widget_cache,
                 )
             elif "books" in tables:
                 result = self._analyze_books(
@@ -314,6 +334,8 @@ class LibraryStatisticsEngine:
                     selected_library_id,
                     on_progress,
                     should_stop,
+                    source,
+                    widget_cache,
                 )
             else:
                 raise RuntimeError("통계를 계산할 도서 테이블이 없습니다.")
@@ -321,6 +343,25 @@ class LibraryStatisticsEngine:
         result["duration_ms"] = round((time.monotonic() - started) * 1000)
         self._notify(on_progress, "complete", 100, 100, "라이브러리 통계 분석을 완료했습니다.")
         return result
+
+    @staticmethod
+    def _widget_key(source, widget_name):
+        return (
+            str((source or {}).get("fingerprint") or ""),
+            str(widget_name or ""),
+        )
+
+    def _cached_widget(self, cache, source, widget_name, compute):
+        if cache is None or not (source or {}).get("fingerprint"):
+            return compute()
+        return cache.get_or_compute(
+            self._widget_key(source, widget_name),
+            compute,
+        )
+
+    def _connection_widget(self, target, callback):
+        with closing(self.database_adapter.connect(target)) as connection:
+            return callback(connection)
 
     def _resolve_library(self, connection, library_id):
         if library_id is None:
@@ -694,64 +735,80 @@ class LibraryStatisticsEngine:
             stream_statistics,
         )
 
-    def _analyze_books(self, connection, target, library_id, on_progress, should_stop):
-        columns = connection.columns("books")
-        active_column = "is_deleted" if "is_deleted" in columns else ""
-        library_column = "library_id" if "library_id" in columns else ""
-        where_sql, params = self._where("b", active_column, library_column, library_id)
-        library_name = self._resolve_library(connection, library_id)
-        self._notify(on_progress, "summary", 3, 100, "도서 수를 집계하고 있습니다.")
+    def _book_simple_aggregates(
+        self,
+        connection,
+        columns,
+        where_sql,
+        params,
+    ):
+        current_year = f"{datetime.now().year}-01-01 00:00:00"
+        size_expr = "COALESCE(b.file_size, 0)" if "file_size" in columns else "0"
+        added_expr = (
+            "SUM(CASE WHEN b.created_at >= ? THEN 1 ELSE 0 END)"
+            if "created_at" in columns
+            else "0"
+        )
+        summary_params = ([current_year] if "created_at" in columns else []) + list(params)
         row = connection.execute(
             f"""
-            SELECT COUNT(*) AS total_items,
-                   0 AS total_authors,
-                   0 AS total_publishers,
-                   0 AS storage_bytes,
-                   0 AS added_this_year
+            SELECT COALESCE(SUM({size_expr}), 0) AS storage_bytes,
+                   {added_expr} AS added_this_year
             FROM books b
             WHERE {where_sql}
             """,
-            params,
+            summary_params,
         ).fetchone()
-        summary = {key: int(row[key] or 0) for key in row.keys()}
-        summary["total_series"] = self._series_count(connection, library_id)
-        total = summary["total_items"]
-        self._notify(on_progress, "distribution", 10, 100, "도서 행을 한 번 순회해 분포를 집계하고 있습니다.")
-        library_labels = {}
-        if "libraries" in connection.tables() and "library_id" in columns:
-            library_columns = connection.columns("libraries")
-            if {"id", "name"}.issubset(library_columns):
-                library_labels = {
-                    row["id"]: str(row["name"] or "")
-                    for row in connection.execute(
-                        "SELECT id, name FROM libraries ORDER BY id"
-                    ).fetchall()
+
+        formats = []
+        if "file_format" in columns:
+            format_expr = "LOWER(TRIM(COALESCE(b.file_format, '')))"
+            formats = [
+                {
+                    "label": str(item["format_name"] or "알 수 없음").upper(),
+                    "count": int(item["item_count"] or 0),
+                    "size_bytes": int(item["size_bytes"] or 0),
                 }
-        self._check_cancel(should_stop)
-        metadata, missing, genres, tags, years, distinct_counts, stream_statistics = self._metadata_stream(
+                for item in connection.execute(
+                    f"""
+                    SELECT {format_expr} AS format_name,
+                           COUNT(*) AS item_count,
+                           COALESCE(SUM({size_expr}), 0) AS size_bytes
+                    FROM books b
+                    WHERE {where_sql}
+                    GROUP BY {format_expr}
+                    ORDER BY item_count DESC, format_name
+                    """,
+                    params,
+                ).fetchall()
+            ]
+
+        libraries = self._library_distribution(
+            connection,
+            "books",
+            "b",
+            where_sql,
+            params,
+            f"COALESCE(SUM({size_expr}), 0)",
+        )
+        timeline = self._added_timeline(
             connection,
             "books",
             "b",
             columns,
-            BOOK_METADATA_FIELDS,
             where_sql,
             params,
-            total,
-            on_progress,
-            should_stop,
-            include_taxonomy=True,
-            year_column="release_date",
-            distinct_fields=("author", "publisher"),
-            collect_book_statistics=True,
-            library_labels=library_labels,
         )
-        summary["total_authors"] = int(distinct_counts.get("author") or 0)
-        summary["total_publishers"] = int(distinct_counts.get("publisher") or 0)
-        summary["storage_bytes"] = int(stream_statistics["storage_bytes"])
-        summary["added_this_year"] = int(stream_statistics["added_this_year"])
-        format_rows = stream_statistics["formats"]
-        library_rows = stream_statistics["libraries"]
-        self._notify(on_progress, "ranking", 80, 100, "대용량 도서와 독서 진행 상태를 집계하고 있습니다.")
+        return {
+            "storage_bytes": int(row["storage_bytes"] or 0),
+            "added_this_year": int(row["added_this_year"] or 0),
+            "formats": formats,
+            "libraries": libraries,
+            "added_over_time": timeline,
+        }
+
+    @staticmethod
+    def _book_largest(connection, columns, where_sql, params):
         title_expr = "b.title" if "title" in columns else "''"
         series_expr = "b.series_name" if "series_name" in columns else "''"
         size_expr = "COALESCE(b.file_size, 0)" if "file_size" in columns else "0"
@@ -762,7 +819,7 @@ class LibraryStatisticsEngine:
             if {"id", "name"}.issubset(library_columns):
                 library_join = "LEFT JOIN libraries l ON l.id = b.library_id"
                 library_name_expr = "COALESCE(l.name, '')"
-        largest = [
+        return [
             {
                 "id": int(item["id"]),
                 "title": str(item["title"] or ""),
@@ -783,8 +840,162 @@ class LibraryStatisticsEngine:
                 params,
             ).fetchall()
         ]
-        progress = self._progress_funnel(connection, "book", where_sql, params)
-        timeline = stream_statistics["added_over_time"]
+
+    def _analyze_books(
+        self,
+        connection,
+        target,
+        library_id,
+        on_progress,
+        should_stop,
+        source,
+        widget_cache,
+    ):
+        columns = connection.columns("books")
+        active_column = "is_deleted" if "is_deleted" in columns else ""
+        library_column = "library_id" if "library_id" in columns else ""
+        where_sql, params = self._where("b", active_column, library_column, library_id)
+        library_name = self._resolve_library(connection, library_id)
+        self._notify(on_progress, "summary", 3, 100, "도서 수를 집계하고 있습니다.")
+        row = connection.execute(
+            f"""
+            SELECT COUNT(*) AS total_items,
+                   0 AS total_authors,
+                   0 AS total_publishers,
+                   0 AS storage_bytes,
+                   0 AS added_this_year
+            FROM books b
+            WHERE {where_sql}
+            """,
+            params,
+        ).fetchone()
+        summary = {key: int(row[key] or 0) for key in row.keys()}
+        total = summary["total_items"]
+        self._notify(on_progress, "distribution", 10, 100, "통계 위젯을 나누어 집계하고 있습니다.")
+        library_labels = {}
+        if "libraries" in connection.tables() and "library_id" in columns:
+            library_columns = connection.columns("libraries")
+            if {"id", "name"}.issubset(library_columns):
+                library_labels = {
+                    row["id"]: str(row["name"] or "")
+                    for row in connection.execute(
+                        "SELECT id, name FROM libraries ORDER BY id"
+                    ).fetchall()
+                }
+        self._check_cancel(should_stop)
+
+        def metadata_task(widget_connection):
+            return self._metadata_stream(
+                widget_connection,
+                "books",
+                "b",
+                columns,
+                BOOK_METADATA_FIELDS,
+                where_sql,
+                params,
+                total,
+                on_progress,
+                should_stop,
+                include_taxonomy=True,
+                year_column="release_date",
+                distinct_fields=("author", "publisher"),
+                collect_book_statistics=target.engine != "mariadb",
+                library_labels=library_labels,
+            )
+
+        def cached_connection_widget(name, callback):
+            return self._cached_widget(
+                widget_cache,
+                source,
+                f"book:{name}",
+                lambda: self._connection_widget(target, callback),
+            )
+
+        if target.engine == "mariadb":
+            widget_results = run_widget_tasks(
+                {
+                    "metadata": lambda: cached_connection_widget(
+                        "metadata",
+                        metadata_task,
+                    ),
+                    "simple": lambda: cached_connection_widget(
+                        "simple",
+                        lambda item_connection: self._book_simple_aggregates(
+                            item_connection,
+                            columns,
+                            where_sql,
+                            params,
+                        ),
+                    ),
+                    "series": lambda: cached_connection_widget(
+                        "series",
+                        lambda item_connection: self._series_count(
+                            item_connection,
+                            library_id,
+                        ),
+                    ),
+                    "largest": lambda: cached_connection_widget(
+                        "largest",
+                        lambda item_connection: self._book_largest(
+                            item_connection,
+                            columns,
+                            where_sql,
+                            params,
+                        ),
+                    ),
+                    "progress": lambda: cached_connection_widget(
+                        "progress",
+                        lambda item_connection: self._progress_funnel(
+                            item_connection,
+                            "book",
+                            where_sql,
+                            params,
+                        ),
+                    ),
+                },
+                max_workers=3,
+            )
+            metadata_result = widget_results["metadata"]
+            simple_statistics = widget_results["simple"]
+            summary["total_series"] = int(widget_results["series"] or 0)
+            largest = widget_results["largest"]
+            progress = widget_results["progress"]
+        else:
+            metadata_result = self._cached_widget(
+                widget_cache,
+                source,
+                "book:metadata",
+                lambda: metadata_task(connection),
+            )
+            simple_statistics = metadata_result[6]
+            summary["total_series"] = self._cached_widget(
+                widget_cache,
+                source,
+                "book:series",
+                lambda: self._series_count(connection, library_id),
+            )
+            largest = self._cached_widget(
+                widget_cache,
+                source,
+                "book:largest",
+                lambda: self._book_largest(connection, columns, where_sql, params),
+            )
+            progress = self._cached_widget(
+                widget_cache,
+                source,
+                "book:progress",
+                lambda: self._progress_funnel(connection, "book", where_sql, params),
+            )
+
+        metadata, missing, genres, tags, years, distinct_counts, unused_stream = metadata_result
+        summary["total_authors"] = int(distinct_counts.get("author") or 0)
+        summary["total_publishers"] = int(distinct_counts.get("publisher") or 0)
+        summary["storage_bytes"] = int(simple_statistics["storage_bytes"])
+        summary["added_this_year"] = int(simple_statistics["added_this_year"])
+        format_rows = simple_statistics["formats"]
+        library_rows = simple_statistics["libraries"]
+        self._notify(on_progress, "ranking", 80, 100, "대용량 도서와 독서 진행 상태를 집계하고 있습니다.")
+        timeline = simple_statistics["added_over_time"]
         self._check_cancel(should_stop)
         return {
             "db_type": target.db_type,
@@ -806,7 +1017,70 @@ class LibraryStatisticsEngine:
             "progress": progress,
         }
 
-    def _analyze_audiobooks(self, connection, target, library_id, on_progress, should_stop):
+    @staticmethod
+    def _audiobook_largest(connection, columns, where_sql, params):
+        library_join = ""
+        library_name_expr = "''"
+        if "libraries" in connection.tables() and "library_id" in columns:
+            library_columns = connection.columns("libraries")
+            if {"id", "name"}.issubset(library_columns):
+                library_join = "LEFT JOIN libraries l ON l.id = a.library_id"
+                library_name_expr = "COALESCE(l.name, '')"
+        if "audiobook_tracks" in connection.tables():
+            track_columns = connection.columns("audiobook_tracks")
+            size_expr = (
+                "COALESCE(SUM(COALESCE(t.file_size, 0)), 0)"
+                if "file_size" in track_columns
+                else "0"
+            )
+            largest_rows = connection.execute(
+                f"""
+                SELECT a.id, a.title, {library_name_expr} AS library_name,
+                       {size_expr} AS size_bytes
+                FROM audiobooks a
+                {library_join}
+                LEFT JOIN audiobook_tracks t ON t.audiobook_id = a.id
+                WHERE {where_sql}
+                GROUP BY a.id, a.title, {library_name_expr}
+                ORDER BY size_bytes DESC, a.id
+                LIMIT 20
+                """,
+                params,
+            ).fetchall()
+        else:
+            largest_rows = connection.execute(
+                f"""
+                SELECT a.id, a.title, {library_name_expr} AS library_name,
+                       0 AS size_bytes
+                FROM audiobooks a
+                {library_join}
+                WHERE {where_sql}
+                ORDER BY a.id
+                LIMIT 20
+                """,
+                params,
+            ).fetchall()
+        return [
+            {
+                "id": int(item["id"]),
+                "title": str(item["title"] or ""),
+                "series_name": "",
+                "library_name": str(item["library_name"] or ""),
+                "size_bytes": int(item["size_bytes"] or 0),
+            }
+            for item in largest_rows
+        ]
+
+    def _analyze_audiobooks(
+        self,
+        connection,
+        target,
+        library_id,
+        on_progress,
+        should_stop,
+        source,
+        widget_cache,
+    ):
         columns = connection.columns("audiobooks")
         active_column = "is_deleted" if "is_deleted" in columns else ""
         library_column = "library_id" if "library_id" in columns else ""
@@ -910,71 +1184,130 @@ class LibraryStatisticsEngine:
                         params,
                     ).fetchall()
                 ]
-        metadata, missing, unused_genres, unused_tags, years, distinct_counts, unused_stream_statistics = self._metadata_stream(
-            connection,
-            "audiobooks",
-            "a",
-            columns,
-            AUDIOBOOK_METADATA_FIELDS,
-            where_sql,
-            params,
-            total,
-            on_progress,
-            should_stop,
-            include_taxonomy=False,
-            year_column="premiered",
-            distinct_fields=("author", "publisher"),
-        )
+        def metadata_task(widget_connection):
+            return self._metadata_stream(
+                widget_connection,
+                "audiobooks",
+                "a",
+                columns,
+                AUDIOBOOK_METADATA_FIELDS,
+                where_sql,
+                params,
+                total,
+                on_progress,
+                should_stop,
+                include_taxonomy=False,
+                year_column="premiered",
+                distinct_fields=("author", "publisher"),
+            )
+
+        if target.engine == "mariadb":
+            widget_results = run_widget_tasks(
+                {
+                    "metadata": lambda: self._cached_widget(
+                        widget_cache,
+                        source,
+                        "audiobook:metadata",
+                        lambda: self._connection_widget(target, metadata_task),
+                    ),
+                    "largest": lambda: self._cached_widget(
+                        widget_cache,
+                        source,
+                        "audiobook:largest",
+                        lambda: self._connection_widget(
+                            target,
+                            lambda widget_connection: self._audiobook_largest(
+                                widget_connection,
+                                columns,
+                                where_sql,
+                                params,
+                            ),
+                        ),
+                    ),
+                    "progress": lambda: self._cached_widget(
+                        widget_cache,
+                        source,
+                        "audiobook:progress",
+                        lambda: self._connection_widget(
+                            target,
+                            lambda widget_connection: self._progress_funnel(
+                                widget_connection,
+                                "audiobook",
+                                where_sql,
+                                params,
+                            ),
+                        ),
+                    ),
+                    "timeline": lambda: self._cached_widget(
+                        widget_cache,
+                        source,
+                        "audiobook:timeline",
+                        lambda: self._connection_widget(
+                            target,
+                            lambda widget_connection: self._added_timeline(
+                                widget_connection,
+                                "audiobooks",
+                                "a",
+                                columns,
+                                where_sql,
+                                params,
+                            ),
+                        ),
+                    ),
+                },
+                max_workers=3,
+            )
+            metadata_result = widget_results["metadata"]
+            largest = widget_results["largest"]
+            progress = widget_results["progress"]
+            timeline = widget_results["timeline"]
+        else:
+            metadata_result = self._cached_widget(
+                widget_cache,
+                source,
+                "audiobook:metadata",
+                lambda: metadata_task(connection),
+            )
+            largest = self._cached_widget(
+                widget_cache,
+                source,
+                "audiobook:largest",
+                lambda: self._audiobook_largest(
+                    connection,
+                    columns,
+                    where_sql,
+                    params,
+                ),
+            )
+            progress = self._cached_widget(
+                widget_cache,
+                source,
+                "audiobook:progress",
+                lambda: self._progress_funnel(
+                    connection,
+                    "audiobook",
+                    where_sql,
+                    params,
+                ),
+            )
+            timeline = self._cached_widget(
+                widget_cache,
+                source,
+                "audiobook:timeline",
+                lambda: self._added_timeline(
+                    connection,
+                    "audiobooks",
+                    "a",
+                    columns,
+                    where_sql,
+                    params,
+                ),
+            )
+
+        metadata, missing, unused_genres, unused_tags, years, distinct_counts, unused_stream_statistics = metadata_result
         summary["total_authors"] = int(distinct_counts.get("author") or 0)
         summary["total_publishers"] = int(distinct_counts.get("publisher") or 0)
         self._notify(on_progress, "ranking", 80, 100, "대용량 오디오북과 청취 상태를 집계하고 있습니다.")
-        library_join = ""
-        library_name_expr = "''"
-        if "libraries" in connection.tables() and "library_id" in columns:
-            library_columns = connection.columns("libraries")
-            if {"id", "name"}.issubset(library_columns):
-                library_join = "LEFT JOIN libraries l ON l.id = a.library_id"
-                library_name_expr = "COALESCE(l.name, '')"
-        if "audiobook_tracks" in connection.tables():
-            track_columns = connection.columns("audiobook_tracks")
-            size_expr = "COALESCE(SUM(COALESCE(t.file_size, 0)), 0)" if "file_size" in track_columns else "0"
-            largest_rows = connection.execute(
-                f"""
-                SELECT a.id, a.title, {library_name_expr} AS library_name, {size_expr} AS size_bytes
-                FROM audiobooks a
-                {library_join}
-                LEFT JOIN audiobook_tracks t ON t.audiobook_id = a.id
-                WHERE {where_sql}
-                GROUP BY a.id, a.title, {library_name_expr}
-                ORDER BY size_bytes DESC, a.id
-                LIMIT 20
-                """,
-                params,
-            ).fetchall()
-        else:
-            largest_rows = connection.execute(
-                f"""
-                SELECT a.id, a.title, {library_name_expr} AS library_name, 0 AS size_bytes
-                FROM audiobooks a
-                {library_join}
-                WHERE {where_sql}
-                ORDER BY a.id
-                LIMIT 20
-                """,
-                params,
-            ).fetchall()
-        largest = [
-            {
-                "id": int(item["id"]),
-                "title": str(item["title"] or ""),
-                "series_name": "",
-                "library_name": str(item["library_name"] or ""),
-                "size_bytes": int(item["size_bytes"] or 0),
-            }
-            for item in largest_rows
-        ]
-        progress = self._progress_funnel(connection, "audiobook", where_sql, params)
-        timeline = self._added_timeline(connection, "audiobooks", "a", columns, where_sql, params)
         self._check_cancel(should_stop)
         return {
             "db_type": target.db_type,
