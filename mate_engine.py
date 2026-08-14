@@ -286,34 +286,9 @@ class BookOasisMateEngine:
         """
         row = connection.execute(query).fetchone()
         result = {key: int(row[key] or 0) for key in row.keys()}
-
-        if "isbn" in parts["columns"]:
-            duplicate_parts = self._book_query_parts(
-                connection,
-                include_duplicate_isbn=True,
-            )
-            duplicate_expression = duplicate_parts["expressions"]["duplicate_isbn"]
-            base_problem_expression = " OR ".join(expressions.values()) or "0"
-            duplicate_row = connection.execute(
-                f"""
-                {duplicate_parts['duplicate_cte']}
-                SELECT
-                    SUM(CASE WHEN {duplicate_expression} THEN 1 ELSE 0 END)
-                        AS duplicate_isbn,
-                    SUM(CASE WHEN {duplicate_expression}
-                                  AND NOT ({base_problem_expression})
-                             THEN 1 ELSE 0 END) AS duplicate_only
-                FROM books b
-                {duplicate_parts['duplicate_join']}
-                {duplicate_parts['library_join']}
-                WHERE {duplicate_parts['active']}
-                """
-            ).fetchone()
-            result["duplicate_isbn"] = int(duplicate_row["duplicate_isbn"] or 0)
-            result["problem_books"] += int(duplicate_row["duplicate_only"] or 0)
-
         for issue_type in ISSUE_LABELS:
             result.setdefault(issue_type, 0)
+        result["duplicate_isbn_deferred"] = "isbn" in parts["columns"]
         return result
 
     def _audiobook_summary(self, connection):
@@ -650,6 +625,12 @@ class BookOasisMateEngine:
         healthy_books = max(0, totals["total_books"] - totals["problem_books"])
         totals["healthy_books"] = healthy_books
         totals["health_percent"] = round(healthy_books / totals["total_books"] * 100) if totals["total_books"] else 0
+        duplicate_isbn_deferred = any(
+            database.get("media_kind") == "book"
+            and bool(database.get("summary", {}).get("duplicate_isbn_deferred"))
+            for database in databases
+        )
+        totals["duplicate_isbn_deferred"] = duplicate_isbn_deferred
         return {
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "database_engine": self.database_adapter.public_info(),
@@ -660,6 +641,7 @@ class BookOasisMateEngine:
             "audiobook": audiobook_totals,
             "stale_days": self.stale_days,
             "check_missing_isbn": self.check_missing_isbn,
+            "duplicate_isbn_deferred": duplicate_isbn_deferred,
         }
 
     def _issue_query_context(

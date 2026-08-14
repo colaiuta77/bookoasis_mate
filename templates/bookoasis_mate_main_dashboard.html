@@ -138,7 +138,7 @@ function doctorSummaryOverview(totals, scanner, audiobook, staleDays) {
   var groups = bookoasisMateText('div', 'doctor-summary-diagnostics', '');
   groups.appendChild(doctorMetricGroup('문제 도서', [
     {label:'점검 필요', value:doctorFormatCount(problemBooks, '권'), tone:problemBooks ? 'warning' : 'healthy'},
-    {label:'중복 ISBN 후보', value:doctorFormatCount(totals.duplicate_isbn, '권')},
+    {label:'중복 ISBN 후보', value:totals.duplicate_isbn_deferred ? '문제 도서에서 수동 검사' : doctorFormatCount(totals.duplicate_isbn, '권')},
     {label:'ISBN 누락', value:doctorFormatCount(totals.isbn, '권')}
   ], {icon:'문', badge:doctorFormatCount(problemBooks, '권'), tone:problemBooks ? 'warning' : 'healthy'}));
   groups.appendChild(doctorMetricGroup('메타데이터 누락', [
