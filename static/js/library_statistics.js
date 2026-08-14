@@ -3,8 +3,11 @@
   'use strict';
 
   var charts = {};
+  var deferredCharts = {};
+  var chartObserver = null;
   var pollTimer = null;
   var currentState = 'wait';
+  var renderedResultKey = '';
   var palette = ['#4f46e5', '#7c3aed', '#0ea5e9', '#14b8a6', '#22c55e', '#eab308', '#f97316', '#ef4444', '#ec4899', '#64748b', '#8b5cf6', '#06b6d4', '#84cc16', '#f59e0b', '#dc2626'];
 
   function number(value) {
@@ -37,6 +40,12 @@
 
   function destroyAllCharts() {
     Object.keys(charts).forEach(destroyChart);
+  }
+
+  function clearDeferredCharts() {
+    deferredCharts = {};
+    if (chartObserver) chartObserver.disconnect();
+    chartObserver = null;
   }
 
   function chartTextColor() {
@@ -98,6 +107,34 @@
     });
   }
 
+  function deferChart(id, emptyId, rows, config) {
+    var canvas = document.getElementById(id);
+    var card = canvas ? canvas.closest('.doctor-statistics-chart-card') : null;
+    if (!canvas || !card || typeof IntersectionObserver === 'undefined') {
+      renderChart(id, emptyId, rows, config);
+      return;
+    }
+    deferredCharts[id] = {
+      emptyId: emptyId,
+      rows: rows,
+      config: config
+    };
+    if (!chartObserver) {
+      chartObserver = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          if (!entry.isIntersecting) return;
+          var targetCanvas = entry.target.querySelector('canvas');
+          var deferred = targetCanvas ? deferredCharts[targetCanvas.id] : null;
+          if (!deferred) return;
+          delete deferredCharts[targetCanvas.id];
+          chartObserver.unobserve(entry.target);
+          renderChart(targetCanvas.id, deferred.emptyId, deferred.rows, deferred.config);
+        });
+      }, {rootMargin: '320px 0px'});
+    }
+    chartObserver.observe(card);
+  }
+
   function appendKpi(container, label, value, note) {
     var card = bookoasisMateText('div', 'doctor-statistics-kpi', '');
     card.appendChild(bookoasisMateText('span', '', label));
@@ -142,6 +179,16 @@
 
   function renderResult(result) {
     if (!result) return;
+    var resultKey = [
+      result.engine || '',
+      result.database || '',
+      result.library_id || '',
+      result.generated_at || '',
+      result.duration_ms == null ? '' : result.duration_ms
+    ].join('|');
+    if (resultKey === renderedResultKey) return;
+    renderedResultKey = resultKey;
+    clearDeferredCharts();
     document.getElementById('statistics_result').style.display = '';
     var mediaLabel = result.media_kind === 'audiobook' ? '오디오북' : '도서';
     document.getElementById('statistics_result_title').textContent = (result.library_name || '전체 보관함') + ' ' + mediaLabel + ' 통계';
@@ -165,20 +212,20 @@
       type: 'bar', indexAxis: 'y', legend: false, datasetLabel: '용량',
       label: function(item) { return item.label; }, value: function(item) { return item.size_bytes; }, tooltip: bytes
     });
-    renderChart('statistics_libraries', 'statistics_libraries_empty', result.libraries, {
+    deferChart('statistics_libraries', 'statistics_libraries_empty', result.libraries, {
       type: 'bar', legend: false, datasetLabel: '자료 수',
       label: function(item) { return item.name; }, value: function(item) { return item.count; }
     });
-    renderChart('statistics_metadata_score', 'statistics_metadata_score_empty', result.metadata_scores, {
+    deferChart('statistics_metadata_score', 'statistics_metadata_score_empty', result.metadata_scores, {
       type: 'bar', legend: false, datasetLabel: '자료 수',
       label: function(item) { return item.label; }, value: function(item) { return item.count; }
     });
-    renderChart('statistics_metadata_missing', 'statistics_metadata_missing_empty', result.metadata_missing, {
+    deferChart('statistics_metadata_missing', 'statistics_metadata_missing_empty', result.metadata_missing, {
       type: 'bar', indexAxis: 'y', legend: false, datasetLabel: '누락 수',
       label: function(item) { return item.label; }, value: function(item) { return item.count; }
     });
     var progress = result.progress || {};
-    renderChart('statistics_progress', 'statistics_progress_empty', [
+    deferChart('statistics_progress', 'statistics_progress_empty', [
       {label: '미시작', count: progress.not_started},
       {label: '진행 중', count: progress.in_progress},
       {label: '완료', count: progress.completed}
@@ -186,19 +233,19 @@
       type: 'doughnut', scales: false, datasetLabel: '자료 수', colors: ['#94a3b8', '#3b82f6', '#22c55e'],
       label: function(item) { return item.label; }, value: function(item) { return item.count; }
     });
-    renderChart('statistics_genres', 'statistics_genres_empty', result.genres, {
+    deferChart('statistics_genres', 'statistics_genres_empty', result.genres, {
       type: 'bar', indexAxis: 'y', legend: false, datasetLabel: '도서 수',
       label: function(item) { return item.label; }, value: function(item) { return item.count; }
     });
-    renderChart('statistics_tags', 'statistics_tags_empty', result.tags, {
+    deferChart('statistics_tags', 'statistics_tags_empty', result.tags, {
       type: 'bar', indexAxis: 'y', legend: false, datasetLabel: '도서 수',
       label: function(item) { return item.label; }, value: function(item) { return item.count; }
     });
-    renderChart('statistics_timeline', 'statistics_timeline_empty', result.added_over_time, {
+    deferChart('statistics_timeline', 'statistics_timeline_empty', result.added_over_time, {
       type: 'line', legend: false, datasetLabel: '등록 수', colors: [palette[0]],
       label: function(item) { return item.period; }, value: function(item) { return item.count; }
     });
-    renderChart('statistics_years', 'statistics_years_empty', result.publication_years, {
+    deferChart('statistics_years', 'statistics_years_empty', result.publication_years, {
       type: 'bar', legend: false, datasetLabel: '자료 수',
       label: function(item) { return item.label; }, value: function(item) { return item.count; }
     });
@@ -223,7 +270,7 @@
     document.getElementById('statistics_start').disabled = state === 'run' || document.getElementById('statistics_library').disabled;
     document.getElementById('statistics_stop').disabled = state !== 'run';
     if (status.result) renderResult(status.result);
-    if (state === 'run') schedulePoll();
+    if (state === 'run' || status.validation_pending) schedulePoll();
     else clearPoll();
   }
 
@@ -306,6 +353,7 @@
 
   window.addEventListener('beforeunload', function() {
     clearPoll();
+    clearDeferredCharts();
     destroyAllCharts();
   });
 })();

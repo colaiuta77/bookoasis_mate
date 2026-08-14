@@ -201,7 +201,15 @@ class _MariaDBReadPool:
 
 
 class ConnectionProxy:
-    def __init__(self, connection, target, release=None, metadata_cache=None, metadata_namespace=None):
+    def __init__(
+        self,
+        connection,
+        target,
+        release=None,
+        metadata_cache=None,
+        metadata_namespace=None,
+        stream_cursor_class=None,
+    ):
         self._connection = connection
         self.target = target
         self.engine = target.engine
@@ -209,6 +217,7 @@ class ConnectionProxy:
         self._closed = False
         self._metadata_cache = metadata_cache
         self._metadata_namespace = metadata_namespace
+        self._stream_cursor_class = stream_cursor_class
         self._tables_cache = None
         self._columns_cache = {}
 
@@ -224,6 +233,19 @@ class ConnectionProxy:
             cursor.close()
             raise BookOasisDatabaseError(
                 f"MariaDB 조회 실패: {error}"
+            ) from error
+        return CursorProxy(cursor)
+
+    def execute_stream(self, sql, params=()):
+        if self.engine == "sqlite":
+            return self.execute(sql, params)
+        cursor = self._connection.cursor(self._stream_cursor_class)
+        try:
+            cursor.execute(convert_placeholders(sql), tuple(params or ()))
+        except Exception as error:
+            cursor.close()
+            raise BookOasisDatabaseError(
+                f"MariaDB 스트리밍 조회 실패: {error}"
             ) from error
         return CursorProxy(cursor)
 
@@ -456,7 +478,11 @@ class BookOasisDatabaseAdapter:
 
         try:
             if not readonly:
-                return ConnectionProxy(create_connection(), target)
+                return ConnectionProxy(
+                    create_connection(),
+                    target,
+                    stream_cursor_class=module.cursors.SSDictCursor,
+                )
 
             pool_key = (
                 id(module), host, port, user, password, target.database,
@@ -478,6 +504,7 @@ class BookOasisDatabaseAdapter:
                 release=pool.release,
                 metadata_cache=self._schema_cache,
                 metadata_namespace=metadata_namespace,
+                stream_cursor_class=module.cursors.SSDictCursor,
             )
         except Exception as error:
             raise BookOasisDatabaseError(

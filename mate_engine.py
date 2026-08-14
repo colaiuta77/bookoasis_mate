@@ -1,6 +1,10 @@
 # BookOasis DB를 읽기 전용으로 검사하고 진단 결과를 생성합니다.
+import hashlib
+import json
+import os
 import time
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlparse
@@ -9,10 +13,12 @@ try:
     from .bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
     from .cover_inspector import normalize_cover_path
     from .series_gap import find_series_gaps
+    from .statistics_cache import DEFAULT_SUMMARY_TARGET_CACHE
 except ImportError:
     from bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
     from cover_inspector import normalize_cover_path
     from series_gap import find_series_gaps
+    from statistics_cache import DEFAULT_SUMMARY_TARGET_CACHE
 
 
 ISSUE_LABELS = {
@@ -286,34 +292,9 @@ class BookOasisMateEngine:
         """
         row = connection.execute(query).fetchone()
         result = {key: int(row[key] or 0) for key in row.keys()}
-
-        if "isbn" in parts["columns"]:
-            duplicate_parts = self._book_query_parts(
-                connection,
-                include_duplicate_isbn=True,
-            )
-            duplicate_expression = duplicate_parts["expressions"]["duplicate_isbn"]
-            base_problem_expression = " OR ".join(expressions.values()) or "0"
-            duplicate_row = connection.execute(
-                f"""
-                {duplicate_parts['duplicate_cte']}
-                SELECT
-                    SUM(CASE WHEN {duplicate_expression} THEN 1 ELSE 0 END)
-                        AS duplicate_isbn,
-                    SUM(CASE WHEN {duplicate_expression}
-                                  AND NOT ({base_problem_expression})
-                             THEN 1 ELSE 0 END) AS duplicate_only
-                FROM books b
-                {duplicate_parts['duplicate_join']}
-                {duplicate_parts['library_join']}
-                WHERE {duplicate_parts['active']}
-                """
-            ).fetchone()
-            result["duplicate_isbn"] = int(duplicate_row["duplicate_isbn"] or 0)
-            result["problem_books"] += int(duplicate_row["duplicate_only"] or 0)
-
         for issue_type in ISSUE_LABELS:
             result.setdefault(issue_type, 0)
+        result["duplicate_isbn_deferred"] = "isbn" in parts["columns"]
         return result
 
     def _audiobook_summary(self, connection):
@@ -588,8 +569,110 @@ class BookOasisMateEngine:
                 "duration_ms": round((datetime.now(timezone.utc) - started).total_seconds() * 1000),
             }
 
-    def build_report(self):
-        databases = [self.inspect_target(target) for target in self.targets()]
+    def _target_source_fingerprint(self, target):
+        if target.engine == "sqlite":
+            try:
+                stat = os.stat(target.path)
+                payload = {
+                    "size": int(stat.st_size),
+                    "mtime_ns": int(stat.st_mtime_ns),
+                }
+            except OSError as error:
+                payload = {"error": type(error).__name__}
+        else:
+            try:
+                with closing(self._connect(target)) as connection:
+                    rows = connection.execute(
+                        """
+                        SELECT table_name, table_rows, update_time,
+                               data_length, index_length
+                        FROM information_schema.tables
+                        WHERE table_schema = ?
+                          AND table_name IN (
+                            'books', 'audiobooks', 'audiobook_tracks',
+                            'libraries', 'scanner_tasks'
+                          )
+                        ORDER BY table_name
+                        """,
+                        (target.database,),
+                    ).fetchall()
+                payload = [dict(row) for row in rows]
+            except (BookOasisDatabaseError, RuntimeError, ValueError) as error:
+                payload = {"error": str(error)}
+        encoded = json.dumps(
+            {
+                "db_type": target.db_type,
+                "engine": target.engine,
+                "database": target.database or target.path,
+                "source": payload,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def source_fingerprint(self):
+        targets = self.targets()
+        worker_count = max(1, min(3, len(targets)))
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="bookoasis-summary-source",
+        ) as executor:
+            futures = {
+                target.db_type: executor.submit(
+                    self._target_source_fingerprint,
+                    target,
+                )
+                for target in targets
+            }
+            target_fingerprints = {
+                target.db_type: futures[target.db_type].result()
+                for target in targets
+            }
+        encoded = json.dumps(
+            target_fingerprints,
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
+        return {
+            "fingerprint": hashlib.sha256(encoded).hexdigest(),
+            "targets": target_fingerprints,
+        }
+
+    def build_report(self, source=None, target_cache=None, force=False):
+        targets = self.targets()
+        source = source or self.source_fingerprint()
+        target_cache = target_cache or DEFAULT_SUMMARY_TARGET_CACHE
+
+        def inspect(target):
+            if force:
+                return self.inspect_target(target)
+            key = (
+                "summary-target",
+                target.db_type,
+                str((source.get("targets") or {}).get(target.db_type) or ""),
+                bool(self.check_missing_isbn),
+                int(self.stale_days),
+            )
+            return target_cache.get_or_compute(
+                key,
+                lambda: self.inspect_target(target),
+            )
+
+        worker_count = max(1, min(3, len(targets)))
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="bookoasis-summary",
+        ) as executor:
+            futures = {
+                target.db_type: executor.submit(inspect, target)
+                for target in targets
+            }
+            databases = [
+                futures[target.db_type].result()
+                for target in targets
+            ]
         totals = {
             key: 0
             for key in [
@@ -650,6 +733,12 @@ class BookOasisMateEngine:
         healthy_books = max(0, totals["total_books"] - totals["problem_books"])
         totals["healthy_books"] = healthy_books
         totals["health_percent"] = round(healthy_books / totals["total_books"] * 100) if totals["total_books"] else 0
+        duplicate_isbn_deferred = any(
+            database.get("media_kind") == "book"
+            and bool(database.get("summary", {}).get("duplicate_isbn_deferred"))
+            for database in databases
+        )
+        totals["duplicate_isbn_deferred"] = duplicate_isbn_deferred
         return {
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "database_engine": self.database_adapter.public_info(),
@@ -660,6 +749,7 @@ class BookOasisMateEngine:
             "audiobook": audiobook_totals,
             "stale_days": self.stale_days,
             "check_missing_isbn": self.check_missing_isbn,
+            "duplicate_isbn_deferred": duplicate_isbn_deferred,
         }
 
     def _issue_query_context(

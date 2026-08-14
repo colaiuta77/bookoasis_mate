@@ -33,6 +33,7 @@
 var doctorHealthChart = null;
 var doctorHealthTooltip = null;
 var doctorReportPollTimer = null;
+var doctorRenderedReportKey = '';
 
 function doctorFormatCount(value, unit) {
   return Number(value || 0).toLocaleString('ko-KR') + (unit || '');
@@ -138,7 +139,7 @@ function doctorSummaryOverview(totals, scanner, audiobook, staleDays) {
   var groups = bookoasisMateText('div', 'doctor-summary-diagnostics', '');
   groups.appendChild(doctorMetricGroup('문제 도서', [
     {label:'점검 필요', value:doctorFormatCount(problemBooks, '권'), tone:problemBooks ? 'warning' : 'healthy'},
-    {label:'중복 ISBN 후보', value:doctorFormatCount(totals.duplicate_isbn, '권')},
+    {label:'중복 ISBN 후보', value:totals.duplicate_isbn_deferred ? '문제 도서에서 수동 검사' : doctorFormatCount(totals.duplicate_isbn, '권')},
     {label:'ISBN 누락', value:doctorFormatCount(totals.isbn, '권')}
   ], {icon:'문', badge:doctorFormatCount(problemBooks, '권'), tone:problemBooks ? 'warning' : 'healthy'}));
   groups.appendChild(doctorMetricGroup('메타데이터 누락', [
@@ -358,14 +359,32 @@ function doctorRenderReportStatus(status) {
   status = status || {};
   var running = status.is_working === 'run';
   var failed = status.is_working === 'fail';
-  if (status.result) renderReport(status.result);
-  $('#report_refresh_status').toggle(running || failed).toggleClass('doctor-report-refresh-fail', failed);
-  $('#report_refresh_title').text(failed ? '상태 요약 갱신 실패' : (status.cached ? '기존 결과 표시 · 최신 상태 갱신 중' : '상태 요약 갱신 중'));
+  var validating = status.validation_pending === true;
+  var stale = status.stale === true;
+  var validationFailed = Boolean(status.validation_error);
+  if (status.result) {
+    var reportKey = String(status.result.generated_at || '') + '|' + String(status.snapshot_id || 0);
+    if (reportKey !== doctorRenderedReportKey) {
+      renderReport(status.result);
+      doctorRenderedReportKey = reportKey;
+    }
+  }
+  $('#report_refresh_status').toggle(running || failed || validating || stale || validationFailed).toggleClass('doctor-report-refresh-fail', failed || validationFailed);
+  $('#report_refresh_title').text(
+    failed ? '상태 요약 갱신 실패' : (
+      validationFailed ? '저장 결과 표시 · 원본 확인 실패' : (
+        stale ? '저장 결과 표시 · 원본 변경 감지' : (
+        validating ? '저장 결과 표시 · 원본 확인 중' : (
+          status.cached ? '캐시된 상태 요약' : '상태 요약 갱신 중'
+        )
+      ))
+    )
+  );
   $('#report_refresh_message').text(status.error || status.message || '');
   $('#report_refresh_elapsed').text(status.elapsed_seconds ? Number(status.elapsed_seconds).toFixed(1) + '초' : '');
   $('#refresh_btn').prop('disabled', running);
   $('#run_scan_btn').prop('disabled', running);
-  if (running) doctorScheduleReportPoll();
+  if (running || validating) doctorScheduleReportPoll();
   else doctorClearReportPoll();
 }
 
