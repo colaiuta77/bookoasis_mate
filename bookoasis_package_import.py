@@ -21,7 +21,10 @@ except ImportError:
 
 
 DB_MEMBERS_REQUIRED = {"db/media_general.db", "db/media_adult.db"}
-DB_MEMBERS_ALLOWED = DB_MEMBERS_REQUIRED | {"db/media_audiobook.db"}
+DB_MEMBERS_ALLOWED = DB_MEMBERS_REQUIRED | {
+    "db/media_audiobook.db",
+    "db/media_video.db",
+}
 MAX_ARCHIVE_MEMBERS = 1_000_000
 MAX_ARCHIVE_UNCOMPRESSED = 2 * 1024**4
 COPY_CHUNK_SIZE = 1024 * 1024
@@ -155,6 +158,10 @@ class BookOasisPackageImportEngine:
             "audiobook": self._path(
                 self.database_settings.get("audiobook_db_path")
                 or self.database_settings.get("target_audiobook_db")
+            ) if self.database_settings else None,
+            "video": self._path(
+                self.database_settings.get("video_db_path")
+                or self.database_settings.get("target_video_db")
             ) if self.database_settings else None,
         }
         self.target_cover_root = self._path(target_cover_root)
@@ -497,6 +504,11 @@ class BookOasisPackageImportEngine:
                 and self.target_databases["audiobook"].is_file()
             ):
                 export_db_types.append("audiobook")
+            if (
+                self.target_databases.get("video") is not None
+                and self.target_databases["video"].is_file()
+            ):
+                export_db_types.append("video")
             for index, db_type in enumerate(export_db_types, start=1):
                 self._check_stop()
                 destination = database_root / f"media_{db_type}.db"
@@ -681,7 +693,10 @@ class BookOasisPackageImportEngine:
                     + ", ".join(quick_check[:10])
                 )
             tables = self._tables(connection)
-            item_table = "audiobooks" if db_type == "audiobook" else "books"
+            item_table = {
+                "audiobook": "audiobooks",
+                "video": "videos",
+            }.get(db_type, "books")
             if not {"libraries", item_table}.issubset(tables):
                 raise RuntimeError(
                     f"{db_type} DB에 libraries 또는 {item_table} 테이블이 없습니다."
@@ -704,7 +719,7 @@ class BookOasisPackageImportEngine:
                 ).fetchone()[0]
             )
             cover_references = set()
-            if db_type != "audiobook":
+            if db_type in {"general", "adult"}:
                 cover_references = {
                     str(row["cover_image"] or "").replace("\\", "/").lstrip("/")
                     for row in self._iter_rows(
@@ -727,17 +742,17 @@ class BookOasisPackageImportEngine:
                 int(
                     connection.execute(
                         "SELECT COUNT(*) FROM "
-                        + (
-                            "audiobook_progress"
-                            if db_type == "audiobook"
-                            else "user_progress"
-                        )
+                        + {
+                            "audiobook": "audiobook_progress",
+                            "video": "video_progress",
+                        }.get(db_type, "user_progress")
                     ).fetchone()[0]
                 )
                 if (
-                    "audiobook_progress"
-                    if db_type == "audiobook"
-                    else "user_progress"
+                    {
+                        "audiobook": "audiobook_progress",
+                        "video": "video_progress",
+                    }.get(db_type, "user_progress")
                 ) in tables
                 else 0
             )
@@ -748,8 +763,9 @@ class BookOasisPackageImportEngine:
                 ),
                 "libraries": libraries,
                 "libraries_count": len(libraries),
-                "books_count": items_count if db_type != "audiobook" else 0,
+                "books_count": items_count if db_type in {"general", "adult"} else 0,
                 "audiobooks_count": items_count if db_type == "audiobook" else 0,
+                "videos_count": items_count if db_type == "video" else 0,
                 "users_count": users_count,
                 "progress_count": progress_count,
                 "cover_references": cover_references,
@@ -759,10 +775,11 @@ class BookOasisPackageImportEngine:
 
     @staticmethod
     def _mapping_preview(database_path, mappings, db_type="general"):
-        if db_type == "audiobook":
-            return BookOasisPackageImportEngine._audiobook_mapping_preview(
+        if db_type in {"audiobook", "video"}:
+            return BookOasisPackageImportEngine._folder_media_mapping_preview(
                 database_path,
                 mappings,
+                "audiobooks" if db_type == "audiobook" else "videos",
             )
         connection = BookOasisPackageImportEngine._connect(
             database_path, readonly=False
@@ -862,7 +879,7 @@ class BookOasisPackageImportEngine:
             connection.close()
 
     @staticmethod
-    def _audiobook_mapping_preview(database_path, mappings):
+    def _folder_media_mapping_preview(database_path, mappings, item_table):
         connection = BookOasisPackageImportEngine._connect(
             database_path,
             readonly=True,
@@ -872,7 +889,9 @@ class BookOasisPackageImportEngine:
             mapped_paths = {}
             collisions = []
             for row in BookOasisPackageImportEngine._iter_rows(
-                connection.execute("SELECT id, folder_path FROM audiobooks ORDER BY id")
+                connection.execute(
+                    f"SELECT id, folder_path FROM {item_table} ORDER BY id"
+                )
             ):
                 old_path = str(row["folder_path"] or "")
                 new_path = apply_media_mappings(old_path, mappings)
@@ -915,6 +934,8 @@ class BookOasisPackageImportEngine:
         database_types = ["general", "adult"]
         if "db/media_audiobook.db" in database_package.get("regular_names", set()):
             database_types.append("audiobook")
+        if "db/media_video.db" in database_package.get("regular_names", set()):
+            database_types.append("video")
         for db_type in database_types:
             filename = f"media_{db_type}.db"
             db_path = stage / "db" / filename
@@ -960,6 +981,7 @@ class BookOasisPackageImportEngine:
             "audiobooks_count": sum(
                 item.get("audiobooks_count", 0) for item in databases
             ),
+            "videos_count": sum(item.get("videos_count", 0) for item in databases),
             "users_count": sum(item["users_count"] for item in databases),
             "progress_count": sum(item["progress_count"] for item in databases),
             "cover_references_count": len(references),
@@ -1080,10 +1102,11 @@ class BookOasisPackageImportEngine:
         mappings,
         db_type="general",
     ):
-        if db_type == "audiobook":
-            return self._transform_audiobook_database(
+        if db_type in {"audiobook", "video"}:
+            return self._transform_folder_media_database(
                 database_path,
                 mappings,
+                db_type,
             )
         connection = self._connect(database_path, readonly=False)
         moved_files = []
@@ -1226,7 +1249,9 @@ class BookOasisPackageImportEngine:
             "changed_covers_count": changed_covers,
         }
 
-    def _transform_audiobook_database(self, database_path, mappings):
+    def _transform_folder_media_database(self, database_path, mappings, db_type):
+        item_table = "audiobooks" if db_type == "audiobook" else "videos"
+        child_table = "audiobook_tracks" if db_type == "audiobook" else "video_episodes"
         connection = self._connect(database_path, readonly=False)
         changed_items = 0
         changed_libraries = 0
@@ -1235,13 +1260,15 @@ class BookOasisPackageImportEngine:
             mapped_paths = set()
             updates = []
             for row in self._iter_rows(
-                connection.execute("SELECT id, folder_path, poster FROM audiobooks ORDER BY id")
+                connection.execute(
+                    f"SELECT id, folder_path, poster FROM {item_table} ORDER BY id"
+                )
             ):
                 old_path = str(row["folder_path"] or "")
                 new_path = apply_media_mappings(old_path, mappings)
                 if new_path in mapped_paths:
                     raise ValueError(
-                        f"변경 후 오디오북 경로 충돌이 있습니다: {new_path}"
+                        f"변경 후 {db_type} 경로 충돌이 있습니다: {new_path}"
                     )
                 mapped_paths.add(new_path)
                 old_poster = str(row["poster"] or "")
@@ -1254,10 +1281,24 @@ class BookOasisPackageImportEngine:
                     updates.append((new_path, new_poster, int(row["id"])))
             if updates:
                 connection.executemany(
-                    "UPDATE audiobooks SET folder_path=?, poster=? WHERE id=?",
+                    f"UPDATE {item_table} SET folder_path=?, poster=? WHERE id=?",
                     updates,
                 )
                 changed_items = len(updates)
+            if child_table in self._tables(connection):
+                child_updates = []
+                for row in self._iter_rows(
+                    connection.execute(f"SELECT id, file_path FROM {child_table} ORDER BY id")
+                ):
+                    old_path = str(row["file_path"] or "")
+                    new_path = apply_media_mappings(old_path, mappings)
+                    if new_path != old_path:
+                        child_updates.append((new_path, int(row["id"])))
+                if child_updates:
+                    connection.executemany(
+                        f"UPDATE {child_table} SET file_path=? WHERE id=?",
+                        child_updates,
+                    )
             for row in self._iter_rows(
                 connection.execute("SELECT id, physical_path FROM libraries")
             ):
@@ -1508,6 +1549,8 @@ class BookOasisPackageImportEngine:
             imported_db_types = ["general", "adult"]
             if (stage / "db" / "media_audiobook.db").is_file():
                 imported_db_types.append("audiobook")
+            if (stage / "db" / "media_video.db").is_file():
+                imported_db_types.append("video")
             for db_type in imported_db_types:
                 self._check_stop()
                 result = self._transform_database(

@@ -20,6 +20,7 @@ class ModuleMain(PluginModuleBase):
             "adult_enabled": "False",
             "adult_db_path": "/bookoasis-db/media_adult.db",
             "audiobook_db_path": "/bookoasis-db/media_audiobook.db",
+            "video_db_path": "/bookoasis-db/media_video.db",
             "mariadb_host": "",
             "mariadb_port": "3306",
             "mariadb_user": "",

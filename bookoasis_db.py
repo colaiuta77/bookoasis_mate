@@ -10,7 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 
 
-VALID_DB_TYPES = {"general", "adult", "audiobook"}
+VALID_DB_TYPES = {"general", "adult", "audiobook", "video"}
 VALID_ENGINES = {"auto", "sqlite", "mariadb"}
 MARIADB_READ_POOL_SIZE = 4
 MARIADB_POOL_IDLE_SECONDS = 300
@@ -353,13 +353,28 @@ class ConnectionProxy:
                 "collation": "",
             }
         row = self.execute(
-            "SELECT VERSION() AS server_version, @@collation_database AS collation"
+            "SELECT VERSION() AS server_version, @@collation_database AS collation, "
+            "@@innodb_buffer_pool_size AS innodb_buffer_pool_size, "
+            "@@tmp_table_size AS tmp_table_size, "
+            "@@max_heap_table_size AS max_heap_table_size, "
+            "@@max_statement_time AS max_statement_time"
+        ).fetchone()
+        isbn_index = self.execute(
+            "SELECT COUNT(*) AS index_count FROM information_schema.statistics "
+            "WHERE table_schema = ? AND table_name = 'books' "
+            "AND index_name = 'idx_books_isbn' AND column_name = 'isbn'",
+            (self.target.database,),
         ).fetchone()
         return {
             "journal_mode": "",
             "user_version": 0,
             "server_version": str(row["server_version"] or ""),
             "collation": str(row["collation"] or ""),
+            "innodb_buffer_pool_size": int(row["innodb_buffer_pool_size"] or 0),
+            "tmp_table_size": int(row["tmp_table_size"] or 0),
+            "max_heap_table_size": int(row["max_heap_table_size"] or 0),
+            "max_statement_time": float(row["max_statement_time"] or 0),
+            "isbn_index_ready": bool(int(isbn_index["index_count"] or 0)),
         }
 
 

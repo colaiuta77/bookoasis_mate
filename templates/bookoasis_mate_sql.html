@@ -10,6 +10,7 @@
         <option value="general">일반 DB</option>
         {% if arg.get('adult_enabled') %}<option value="adult">성인 DB</option>{% endif %}
         {% if arg.get('audiobook_enabled') %}<option value="audiobook">오디오북 DB</option>{% endif %}
+        {% if arg.get('video_enabled') %}<option value="video">비디오북 DB</option>{% endif %}
       </select>
     </label>
     <label>진단 프리셋
@@ -152,7 +153,7 @@ function sqlRenderResult(data) {
 
   var suffix = data.truncated ? ' · 최대 ' + data.max_rows + '행에서 잘림' : '';
   document.getElementById('sql_result_summary').textContent =
-    ({general:'일반 DB', adult:'성인 DB', audiobook:'오디오북 DB'}[data.db_type] || data.db_type) + ' · ' +
+    ({general:'일반 DB', adult:'성인 DB', audiobook:'오디오북 DB', video:'비디오북 DB'}[data.db_type] || data.db_type) + ' · ' +
     Number(data.row_count || 0).toLocaleString('ko-KR') + '행 · ' +
     Number(data.elapsed_ms || 0).toLocaleString('ko-KR') + 'ms' + suffix;
   document.getElementById('sql_result_wrap').style.display = rows.length ? 'block' : 'none';

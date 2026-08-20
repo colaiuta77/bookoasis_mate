@@ -154,17 +154,22 @@
     var summary = result.summary || {};
     var container = document.getElementById('statistics_kpis');
     bookoasisMateClear(container);
-    appendKpi(container, result.media_kind === 'audiobook' ? '오디오북' : '도서', number(summary.total_items) + (result.media_kind === 'audiobook' ? '개' : '권'));
+    var mediaLabel = result.media_kind === 'audiobook' ? '오디오북' : (result.media_kind === 'video' ? '비디오북' : '도서');
+    var mediaUnit = result.media_kind === 'book' ? '권' : '개';
+    appendKpi(container, mediaLabel, number(summary.total_items) + mediaUnit);
     if (result.media_kind === 'audiobook') {
       appendKpi(container, '트랙', number(summary.total_tracks) + '개');
       appendKpi(container, '총 재생 시간', duration(summary.total_duration));
+    } else if (result.media_kind === 'video') {
+      appendKpi(container, '에피소드', number(summary.total_episodes) + '개');
+      appendKpi(container, '총 재생 시간', duration(summary.total_duration));
     } else {
       appendKpi(container, '시리즈', number(summary.total_series) + '개');
+      appendKpi(container, '저자', number(summary.total_authors) + '명');
+      appendKpi(container, '출판사', number(summary.total_publishers) + '개');
     }
-    appendKpi(container, '저자', number(summary.total_authors) + '명');
-    appendKpi(container, '출판사', number(summary.total_publishers) + '개');
     appendKpi(container, '저장 용량', bytes(summary.storage_bytes));
-    appendKpi(container, '올해 등록', number(summary.added_this_year) + (result.media_kind === 'audiobook' ? '개' : '권'));
+    appendKpi(container, '올해 등록', number(summary.added_this_year) + mediaUnit);
   }
 
   function renderLargest(result) {
@@ -197,7 +202,7 @@
     renderedResultKey = resultKey;
     clearDeferredCharts();
     document.getElementById('statistics_result').style.display = '';
-    var mediaLabel = result.media_kind === 'audiobook' ? '오디오북' : '도서';
+    var mediaLabel = result.media_kind === 'audiobook' ? '오디오북' : (result.media_kind === 'video' ? '비디오북' : '도서');
     document.getElementById('statistics_result_title').textContent = (result.library_name || '전체 보관함') + ' ' + mediaLabel + ' 통계';
     document.getElementById('statistics_result_meta').textContent = [
       String(result.engine || '').toUpperCase(),
@@ -205,10 +210,10 @@
       result.generated_at ? '생성 ' + result.generated_at.replace('T', ' ') : '',
       result.duration_ms != null ? (Number(result.duration_ms) / 1000).toFixed(1) + '초' : ''
     ].filter(Boolean).join(' · ');
-    document.getElementById('statistics_progress_title').textContent = result.media_kind === 'audiobook' ? '청취 상태' : '독서 상태';
-    document.getElementById('statistics_year_title').textContent = result.media_kind === 'audiobook' ? '공개 연도 분포' : '출간 연도 분포';
+    document.getElementById('statistics_progress_title').textContent = result.media_kind === 'audiobook' ? '청취 상태' : (result.media_kind === 'video' ? '시청 상태' : '독서 상태');
+    document.getElementById('statistics_year_title').textContent = result.media_kind === 'book' ? '출간 연도 분포' : '공개 연도 분포';
     document.getElementById('statistics_genres_card').style.display = result.media_kind === 'audiobook' ? 'none' : '';
-    document.getElementById('statistics_tags_card').style.display = result.media_kind === 'audiobook' ? 'none' : '';
+    document.getElementById('statistics_tags_card').style.display = result.media_kind === 'book' ? '' : 'none';
 
     renderKpis(result);
     renderChart('statistics_format_count', 'statistics_format_empty', result.formats, {

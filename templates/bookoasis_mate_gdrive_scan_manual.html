@@ -33,7 +33,8 @@
   <h4>2. Mate 사전 설정</h4>
   <ol>
     <li>BookOasis Mate 설정에서 현재 DB 엔진과 연결 정보를 설정하고 BookOasis URL, 관리자 계정과 스캔 웹훅 토큰을 입력합니다. 개별 경로와 루트 스캔은 웹훅 토큰을 우선 사용하며, 구버전 호환 경로만 관리자 세션을 사용합니다.</li>
-    <li><code>/api/webhook/scan</code>의 <code>path</code> 요청을 지원하는 최신 BookOasis 사용을 권장합니다. SQLite는 사용할 일반·성인·오디오북 DB 경로를 확인하고 MariaDB는 접속 정보를 입력합니다.</li>
+    <li><code>/api/webhook/scan</code>의 <code>path</code> 요청을 지원하는 최신 BookOasis 사용을 권장합니다. SQLite는 사용할 일반·성인·오디오북·비디오북 DB 경로를 확인하고 MariaDB는 접속 정보를 입력합니다.</li>
+    <li>비디오북 변경은 MP4·MKV·AVI·WEBM·MOV·M4V·TS와 SMI·SRT·VTT 파일을 인식해 <code>video</code> 보관함의 경로 스캔으로 연결합니다.</li>
     <li>Google Drive 연동 설정에서 경로 매핑과 rclone VFS 규칙을 실제 컨테이너 경로에 맞춥니다.</li>
     <li>FlaskFarm 시스템 설정에서 전역 API 키를 확인합니다.</li>
     <li>gd-poller 컨테이너에서 래퍼 파일과 Python 3를 실행할 수 있어야 합니다.</li>

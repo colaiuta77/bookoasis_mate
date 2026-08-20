@@ -42,6 +42,14 @@ AUDIOBOOK_METADATA_FIELDS = (
     ("total_duration", "재생 시간", "number"),
 )
 
+VIDEO_METADATA_FIELDS = (
+    ("poster", "포스터", "text"),
+    ("description", "소개", "text"),
+    ("genres", "장르", "text"),
+    ("total_episodes", "에피소드 수", "number"),
+    ("total_duration", "재생 시간", "number"),
+)
+
 SCORE_BUCKETS = (
     (0, 19, "0–19"),
     (20, 39, "20–39"),
@@ -111,7 +119,7 @@ class LibraryStatisticsEngine:
         self.database_adapter = database_adapter or BookOasisDatabaseAdapter(self.settings)
 
     def _target(self, db_type):
-        labels = {"general": "일반", "adult": "성인", "audiobook": "오디오북"}
+        labels = {"general": "일반", "adult": "성인", "audiobook": "오디오북", "video": "비디오"}
         db_type = str(db_type or "general").strip().lower()
         if db_type not in labels:
             raise ValueError("지원하지 않는 DB 유형입니다.")
@@ -121,6 +129,7 @@ class LibraryStatisticsEngine:
             "general": "general_db_path",
             "adult": "adult_db_path",
             "audiobook": "audiobook_db_path",
+            "video": "video_db_path",
         }[db_type]
         return self.database_adapter.target(db_type, labels[db_type], self.settings.get(path_key))
 
@@ -165,7 +174,7 @@ class LibraryStatisticsEngine:
                 "db_type": target.db_type,
                 "engine": target.engine,
                 "database": target.database or target.path,
-                "media_kind": "audiobook" if "audiobooks" in tables and target.db_type == "audiobook" else "book",
+                "media_kind": target.db_type if target.db_type in {"audiobook", "video"} else "book",
                 "libraries": libraries,
             }
 
@@ -179,6 +188,11 @@ class LibraryStatisticsEngine:
                 alias = "a"
                 progress_table = "audiobook_progress"
                 progress_time = "last_listened_at"
+            elif target.db_type == "video" and "videos" in tables:
+                table = "videos"
+                alias = "v"
+                progress_table = "video_progress"
+                progress_time = "last_watched_at"
             elif "books" in tables:
                 table = "books"
                 alias = "b"
@@ -242,6 +256,8 @@ class LibraryStatisticsEngine:
                         item_key = (
                             "audiobook_id" if table == "audiobooks" else "book_id"
                         )
+                        if table == "videos":
+                            item_key = "video_id"
                         progress_from = (
                             f"{progress_table} p JOIN {table} {alias} "
                             f"ON {alias}.id = p.{item_key}"
@@ -279,6 +295,25 @@ class LibraryStatisticsEngine:
                 ).fetchone()
                 for key in track_row.keys():
                     payload[key] = track_row[key]
+            if table == "videos" and "video_episodes" in tables:
+                episode_columns = connection.columns("video_episodes")
+                episode_select = ["MAX(e.id) AS max_episode_id"]
+                for column in ("created_at", "file_mtime"):
+                    if column in episode_columns:
+                        episode_select.append(f"MAX(e.{column}) AS max_episode_{column}")
+                episode_from = "video_episodes e"
+                episode_where = ""
+                episode_params = ()
+                if selected_library_id is not None:
+                    episode_from += " JOIN videos v ON v.id = e.video_id"
+                    episode_where = f" WHERE {where_sql}"
+                    episode_params = params
+                episode_row = connection.execute(
+                    f"SELECT {', '.join(episode_select)} FROM {episode_from}{episode_where}",
+                    episode_params,
+                ).fetchone()
+                for key in episode_row.keys():
+                    payload[key] = episode_row[key]
 
         identity = {
             "engine": target.engine,
@@ -319,6 +354,16 @@ class LibraryStatisticsEngine:
             self._check_cancel(should_stop)
             if target.db_type == "audiobook" and "audiobooks" in tables:
                 result = self._analyze_audiobooks(
+                    connection,
+                    target,
+                    selected_library_id,
+                    on_progress,
+                    should_stop,
+                    source,
+                    widget_cache,
+                )
+            elif target.db_type == "video" and "videos" in tables:
+                result = self._analyze_videos(
                     connection,
                     target,
                     selected_library_id,
@@ -449,6 +494,11 @@ class LibraryStatisticsEngine:
             item_table = "audiobooks"
             item_alias = "a"
             item_key = "audiobook_id"
+        elif media_kind == "video":
+            table = "video_progress"
+            item_table = "videos"
+            item_alias = "v"
+            item_key = "video_id"
         else:
             table = "user_progress"
             item_table = "books"
@@ -458,7 +508,7 @@ class LibraryStatisticsEngine:
             return {"not_started": 0, "in_progress": 0, "completed": 0, "started": 0}
         progress_columns = connection.columns(table)
         activity_parts = ["COALESCE(p.is_completed, 0) = 1"]
-        if media_kind == "audiobook":
+        if media_kind in {"audiobook", "video"}:
             if "current_time" in progress_columns:
                 activity_parts.append("COALESCE(p.current_time, 0) > 0")
             if "total_progress_pct" in progress_columns:
@@ -1014,6 +1064,140 @@ class LibraryStatisticsEngine:
             "publication_years": years,
             "added_over_time": timeline,
             "largest_items": largest,
+            "progress": progress,
+        }
+
+    def _analyze_videos(
+        self,
+        connection,
+        target,
+        library_id,
+        on_progress,
+        should_stop,
+        source,
+        widget_cache,
+    ):
+        columns = connection.columns("videos")
+        where_sql, params = self._where(
+            "v",
+            "is_deleted" if "is_deleted" in columns else "",
+            "library_id" if "library_id" in columns else "",
+            library_id,
+        )
+        library_name = self._resolve_library(connection, library_id)
+        current_year = str(datetime.now().year)
+        added_this_year = (
+            "SUM(CASE WHEN v.created_at >= ? THEN 1 ELSE 0 END)"
+            if "created_at" in columns
+            else "0"
+        )
+        summary_params = ([f"{current_year}-01-01 00:00:00"] if "created_at" in columns else []) + list(params)
+        row = connection.execute(
+            f"""
+            SELECT COUNT(*) AS total_items,
+                   0 AS total_series,
+                   0 AS total_authors,
+                   0 AS total_publishers,
+                   {added_this_year} AS added_this_year,
+                   {('COALESCE(SUM(COALESCE(v.total_duration, 0)), 0)' if 'total_duration' in columns else '0')} AS total_duration
+            FROM videos v WHERE {where_sql}
+            """,
+            summary_params,
+        ).fetchone()
+        summary = {key: int(float(row[key] or 0)) for key in row.keys()}
+        summary.update(total_episodes=0, storage_bytes=0)
+        formats = []
+        episode_columns = set()
+        if "video_episodes" in connection.tables():
+            episode_columns = connection.columns("video_episodes")
+            format_expr = (
+                "LOWER(TRIM(COALESCE(e.format, '')))"
+                if "format" in episode_columns
+                else "''"
+            )
+            size_expr = "COALESCE(e.file_size, 0)" if "file_size" in episode_columns else "0"
+            formats = [
+                {
+                    "label": str(item["format_name"] or "알 수 없음").upper(),
+                    "count": int(item["item_count"] or 0),
+                    "size_bytes": int(item["size_bytes"] or 0),
+                }
+                for item in connection.execute(
+                    f"""
+                    SELECT {format_expr} AS format_name, COUNT(*) AS item_count,
+                           COALESCE(SUM({size_expr}), 0) AS size_bytes
+                    FROM video_episodes e JOIN videos v ON v.id = e.video_id
+                    WHERE {where_sql}
+                    GROUP BY {format_expr} ORDER BY item_count DESC, format_name
+                    """,
+                    params,
+                ).fetchall()
+            ]
+            summary["total_episodes"] = sum(item["count"] for item in formats)
+            summary["storage_bytes"] = sum(item["size_bytes"] for item in formats)
+        self._notify(on_progress, "metadata", 35, 100, "비디오 메타데이터를 분석하고 있습니다.")
+        metadata_result = self._metadata_stream(
+            connection,
+            "videos",
+            "v",
+            columns,
+            VIDEO_METADATA_FIELDS,
+            where_sql,
+            params,
+            summary["total_items"],
+            on_progress,
+            should_stop,
+            include_taxonomy=False,
+            year_column="premiered",
+        )
+        metadata, missing, unused_genres, unused_tags, years, unused_distinct, unused_stats = metadata_result
+        genres = []
+        if "genres" in columns:
+            counter = Counter()
+            labels = {}
+            cursor = connection.execute_stream(
+                f"SELECT v.genres FROM videos v WHERE {where_sql}", params
+            )
+            try:
+                for batch in iter(lambda: cursor.fetchmany(2000), []):
+                    for item in batch:
+                        for token in _split_tokens(item.get("genres")):
+                            key = token.casefold()
+                            labels.setdefault(key, token)
+                            counter[key] += 1
+            finally:
+                cursor.close()
+            genres = _top_tokens(counter, labels)
+        libraries = self._library_distribution(
+            connection,
+            "videos",
+            "v",
+            where_sql,
+            params,
+            "0",
+        )
+        progress = self._progress_funnel(connection, "video", where_sql, params)
+        timeline = self._added_timeline(
+            connection, "videos", "v", columns, where_sql, params
+        )
+        self._check_cancel(should_stop)
+        return {
+            "db_type": target.db_type,
+            "engine": target.engine,
+            "database": target.database or target.path,
+            "media_kind": "video",
+            "library_id": library_id,
+            "library_name": library_name,
+            "summary": summary,
+            "formats": formats,
+            "libraries": libraries,
+            "metadata_scores": metadata,
+            "metadata_missing": missing,
+            "genres": genres,
+            "tags": [],
+            "publication_years": years,
+            "added_over_time": timeline,
+            "largest_items": [],
             "progress": progress,
         }
 

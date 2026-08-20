@@ -278,6 +278,48 @@ LEFT JOIN audiobook_tracks t ON t.audiobook_id = a.id
 GROUP BY l.id, l.name, l.physical_path, l.scan_status, l.last_scanned_at
 ORDER BY l.id""",
     },
+    {
+        "id": "video_library_counts",
+        "name": "비디오북 보관함별 작품·에피소드 수",
+        "description": "보관함별 활성·삭제 작품 수와 에피소드 수를 확인합니다.",
+        "db_types": ["video"],
+        "sql": """SELECT
+    l.id AS library_id,
+    l.name AS library_name,
+    l.physical_path,
+    l.scan_status,
+    l.last_scanned_at,
+    COUNT(DISTINCT CASE WHEN COALESCE(v.is_deleted, 0) = 0 THEN v.id END) AS active_videos,
+    COUNT(DISTINCT CASE WHEN COALESCE(v.is_deleted, 0) != 0 THEN v.id END) AS deleted_videos,
+    COUNT(DISTINCT e.id) AS episode_count
+FROM libraries l
+LEFT JOIN videos v ON v.library_id = l.id
+LEFT JOIN video_episodes e ON e.video_id = v.id
+GROUP BY l.id, l.name, l.physical_path, l.scan_status, l.last_scanned_at
+ORDER BY l.id""",
+    },
+    {
+        "id": "recent_video_progress",
+        "name": "최근 비디오북 시청 기록",
+        "description": "비디오 DB에 저장된 최근 작품·에피소드 진행률을 확인합니다. 사용자명은 general DB에서 별도로 확인해야 합니다.",
+        "db_types": ["video"],
+        "sql": """SELECT
+    p.user_id,
+    v.id AS video_id,
+    v.title,
+    l.name AS library_name,
+    p.current_episode_id,
+    e.title AS episode_title,
+    p.current_time,
+    p.total_progress_pct,
+    p.is_completed,
+    p.last_watched_at
+FROM video_progress p
+JOIN videos v ON v.id = p.video_id
+LEFT JOIN libraries l ON l.id = v.library_id
+LEFT JOIN video_episodes e ON e.id = p.current_episode_id
+ORDER BY p.last_watched_at DESC""",
+    },
 ]
 
 
@@ -372,6 +414,7 @@ class ReadOnlySqlTool:
                 "general_db_path",
                 "adult_db_path",
                 "audiobook_db_path",
+                "video_db_path",
                 "mariadb_host",
             )
         ):
@@ -381,8 +424,10 @@ class ReadOnlySqlTool:
                 "general_db_path": legacy_paths.get("general", ""),
                 "adult_db_path": legacy_paths.get("adult", ""),
                 "audiobook_db_path": legacy_paths.get("audiobook", ""),
+                "video_db_path": legacy_paths.get("video", ""),
                 "adult_enabled": bool(legacy_paths.get("adult")),
                 "audiobook_enabled": bool(legacy_paths.get("audiobook")),
+                "video_enabled": bool(legacy_paths.get("video")),
             }
         self.database_adapter = BookOasisDatabaseAdapter(self.settings)
 
@@ -403,7 +448,11 @@ class ReadOnlySqlTool:
             self.settings.get("audiobook_enabled", True)
         ):
             raise ValueError(f"활성화되지 않은 DB 유형입니다: {db_key}")
-        if db_key not in {"general", "adult", "audiobook"}:
+        if db_key == "video" and not _as_bool(
+            self.settings.get("video_enabled", True)
+        ):
+            raise ValueError(f"활성화되지 않은 DB 유형입니다: {db_key}")
+        if db_key not in {"general", "adult", "audiobook", "video"}:
             raise ValueError(f"활성화되지 않은 DB 유형입니다: {db_key}")
         path = self.settings.get(f"{db_key}_db_path")
         target = self.database_adapter.target(db_key, db_key, path)

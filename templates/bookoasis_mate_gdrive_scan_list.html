@@ -13,6 +13,8 @@
     <option value="">전체 DB</option>
     <option value="general">일반 DB</option>
     <option value="adult">성인 DB</option>
+    <option value="audiobook">오디오북 DB</option>
+    <option value="video">비디오북 DB</option>
   </select>
   <select id="gdrive_event_library" class="form-control form-control-sm" title="보관함">
     <option value="">전체 보관함</option>
@@ -96,7 +98,7 @@ function gdriveEventActionLabel(action) {
 }
 
 function gdriveEventDbLabel(dbType) {
-  return dbType === 'adult' ? '성인 DB' : (dbType === 'general' ? '일반 DB' : '미분류');
+  return ({general:'일반 DB', adult:'성인 DB', audiobook:'오디오북 DB', video:'비디오북 DB'}[dbType] || '미분류');
 }
 
 function gdriveEventButton(label, className, callback) {
@@ -156,7 +158,7 @@ function renderGdriveLibraryOptions(libraries) {
     option.value = String(item.db_type || '') + ':' + String(item.library_id);
     option.dataset.dbType = item.db_type || '';
     option.textContent =
-      (item.db_type === 'adult' ? '[성인] ' : '[일반] ') +
+      ({general:'[일반] ', adult:'[성인] ', audiobook:'[오디오북] ', video:'[비디오북] '}[item.db_type] || '[미분류] ') +
       item.library_name + ' (#' + item.library_id + ')';
     select.appendChild(option);
   });

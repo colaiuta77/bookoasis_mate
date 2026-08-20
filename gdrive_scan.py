@@ -39,6 +39,16 @@ DEFAULT_EXTENSIONS = (
     ".ogg",
     ".opus",
     ".wma",
+    ".mp4",
+    ".mkv",
+    ".avi",
+    ".webm",
+    ".mov",
+    ".m4v",
+    ".ts",
+    ".smi",
+    ".srt",
+    ".vtt",
 )
 
 
@@ -411,6 +421,9 @@ class GDriveScanProcessor:
             )
         libraries.extend(
             read_bookoasis_libraries("audiobook", self.settings, optional=True)
+        )
+        libraries.extend(
+            read_bookoasis_libraries("video", self.settings, optional=True)
         )
         return sorted(libraries, key=lambda item: len(item["root"]), reverse=True)
 

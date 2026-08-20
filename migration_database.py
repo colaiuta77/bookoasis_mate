@@ -14,7 +14,7 @@ except ImportError:
 class MigrationDatabaseContext:
     def __init__(self, settings, work_dir=None, should_stop=None, on_progress=None):
         self.settings = dict(settings or {})
-        for db_type in ("general", "adult", "audiobook"):
+        for db_type in ("general", "adult", "audiobook", "video"):
             path_key = f"{db_type}_db_path"
             legacy_key = f"target_{db_type}_db"
             if not self.settings.get(path_key) and self.settings.get(legacy_key):
@@ -29,7 +29,7 @@ class MigrationDatabaseContext:
         return self.adapter.engine
 
     def target(self, db_type):
-        labels = {"general": "일반", "adult": "성인", "audiobook": "오디오북"}
+        labels = {"general": "일반", "adult": "성인", "audiobook": "오디오북", "video": "비디오"}
         return self.adapter.target(
             db_type,
             labels.get(db_type, db_type),

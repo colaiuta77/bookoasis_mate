@@ -70,7 +70,7 @@ function doctorMetricGroup(title, stats, meta) {
   return group;
 }
 
-function doctorSummaryOverview(totals, scanner, audiobook, staleDays) {
+function doctorSummaryOverview(totals, scanner, audiobook, video, staleDays) {
   var totalBooks = Number(totals.total_books || 0);
   var problemBooks = Number(totals.problem_books || 0);
   var healthyBooks = Number(totals.healthy_books || 0);
@@ -78,6 +78,8 @@ function doctorSummaryOverview(totals, scanner, audiobook, staleDays) {
   var problemPercent = totalBooks ? (problemBooks / totalBooks * 100).toFixed(1) + '%' : '0%';
   var totalAudiobooks = Number(audiobook.total_audiobooks || 0);
   var problemAudiobooks = Number(audiobook.problem_audiobooks || 0);
+  var totalVideos = Number(video.total_videos || 0);
+  var problemVideos = Number(video.problem_videos || 0);
   var scanFailures = Number(scanner.recent_failed_tasks || 0);
   var dashboard = bookoasisMateText('section', 'doctor-summary-dashboard', '');
 
@@ -87,6 +89,9 @@ function doctorSummaryOverview(totals, scanner, audiobook, staleDays) {
   kpis.appendChild(doctorSummaryKpi('점검 필요', doctorFormatCount(problemBooks, '권'), problemPercent, problemBooks ? 'warning' : 'healthy', '점'));
   if (totalAudiobooks) {
     kpis.appendChild(doctorSummaryKpi('오디오북', doctorFormatCount(totalAudiobooks, '개'), '점검 필요 ' + doctorFormatCount(problemAudiobooks, '개'), problemAudiobooks ? 'warning' : 'healthy', '음'));
+  }
+  if (totalVideos) {
+    kpis.appendChild(doctorSummaryKpi('비디오', doctorFormatCount(totalVideos, '개'), '점검 필요 ' + doctorFormatCount(problemVideos, '개'), problemVideos ? 'warning' : 'healthy', '영'));
   }
   kpis.appendChild(doctorSummaryKpi('최근 스캔 실패', doctorFormatCount(scanFailures, '건'), '대기 ' + doctorFormatCount(scanner.pending_tasks, '건') + ' · 실행 ' + doctorFormatCount(scanner.running_tasks, '건'), scanFailures ? 'danger' : 'healthy', '스'));
   dashboard.appendChild(kpis);
@@ -174,6 +179,18 @@ function doctorSummaryOverview(totals, scanner, audiobook, staleDays) {
       {label:'트랙 수 미기록', value:doctorFormatCount(audiobook.tracks, '개')},
       {label:'트랙 크기 미기록 (참고)', value:doctorFormatCount(audiobook.track_file_size_missing, '개')}
     ], {icon:'음', badge:problemAudiobooks ? doctorFormatCount(problemAudiobooks, '개 점검') : '정상', tone:problemAudiobooks ? 'warning' : 'healthy'}));
+  }
+  if (totalVideos) {
+    groups.appendChild(doctorMetricGroup('비디오', [
+      {label:'전체 비디오', value:doctorFormatCount(video.total_videos, '개')},
+      {label:'점검 필요', value:doctorFormatCount(video.problem_videos, '개'), tone:problemVideos ? 'warning' : 'healthy'},
+      {label:'포스터 없음', value:doctorFormatCount(video.poster, '개')},
+      {label:'소개 없음', value:doctorFormatCount(video.description, '개')},
+      {label:'장르 없음', value:doctorFormatCount(video.genres, '개')},
+      {label:'전체 에피소드', value:doctorFormatCount(video.total_episodes, '개')},
+      {label:'에피소드 수 미기록', value:doctorFormatCount(video.episodes, '개')},
+      {label:'재생시간 미기록', value:doctorFormatCount(video.duration, '개')}
+    ], {icon:'영', badge:problemVideos ? doctorFormatCount(problemVideos, '개 점검') : '정상', tone:problemVideos ? 'warning' : 'healthy'}));
   }
   content.appendChild(groups);
   dashboard.appendChild(content);
@@ -277,10 +294,11 @@ function renderReport(report) {
   var totals = report.totals || {};
   var scanner = report.scanner || {};
   var audiobook = report.audiobook || {};
+  var video = report.video || {};
   $('#generated_at').text('마지막 조회 ' + (report.generated_at || '-'));
   var summary = document.getElementById('summary_grid');
   bookoasisMateClear(summary);
-  summary.appendChild(doctorSummaryOverview(totals, scanner, audiobook, report.stale_days || 14));
+  summary.appendChild(doctorSummaryOverview(totals, scanner, audiobook, video, report.stale_days || 14));
   doctorRenderHealthChart(totals);
 
   var list = document.getElementById('database_list');
@@ -316,9 +334,13 @@ function renderReport(report) {
 
       var facts = bookoasisMateText('div', 'doctor-db-facts', '');
       var isAudiobook = db.media_kind === 'audiobook';
+      var isVideo = db.media_kind === 'video';
+      var totalKey = isAudiobook ? 'total_audiobooks' : (isVideo ? 'total_videos' : 'total_books');
+      var problemKey = isAudiobook ? 'problem_audiobooks' : (isVideo ? 'problem_videos' : 'problem_books');
+      var unit = isAudiobook || isVideo ? '개' : '권';
       [
-        {label:isAudiobook ? '전체 오디오북' : '전체 도서', value:doctorFormatCount((db.summary || {})[isAudiobook ? 'total_audiobooks' : 'total_books'], isAudiobook ? '개' : '권')},
-        {label:isAudiobook ? '점검 필요' : '문제 도서', value:doctorFormatCount((db.summary || {})[isAudiobook ? 'problem_audiobooks' : 'problem_books'], isAudiobook ? '개' : '권')},
+        {label:isAudiobook ? '전체 오디오북' : (isVideo ? '전체 비디오' : '전체 도서'), value:doctorFormatCount((db.summary || {})[totalKey], unit)},
+        {label:isAudiobook || isVideo ? '점검 필요' : '문제 도서', value:doctorFormatCount((db.summary || {})[problemKey], unit)},
         {label:'실패·중단 보관함', value:doctorFormatCount((db.scanner || {}).failed_libraries, '개')},
         {label:'장기 미스캔', value:doctorFormatCount((db.scanner || {}).stale_libraries, '개')}
       ].forEach(function(fact) {
