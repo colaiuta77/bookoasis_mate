@@ -712,9 +712,23 @@ class BookOasisPluginManager:
                 else f"https://github.com/{owner}/{repository_name}"
             )
             repository_url = str(raw.get("repository_url") or "").strip()
+            server_id = str(raw.get("gitea_server_id") or "")
+            if source == "gitea" and not server_id and repository_url:
+                parsed_repository_url = urlparse(repository_url)
+                repository_origin = (
+                    f"{parsed_repository_url.scheme}://{parsed_repository_url.netloc}"
+                )
+                server = next(
+                    (
+                        value
+                        for value in self.normalized_settings(settings)["gitea_servers"]
+                        if value["base_url"] == repository_origin
+                    ),
+                    None,
+                )
+                server_id = server["id"] if server else ""
             if not repository_url:
                 if source == "gitea":
-                    server_id = str(raw.get("gitea_server_id") or "")
                     servers = self.normalized_settings(settings)["gitea_servers"]
                     server = next((value for value in servers if value["id"] == server_id), None)
                     repository_url = f"{server['base_url']}/{repository_value}" if server else ""
@@ -731,7 +745,7 @@ class BookOasisPluginManager:
                     "repository": repository_value,
                     "repository_url": repository_url,
                     "source": source,
-                    "gitea_server_id": str(raw.get("gitea_server_id") or ""),
+                    "gitea_server_id": server_id,
                     "ref": ref,
                     "catalog_version": str(raw.get("catalog_version") or "").strip(),
                     "dependencies": [],
