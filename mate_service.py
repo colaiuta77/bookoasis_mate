@@ -232,7 +232,7 @@ class BookOasisMateService:
         )
         if patched:
             try:
-                return gevent.get_hub().threadpool.spawn(target, *args)
+                return gevent.spawn(target, *args)
             except Exception:
                 pass
         thread = threading.Thread(target=target, args=args, name=name, daemon=True)
