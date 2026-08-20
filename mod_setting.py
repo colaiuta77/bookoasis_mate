@@ -25,6 +25,7 @@ class ModuleSetting(PluginModuleBase):
             "general_db_path",
             "adult_db_path",
             "audiobook_db_path",
+            "video_db_path",
             "bookoasis_log_dir",
             "cover_root_path",
         ):

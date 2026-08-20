@@ -11,7 +11,11 @@ from .setup import *
 
 class ModulePlugins(PluginModuleBase):
     def __init__(self, plugin):
-        super().__init__(plugin, name="plugins")
+        super().__init__(
+            plugin,
+            name="plugins",
+            scheduler_desc="BookOasis 설치 플러그인 업데이트 확인",
+        )
         self.db_default = {
             "plugin_manager_plugins_path": "",
             "plugin_manager_work_dir": "",
@@ -19,8 +23,15 @@ class ModulePlugins(PluginModuleBase):
             "plugin_manager_max_archive_mb": "100",
             "plugin_manager_max_extracted_mb": "500",
             "plugin_manager_max_files": "2000",
-            "plugin_manager_discovery_topics": "bookoasis-plugin",
+            "plugin_manager_discovery_topics": "bookoasis-plugin,security-bookoasis-plugin",
             "plugin_manager_discovery_cache_hours": "6",
+            "plugin_manager_gitea_base_url": "",
+            "plugin_manager_gitea_token": "",
+            "plugin_manager_gitea_verify_ssl": "True",
+            "plugin_manager_gitea_allow_http": "False",
+            "plugin_manager_gitea_servers": "[]",
+            "plugins_auto_start": "False",
+            "plugins_interval": "720",
         }
         self.manager = BookOasisPluginManager(P.logger)
 
@@ -133,8 +144,28 @@ class ModulePlugins(PluginModuleBase):
     def process_menu(self, page, req):
         P.logger.debug("[BookOasisMate] BookOasis 플러그인 관리 메뉴 열기")
         arg = self._settings()
+        arg["plugin_manager_gitea_token_configured"] = bool(
+            self.manager.normalized_settings(arg)["gitea_token_configured"]
+        )
+        arg["plugin_manager_gitea_token"] = ""
+        arg["plugin_manager_gitea_servers"] = self.manager.public_gitea_servers(arg)
         arg["effective_paths"] = self.manager.effective_paths(arg)
         return render_template(f"{P.package_name}_{self.name}.html", arg=arg)
+
+    def _reset_scheduler(self):
+        try:
+            P.logic.scheduler_stop(self.name)
+        except Exception:
+            pass
+        if P.ModelSetting.get_bool("plugins_auto_start"):
+            P.logic.scheduler_start(self.name)
+
+    def scheduler_function(self):
+        self.manager.start_installed_update_refresh(self._settings(), force=True)
+
+    def setting_save_after(self, change_list):
+        if any(key in change_list for key in ("plugins_auto_start", "plugins_interval")):
+            self._reset_scheduler()
 
     def process_ajax(self, command, req):
         started = time.monotonic()
@@ -144,6 +175,87 @@ class ModulePlugins(PluginModuleBase):
         )
         try:
             settings = self._settings()
+            if command == "manager_settings_save":
+                allowed = (
+                    "plugin_manager_plugins_path",
+                    "plugin_manager_work_dir",
+                    "plugin_manager_backup_keep",
+                    "plugin_manager_max_archive_mb",
+                    "plugin_manager_max_extracted_mb",
+                    "plugin_manager_max_files",
+                    "plugin_manager_discovery_topics",
+                    "plugin_manager_discovery_cache_hours",
+                    "plugin_manager_gitea_base_url",
+                    "plugin_manager_gitea_verify_ssl",
+                    "plugin_manager_gitea_allow_http",
+                    "plugins_auto_start",
+                    "plugins_interval",
+                )
+                candidate = dict(settings)
+                for key in allowed:
+                    if key in req.form:
+                        candidate[key] = req.form.get(key)
+                token = str(req.form.get("plugin_manager_gitea_token") or "").strip()
+                if req.form.get("plugin_manager_gitea_token_clear") == "true":
+                    candidate["plugin_manager_gitea_token"] = ""
+                elif token:
+                    candidate["plugin_manager_gitea_token"] = token
+                self.manager.normalized_settings(candidate)
+                try:
+                    interval = int(candidate.get("plugins_interval") or 720)
+                except (TypeError, ValueError) as error:
+                    raise PluginManagerError("업데이트 확인 주기는 숫자로 입력해 주세요.") from error
+                if not 1 <= interval <= 10080:
+                    raise PluginManagerError("업데이트 확인 주기는 1~10,080분으로 입력해 주세요.")
+                for key in allowed:
+                    if key in req.form:
+                        P.ModelSetting.set(key, req.form.get(key))
+                if req.form.get("plugin_manager_gitea_token_clear") == "true":
+                    P.ModelSetting.set("plugin_manager_gitea_token", "")
+                elif token:
+                    P.ModelSetting.set("plugin_manager_gitea_token", token)
+                self._reset_scheduler()
+                return jsonify({"ret": "success", "msg": "플러그인 관리 설정을 저장했습니다."})
+            if command == "gitea_test":
+                data = self.manager.test_gitea_connection(settings)
+                return jsonify({"ret": "success", "msg": "Gitea 연결과 토큰 권한을 확인했습니다.", "data": data})
+            if command == "gitea_servers":
+                return jsonify({"ret": "success", "data": self.manager.public_gitea_servers(settings)})
+            if command == "gitea_server_add":
+                servers = self.manager.add_gitea_server(
+                    settings,
+                    req.form.get("base_url"),
+                    req.form.get("token"),
+                    req.form.get("verify_ssl"),
+                    req.form.get("allow_http"),
+                )
+                P.ModelSetting.set(
+                    "plugin_manager_gitea_servers",
+                    self.manager.serialize_gitea_servers(servers),
+                )
+                P.ModelSetting.set("plugin_manager_gitea_base_url", "")
+                P.ModelSetting.set("plugin_manager_gitea_token", "")
+                return jsonify({"ret": "success", "msg": "Gitea 서버를 확인하고 저장했습니다.", "data": self.manager.public_gitea_servers(self._settings())})
+            if command == "gitea_server_test":
+                data = self.manager.test_gitea_connection(
+                    settings, req.form.get("server_id")
+                )
+                return jsonify({"ret": "success", "msg": "Gitea 연결과 토큰 권한을 확인했습니다.", "data": data})
+            if command in {"gitea_server_toggle", "gitea_server_delete"}:
+                servers = self.manager.update_gitea_server(
+                    settings,
+                    req.form.get("server_id"),
+                    enabled=req.form.get("enabled"),
+                    delete=command == "gitea_server_delete",
+                )
+                P.ModelSetting.set(
+                    "plugin_manager_gitea_servers",
+                    self.manager.serialize_gitea_servers(servers),
+                )
+                P.ModelSetting.set("plugin_manager_gitea_base_url", "")
+                P.ModelSetting.set("plugin_manager_gitea_token", "")
+                message = "Gitea 서버를 삭제했습니다." if command == "gitea_server_delete" else "Gitea 서버 사용 상태를 저장했습니다."
+                return jsonify({"ret": "success", "msg": message, "data": self.manager.public_gitea_servers(self._settings())})
             if command == "catalog":
                 return jsonify(
                     {
@@ -247,11 +359,13 @@ class ModulePlugins(PluginModuleBase):
                     req.form.get("description"),
                     req.form.get("verified"),
                     settings,
+                    source=req.form.get("source") or "github",
+                    gitea_server_id=req.form.get("gitea_server_id") or "",
                 )
                 return jsonify(
                     {
                         "ret": "success",
-                        "msg": "사용자 GitHub 플러그인을 카탈로그에 추가했습니다.",
+                        "msg": "사용자 저장소 플러그인을 카탈로그에 추가했습니다.",
                         "data": data,
                     }
                 )
@@ -290,6 +404,21 @@ class ModulePlugins(PluginModuleBase):
                     {
                         "ret": "success",
                         "msg": "GitHub 플러그인 패키지 검사를 시작했습니다.",
+                        "data": data,
+                    }
+                )
+            if command == "gitea_inspect":
+                data = self.manager.start_gitea_inspect(
+                    req.form.get("repository"),
+                    req.form.get("ref"),
+                    req.form.get("plugin_id"),
+                    settings,
+                    req.form.get("gitea_server_id") or "",
+                )
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "msg": "Gitea 플러그인 패키지 검사를 시작했습니다.",
                         "data": data,
                     }
                 )

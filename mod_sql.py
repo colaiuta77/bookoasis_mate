@@ -33,6 +33,10 @@ class ModuleSql(PluginModuleBase):
             arg["database_engine"].get("resolved_engine") == "mariadb"
             or bool(settings.get("audiobook_db_path"))
         )
+        arg["video_enabled"] = (
+            arg["database_engine"].get("resolved_engine") == "mariadb"
+            or bool(settings.get("video_db_path"))
+        )
         return render_template(f"{P.package_name}_{self.name}.html", arg=arg)
 
     def process_ajax(self, command, req):

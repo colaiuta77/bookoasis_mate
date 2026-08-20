@@ -24,7 +24,7 @@
     <li>패키지 이름과 이관 작업 디렉터리를 저장한 뒤 이관 상태에서 시작합니다.</li>
     <li>완료된 <code>db_이름_날짜.tar.gz</code>와 <code>covers_이름_날짜.tar.gz</code>를 한 세트로 보관하거나 공유합니다.</li>
   </ol>
-  <p class="doctor-muted">통DB 공유 패키지는 SQLite에서 오디오북 DB가 존재하면 함께 포함하고, MariaDB에서는 일반·성인·오디오북 3개 DB를 한 세트로 내보내고 가져옵니다. SQLite는 DB 파일 패키지, MariaDB는 SQL 논리 백업 패키지를 생성합니다.</p>
+  <p class="doctor-muted">통DB 공유 패키지는 SQLite에서 오디오북·비디오 DB가 존재하면 함께 포함하고, MariaDB에서는 일반·성인·오디오북·비디오 4개 DB를 한 세트로 내보내고 가져옵니다. SQLite는 DB 파일 패키지, MariaDB는 SQL 논리 백업 패키지를 생성합니다.</p>
 
   <h5>3. BookOasis 패키지 가져오기</h5>
   <ol>
@@ -44,15 +44,15 @@
   <h4>주의 사항</h4>
   <ul>
     <li>첫 실행은 반드시 Dry Run으로 수행하고 결과의 일치·미일치 수와 오류를 확인합니다.</li>
-    <li>실제 적용 전 현재 일반·성인·오디오북 DB와 표지 디렉터리를 별도로 백업합니다. 플러그인 백업과 별개로 외부 백업도 유지하는 것을 권장합니다.</li>
+    <li>실제 적용 전 현재 일반·성인·오디오북·비디오 DB와 표지 디렉터리를 별도로 백업합니다. 플러그인 백업과 별개로 외부 백업도 유지하는 것을 권장합니다.</li>
     <li>실제 이관 중에는 BookOasis, 스캐너와 메타데이터 변경 작업을 중지해야 합니다.</li>
-    <li>BookOasis 패키지 가져오기는 패키지에 포함된 일반·성인·오디오북 DB와 전체 표지를 교체하며 기존 데이터와 병합하지 않습니다.</li>
+    <li>BookOasis 패키지 가져오기는 패키지에 포함된 일반·성인·오디오북·비디오 DB와 전체 표지를 교체하며 기존 데이터와 병합하지 않습니다.</li>
     <li>공유 DB의 사용자 계정과 독서 진행률도 함께 바뀌므로 출처와 BookOasis 스키마 버전을 신뢰할 수 있는 패키지만 사용합니다.</li>
     <li>SQLite DB 패키지는 <code>db/media_*.db</code>, MariaDB 패키지는 검증용 manifest와 <code>db/media_*.sql</code> 구조이며 표지 패키지는 <code>covers/</code> 트리여야 합니다.</li>
     <li>MariaDB 내보내기·가져오기에는 최상단 매뉴얼에 안내된 PyMySQL과 <code>mariadb-dump</code>·<code>mariadb</code> 또는 호환 <code>mysql</code> 클라이언트가 필요합니다.</li>
     <li>통DB 패키지는 생성 엔진과 같은 엔진에만 복원할 수 있습니다. SQLite와 MariaDB 사이의 변환 도구로 사용하지 않습니다.</li>
     <li>경로 매핑은 보관함과 도서 경로, 표준 <code>book_해시.webp</code> 참조·파일명에 적용됩니다. 사용자 지정 표지와 <code>series_</code> 표지는 이름을 바꾸지 않습니다.</li>
-    <li>압축 경로 이탈, 심볼릭 링크, 필수 DB 누락, DB 무결성 검사 실패나 도서·오디오북 경로 충돌이 발견되면 실제 적용이 차단됩니다.</li>
+    <li>압축 경로 이탈, 심볼릭 링크, 필수 DB 누락, DB 무결성 검사 실패나 도서·오디오북·비디오 경로 충돌이 발견되면 실제 적용이 차단됩니다.</li>
   </ul>
 </div>
 {% endblock %}

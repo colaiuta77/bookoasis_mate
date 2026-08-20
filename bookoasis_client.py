@@ -121,7 +121,7 @@ class BookOasisClient:
 
     @staticmethod
     def _valid_library_db_type(db_type):
-        return db_type if db_type in {"general", "adult", "audiobook"} else None
+        return db_type if db_type in {"general", "adult", "audiobook", "video"} else None
 
     @staticmethod
     def _valid_book_db_type(db_type):
@@ -392,7 +392,7 @@ class BookOasisClient:
             library_id = int(library_id)
         except (TypeError, ValueError):
             return {"success": False, "message": "보관함 ID가 올바르지 않습니다."}
-        if db_type not in {"general", "adult", "audiobook"}:
+        if db_type not in {"general", "adult", "audiobook", "video"}:
             return {"success": False, "message": "DB 유형이 올바르지 않습니다."}
 
         url = urljoin(f"{self.base_url}/", "api/webhook/scan")

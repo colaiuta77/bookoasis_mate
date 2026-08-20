@@ -12,6 +12,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+try:
+    import gevent
+    from gevent import monkey as gevent_monkey
+except ImportError:
+    gevent = None
+    gevent_monkey = None
+
 from .bookoasis_client import BookOasisClient
 from .bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
 from .bookoasis_logs import (
@@ -133,6 +140,7 @@ def derive_bookoasis_paths(root_path):
         "general_db_path": child("db/media_general.db"),
         "adult_db_path": child("db/media_adult.db"),
         "audiobook_db_path": child("db/media_audiobook.db"),
+        "video_db_path": child("db/media_video.db"),
         "bookoasis_log_dir": child("logs"),
         "cover_root_path": child("covers"),
     }
@@ -204,6 +212,32 @@ class BookOasisMateService:
         self._database_migration_stop_path = None
         self._database_migration_started_monotonic = None
         self._database_migration_status = self._empty_migration_status()
+
+    @staticmethod
+    def _background_alive(handle):
+        if handle is None:
+            return False
+        is_alive = getattr(handle, "is_alive", None)
+        if callable(is_alive):
+            return bool(is_alive())
+        ready = getattr(handle, "ready", None)
+        return not bool(ready()) if callable(ready) else False
+
+    @staticmethod
+    def _spawn_background(target, args=(), name="bookoasis-mate-worker"):
+        patched = (
+            gevent is not None
+            and gevent_monkey is not None
+            and gevent_monkey.is_module_patched("threading")
+        )
+        if patched:
+            try:
+                return gevent.spawn(target, *args)
+            except Exception:
+                pass
+        thread = threading.Thread(target=target, args=args, name=name, daemon=True)
+        thread.start()
+        return thread
 
     @staticmethod
     def _empty_report_status():
@@ -360,6 +394,7 @@ class BookOasisMateService:
             "adult_enabled": model.get_bool("adult_enabled"),
             "adult_db_path": model.get("adult_db_path"),
             "audiobook_db_path": model.get("audiobook_db_path"),
+            "video_db_path": model.get("video_db_path"),
             "mariadb_host": model.get("mariadb_host"),
             "mariadb_port": _as_int(model.get("mariadb_port"), 3306, 1, 65535),
             "mariadb_user": model.get("mariadb_user"),
@@ -411,6 +446,7 @@ class BookOasisMateService:
             "adult_enabled": _as_bool(values.get("adult_enabled"), False),
             "adult_db_path": values.get("adult_db_path"),
             "audiobook_db_path": values.get("audiobook_db_path"),
+            "video_db_path": values.get("video_db_path"),
             "mariadb_host": values.get("mariadb_host"),
             "mariadb_port": _as_int(values.get("mariadb_port"), 3306, 1, 65535),
             "mariadb_user": values.get("mariadb_user"),
@@ -603,16 +639,14 @@ class BookOasisMateService:
     def _start_library_statistics_validation(self, snapshot, validation_token):
         with self._lock:
             thread = self._library_statistics_validation_thread
-            if thread is not None and thread.is_alive():
+            if self._background_alive(thread):
                 return
-            thread = threading.Thread(
-                target=self._validate_library_statistics_snapshot,
-                args=(copy.deepcopy(snapshot), validation_token),
+            thread = self._spawn_background(
+                self._validate_library_statistics_snapshot,
+                (copy.deepcopy(snapshot), validation_token),
                 name="bookoasis-mate-statistics-validation",
-                daemon=True,
             )
             self._library_statistics_validation_thread = thread
-            thread.start()
 
     def _validate_library_statistics_snapshot(self, snapshot, validation_token):
         try:
@@ -801,14 +835,12 @@ class BookOasisMateService:
             self._library_statistics_snapshot_checked = True
             self._library_statistics_validation_token += 1
             self._library_statistics_started_monotonic = time.monotonic()
-            thread = threading.Thread(
-                target=self._run_library_statistics,
-                args=(self.settings(), db_type, selected_library_id or None),
+            thread = self._spawn_background(
+                self._run_library_statistics,
+                (self.settings(), db_type, selected_library_id or None),
                 name="bookoasis-mate-library-statistics",
-                daemon=True,
             )
             self._library_statistics_thread = thread
-            thread.start()
         self._debug(
             "라이브러리 통계 백그라운드 분석 시작",
             db_type=db_type,
@@ -985,16 +1017,14 @@ class BookOasisMateService:
     def _start_summary_validation(self, snapshot, validation_token):
         with self._lock:
             thread = self._summary_validation_thread
-            if thread is not None and thread.is_alive():
+            if self._background_alive(thread):
                 return
-            thread = threading.Thread(
-                target=self._validate_summary_snapshot,
-                args=(copy.deepcopy(snapshot), validation_token),
+            thread = self._spawn_background(
+                self._validate_summary_snapshot,
+                (copy.deepcopy(snapshot), validation_token),
                 name="bookoasis-mate-summary-validation",
-                daemon=True,
             )
             self._summary_validation_thread = thread
-            thread.start()
 
     def _validate_summary_snapshot(self, snapshot, validation_token):
         try:
@@ -1113,14 +1143,12 @@ class BookOasisMateService:
             )
             self._report_status = status
             self._report_started_monotonic = time.monotonic()
-            thread = threading.Thread(
-                target=self._run_report_refresh,
-                args=(bool(force),),
+            thread = self._spawn_background(
+                self._run_report_refresh,
+                (bool(force),),
                 name="bookoasis-mate-summary-report",
-                daemon=True,
             )
             self._report_thread = thread
-            thread.start()
             return {"started": True, "status": copy.deepcopy(status)}
 
     def run_and_record(self, trigger="manual"):
@@ -2992,7 +3020,11 @@ class BookOasisMateService:
             media_count=(
                 data.get("audiobooks_count", 0)
                 if data.get("media_kind") == "audiobook"
-                else data.get("books_count", 0)
+                else (
+                    data.get("videos_count", 0)
+                    if data.get("media_kind") == "video"
+                    else data.get("books_count", 0)
+                )
             ),
             covers=data.get("covers_count", 0),
             roots=data.get("root_paths_count", 0),
@@ -3103,6 +3135,7 @@ class BookOasisMateService:
             "target_general_db": settings.get("general_db_path"),
             "target_adult_db": settings.get("adult_db_path"),
             "target_audiobook_db": settings.get("audiobook_db_path"),
+            "target_video_db": settings.get("video_db_path"),
             "db_engine": settings.get("db_engine"),
             "mariadb_host": settings.get("mariadb_host"),
             "mariadb_port": settings.get("mariadb_port"),
@@ -3483,6 +3516,7 @@ class BookOasisMateService:
             "target_general_db": settings.get("general_db_path"),
             "target_adult_db": settings.get("adult_db_path"),
             "target_audiobook_db": settings.get("audiobook_db_path"),
+            "target_video_db": settings.get("video_db_path"),
             "target_cover_root": settings.get("cover_root_path"),
             "bookoasis_url": settings.get("bookoasis_url"),
             "api_timeout": settings.get("api_timeout", 30),

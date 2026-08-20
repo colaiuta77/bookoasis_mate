@@ -119,12 +119,13 @@ RUN apt-get update \
 <div class="doctor-section doctor-card">
   <h4>6. BookOasis 공식 구현 참고</h4>
   <ul>
-    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/database.py" target="_blank" rel="noopener noreferrer">database.py</a> — 일반·성인·오디오북 DB 역할과 공통 스키마.</li>
+    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/database.py" target="_blank" rel="noopener noreferrer">database.py</a> — 일반·성인·오디오북·비디오 DB 역할과 공통 스키마.</li>
     <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/docs/api_endpoints.md" target="_blank" rel="noopener noreferrer">api_endpoints.md</a> — 상태 조회, 스캔, 도서 작업과 상세 화면 연동 API 계약.</li>
     <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/docs/move_to_mariadb.md" target="_blank" rel="noopener noreferrer">move_to_mariadb.md</a> — SQLite·MariaDB 엔진 설정과 공식 전환 절차.</li>
     <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/tools/scanner/tasks.py" target="_blank" rel="noopener noreferrer">scanner/tasks.py</a>와 <a href="https://github.com/leeyj/BookOasis_stable/blob/main/tools/scanner/db_writer.py" target="_blank" rel="noopener noreferrer">scanner/db_writer.py</a> — 전체 스캔의 파일 정보 수집과 DB 저장.</li>
     <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/services/book_info_service.py" target="_blank" rel="noopener noreferrer">book_info_service.py</a>와 <a href="https://github.com/leeyj/BookOasis_stable/blob/main/tools/lazy_scanner.py" target="_blank" rel="noopener noreferrer">lazy_scanner.py</a> — 상세·뷰어 요청과 지연 스캔의 정보 보정.</li>
     <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/repositories/sqlite/audiobook_repository.py" target="_blank" rel="noopener noreferrer">SQLite 오디오북 저장소</a>와 <a href="https://github.com/leeyj/BookOasis_stable/blob/main/repositories/mariadb/audiobook_repository.py" target="_blank" rel="noopener noreferrer">MariaDB 오디오북 저장소</a> — 오디오북·트랙·재생 진행률의 엔진별 구현.</li>
+    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/repositories/sqlite/video_repository.py" target="_blank" rel="noopener noreferrer">SQLite 비디오 저장소</a>와 <a href="https://github.com/leeyj/BookOasis_stable/blob/main/repositories/mariadb/video_repository.py" target="_blank" rel="noopener noreferrer">MariaDB 비디오 저장소</a> — 작품·에피소드·시청 진행률의 엔진별 구현.</li>
     <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/docs/spec_scanner_logic.md" target="_blank" rel="noopener noreferrer">spec_scanner_logic.md</a> — 체크포인트, 원격 경로, VFS와 예외 필터를 포함한 스캐너 명세.</li>
     <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/tools/export_category.py" target="_blank" rel="noopener noreferrer">export_category.py</a>, <a href="https://github.com/leeyj/BookOasis_stable/blob/main/tools/import_category.py" target="_blank" rel="noopener noreferrer">import_category.py</a>와 <a href="https://github.com/leeyj/BookOasis_stable/blob/main/docs/guide_category_migration.md" target="_blank" rel="noopener noreferrer">guide_category_migration.md</a> — 카테고리 패키지 형식과 병합 계약.</li>
   </ul>
@@ -140,7 +141,16 @@ RUN apt-get update \
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>8. 네이티브 플러그인 관리</h4>
+  <h4>8. 비디오북 공통 지원</h4>
+  <ul>
+    <li>SQLite의 <code>db/media_video.db</code> 또는 MariaDB의 비디오 DB를 별도로 연결하며 상태 요약, 라이브러리 통계, DB 정보·보관함 확인, 스캔 상태와 읽기 전용 SQL에서 사용할 수 있습니다.</li>
+    <li>Google Drive 변경 연동은 MP4·MKV·AVI·WEBM·MOV·M4V·TS와 SMI·SRT·VTT 이벤트를 비디오 보관함의 개별 경로 스캔으로 연결합니다.</li>
+    <li>비디오는 <code>videos</code>·<code>video_episodes</code> 구조를 사용하므로 도서 전용 문제 도서, 시리즈 누락, 표지 검사와 도서 메타데이터 메뉴에는 표시하지 않습니다.</li>
+  </ul>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>9. 네이티브 플러그인 관리</h4>
   <ul>
     <li><strong>카탈로그</strong>는 Mate에서 확인한 저장소와 사용자가 등록한 저장소를 관리하며, 실제 설치 전에 ZIP 구조와 Python 패키지를 검사합니다.</li>
     <li><strong>실행 상태</strong>는 최신 BookOasis 관리 API에서 설치 발견 여부, 활성화 여부와 실제 로드 성공·오류를 구분해 표시합니다.</li>
@@ -151,7 +161,7 @@ RUN apt-get update \
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>9. 기능별 안내 위치</h4>
+  <h4>10. 기능별 안내 위치</h4>
   <div class="doctor-guide-grid">
     <div><strong>라이브러리 진단</strong><span>판정 기준, 스캔 상태, 표지·고아 파일 동작 방식.</span></div>
     <div><strong>카테고리 이관</strong><span>내보내기, 신규 가져오기, 기존 카테고리 병합.</span></div>

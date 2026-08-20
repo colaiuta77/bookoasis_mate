@@ -53,13 +53,14 @@
           {{ macros.setting_input_text('adult_db_path', '성인 DB 파일', value=arg['adult_db_path'], desc=['<기본 경로>/db/media_adult.db로 자동 설정됩니다.']) }}
         </div>
         {{ macros.setting_input_text('audiobook_db_path', '오디오북 DB 파일', value=arg.get('audiobook_db_path', ''), desc=['<기본 경로>/db/media_audiobook.db로 자동 설정됩니다.']) }}
+        {{ macros.setting_input_text('video_db_path', '비디오 DB 파일', value=arg.get('video_db_path', ''), desc=['<기본 경로>/db/media_video.db로 자동 설정됩니다.']) }}
       </div>
 
       <div id="mariadb_database_settings" class="doctor-section doctor-card">
         <h4>MariaDB 연결</h4>
         {{ macros.setting_input_text('mariadb_host', 'MariaDB 호스트', value=arg.get('mariadb_host', ''), desc=['FF 컨테이너에서 접근 가능한 MariaDB 호스트 또는 IP입니다.', '컨테이너가 분리되어 있으면 127.0.0.1은 FF 컨테이너 자신이므로 MariaDB 서버 주소를 입력해야 합니다.', 'MariaDB 계정의 Host 허용 범위에는 FF가 실제로 접속하는 원본 IP가 포함되어야 합니다.', '예: 172.17.0.1']) }}
         {{ macros.setting_input_int('mariadb_port', 'MariaDB 포트', value=arg.get('mariadb_port', '3306'), desc=['기본값 3306']) }}
-        {{ macros.setting_input_text('mariadb_user', 'MariaDB 사용자', value=arg.get('mariadb_user', ''), desc=['진단만 사용할 때는 media_general·media_adult·media_audiobook 읽기 권한이 필요합니다.', '카테고리·Kavita·통DB 실제 이관에는 대상 DB 쓰기와 논리 백업·복원 권한이 필요하므로 BookOasis와 같은 수준의 계정을 권장합니다.']) }}
+        {{ macros.setting_input_text('mariadb_user', 'MariaDB 사용자', value=arg.get('mariadb_user', ''), desc=['진단만 사용할 때는 media_general·media_adult·media_audiobook·media_video 읽기 권한이 필요합니다.', '카테고리·Kavita·통DB 실제 이관에는 대상 DB 쓰기와 논리 백업·복원 권한이 필요하므로 BookOasis와 같은 수준의 계정을 권장합니다.']) }}
         {{ macros.setting_input_text('mariadb_password', 'MariaDB 비밀번호', value=arg.get('mariadb_password', ''), type='password', desc=['로그나 연결 결과에 표시하지 않습니다.']) }}
         {{ macros.setting_input_text('mariadb_database_prefix', 'DB 이름 접두어', value=arg.get('mariadb_database_prefix', 'media_'), desc=['기본값 media_ · 실제 DB 이름은 media_general 같은 형식입니다.']) }}
         {{ macros.setting_input_int('mariadb_connect_timeout', 'MariaDB 연결 제한 시간(초)', value=arg.get('mariadb_connect_timeout', '10'), desc=['1~60초']) }}
@@ -84,6 +85,10 @@
           <div class="doctor-db-action-card">
             <div><span class="doctor-db-kind doctor-db-kind-audio">오디오</span><strong>오디오북 DB</strong><small>media_audiobook</small></div>
             <div class="doctor-db-action-buttons"><button id="audiobook_db_size_btn" type="button" class="btn btn-sm btn-outline-primary">DB 정보</button><button id="audiobook_db_libraries_btn" type="button" class="btn btn-sm btn-outline-secondary">보관함 확인</button></div>
+          </div>
+          <div class="doctor-db-action-card">
+            <div><span class="doctor-db-kind doctor-db-kind-video">비디오</span><strong>비디오 DB</strong><small>media_video</small></div>
+            <div class="doctor-db-action-buttons"><button id="video_db_size_btn" type="button" class="btn btn-sm btn-outline-primary">DB 정보</button><button id="video_db_libraries_btn" type="button" class="btn btn-sm btn-outline-secondary">보관함 확인</button></div>
           </div>
         </div>
       </div>
@@ -142,7 +147,7 @@
 <script>
 $(function() {
   use_collapse('adult_enabled');
-  $('#general_db_path,#adult_db_path,#audiobook_db_path,#bookoasis_log_dir').prop('readonly', true);
+  $('#general_db_path,#adult_db_path,#audiobook_db_path,#video_db_path,#bookoasis_log_dir').prop('readonly', true);
   updateDatabaseEngineMode();
   updateCoverRootMode();
   updateBookOasisDerivedPaths();
@@ -175,6 +180,7 @@ function updateBookOasisDerivedPaths() {
   $('#general_db_path').val(bookoasisRootJoin(root, 'db/media_general.db'));
   $('#adult_db_path').val(bookoasisRootJoin(root, 'db/media_adult.db'));
   $('#audiobook_db_path').val(bookoasisRootJoin(root, 'db/media_audiobook.db'));
+  $('#video_db_path').val(bookoasisRootJoin(root, 'db/media_video.db'));
   $('#bookoasis_log_dir').val(bookoasisRootJoin(root, 'logs'));
   if (!$('#cover_root_custom').is(':checked')) $('#cover_root_path').val(bookoasisRootJoin(root, 'covers'));
 }
@@ -211,12 +217,21 @@ $("body").on('click', '#select_cover_root_path_btn', function(e) {
 function databaseSummaryHtml(db, label) {
   var identity = db.engine === 'mariadb' ? db.database : db.path;
   var engine = String(db.engine || 'sqlite').toUpperCase();
+  var diagnostics = '';
+  if (db.engine === 'mariadb') {
+    diagnostics = '<div class="doctor-db-modal-summary">' +
+      '<div><span>InnoDB 버퍼</span><strong>' + bookoasisMateEscape(bookoasisMateBytes(db.innodb_buffer_pool_size || 0)) + '</strong></div>' +
+      '<div><span>임시 테이블</span><strong>' + bookoasisMateEscape(bookoasisMateBytes(db.tmp_table_size || 0)) + '</strong></div>' +
+      '<div><span>최대 HEAP</span><strong>' + bookoasisMateEscape(bookoasisMateBytes(db.max_heap_table_size || 0)) + '</strong></div>' +
+      '<div><span>ISBN 인덱스</span><strong>' + (db.isbn_index_ready ? '정상' : (db.media_kind === 'book' ? '미확인' : '해당 없음')) + '</strong></div>' +
+      '</div>';
+  }
   return '<div class="doctor-db-modal-summary">' +
     '<div><span>DB</span><strong>' + bookoasisMateEscape(label) + '</strong></div>' +
     '<div><span>엔진</span><strong>' + bookoasisMateEscape(engine) + '</strong></div>' +
     '<div><span>크기</span><strong>' + bookoasisMateEscape(bookoasisMateBytes(db.file_size)) + '</strong></div>' +
     '<div><span>보관함</span><strong>' + Number((db.libraries || []).length).toLocaleString() + '개</strong></div>' +
-    '</div><div class="doctor-db-modal-identity doctor-path">' + bookoasisMateEscape(identity || 'DB 식별 정보 없음') + '</div>';
+    '</div>' + diagnostics + '<div class="doctor-db-modal-identity doctor-path">' + bookoasisMateEscape(identity || 'DB 식별 정보 없음') + '</div>';
 }
 
 var envRequestRunning = false;
@@ -307,7 +322,7 @@ function showDatabaseDetails(dbType, view) {
   bookoasisMateAjax('setting', 'database_details', data, function(ret) {
     if (!ret.data || !ret.data.success) return;
     var db = ret.data;
-    var labels = {general:'일반 DB', adult:'성인 DB', audiobook:'오디오북 DB'};
+    var labels = {general:'일반 DB', adult:'성인 DB', audiobook:'오디오북 DB', video:'비디오 DB'};
     var label = labels[dbType] || dbType;
     var body = databaseSummaryHtml(db, label);
     if (view === 'libraries') {
@@ -324,13 +339,13 @@ function showDatabaseDetails(dbType, view) {
   });
 }
 
-$("body").on('click', '#general_db_size_btn,#adult_db_size_btn,#audiobook_db_size_btn', function(e) {
+$("body").on('click', '#general_db_size_btn,#adult_db_size_btn,#audiobook_db_size_btn,#video_db_size_btn', function(e) {
   e.preventDefault();
-  showDatabaseDetails(this.id.indexOf('audiobook_') === 0 ? 'audiobook' : (this.id.indexOf('adult_') === 0 ? 'adult' : 'general'), 'size');
+  showDatabaseDetails(this.id.indexOf('video_') === 0 ? 'video' : (this.id.indexOf('audiobook_') === 0 ? 'audiobook' : (this.id.indexOf('adult_') === 0 ? 'adult' : 'general')), 'size');
 });
-$("body").on('click', '#general_db_libraries_btn,#adult_db_libraries_btn,#audiobook_db_libraries_btn', function(e) {
+$("body").on('click', '#general_db_libraries_btn,#adult_db_libraries_btn,#audiobook_db_libraries_btn,#video_db_libraries_btn', function(e) {
   e.preventDefault();
-  showDatabaseDetails(this.id.indexOf('audiobook_') === 0 ? 'audiobook' : (this.id.indexOf('adult_') === 0 ? 'adult' : 'general'), 'libraries');
+  showDatabaseDetails(this.id.indexOf('video_') === 0 ? 'video' : (this.id.indexOf('audiobook_') === 0 ? 'audiobook' : (this.id.indexOf('adult_') === 0 ? 'adult' : 'general')), 'libraries');
 });
 
 $('#setting_save_btn').click(function(e) {

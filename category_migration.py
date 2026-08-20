@@ -95,6 +95,18 @@ AUDIOBOOK_TRACK_COLUMNS = (
     "format",
     "created_at",
 )
+VIDEO_COLUMNS = (
+    "library_id", "title", "sort_title", "web_id", "genres", "poster",
+    "backdrop", "premiered", "description", "folder_name", "folder_path",
+    "total_duration", "total_episodes", "is_favorite", "created_at",
+    "updated_at", "is_deleted", "deleted_at",
+)
+VIDEO_EPISODE_COLUMNS = (
+    "video_id", "episode_number", "episode_code", "title", "filename",
+    "file_path", "file_mtime", "file_size", "duration", "width", "height",
+    "premiered", "format", "needs_transcode", "subtitle_path",
+    "container_verified",
+)
 
 
 class MigrationStopped(RuntimeError):
@@ -380,6 +392,7 @@ class CategoryMigrationEngine:
         media_kind = str(manifest.get("media_kind") or "book").strip().lower()
         db_type = str(manifest.get("db_type") or "general").strip().lower()
         is_audiobook = media_kind == "audiobook" or db_type == "audiobook"
+        is_video = media_kind == "video" or db_type == "video"
         if not isinstance(library, dict):
             raise ValueError("패키지 library 형식이 올바르지 않습니다.")
         deferred_counts = []
@@ -395,8 +408,14 @@ class CategoryMigrationEngine:
             audiobook_track_progress_count = int(
                 manifest.get("audiobook_track_progress_count") or 0
             )
+            videos_count = int(manifest.get("videos_count") or 0)
+            video_episodes_count = int(manifest.get("video_episodes_count") or 0)
+            video_progress_count = int(manifest.get("video_progress_count") or 0)
+            video_episode_progress_count = int(
+                manifest.get("video_episode_progress_count") or 0
+            )
             offsets_count = int(manifest.get("offsets_count") or 0)
-            if "offsets_count" not in manifest and not is_audiobook:
+            if "offsets_count" not in manifest and not (is_audiobook or is_video):
                 deferred_counts.append("offsets_count")
             user_progress_count = int(manifest.get("user_progress_count") or 0)
             user_favorites_count = int(manifest.get("user_favorites_count") or 0)
@@ -407,6 +426,10 @@ class CategoryMigrationEngine:
             audiobook_tracks = metadata.get("audiobook_tracks", [])
             audiobook_progress = metadata.get("audiobook_progress", [])
             audiobook_track_progress = metadata.get("audiobook_track_progress", [])
+            videos = metadata.get("videos", [])
+            video_episodes = metadata.get("video_episodes", [])
+            video_progress = metadata.get("video_progress", [])
+            video_episode_progress = metadata.get("video_episode_progress", [])
             if is_audiobook:
                 if not all(
                     isinstance(items, list)
@@ -418,6 +441,17 @@ class CategoryMigrationEngine:
                     )
                 ):
                     raise ValueError("오디오북 패키지 데이터 형식이 올바르지 않습니다.")
+            elif is_video:
+                if not all(
+                    isinstance(items, list)
+                    for items in (
+                        videos,
+                        video_episodes,
+                        video_progress,
+                        video_episode_progress,
+                    )
+                ):
+                    raise ValueError("비디오 패키지 데이터 형식이 올바르지 않습니다.")
             elif not isinstance(books, list) or not isinstance(offsets, dict):
                 raise ValueError("패키지 books 또는 offsets 형식이 올바르지 않습니다.")
             books_count = len(books)
@@ -425,6 +459,10 @@ class CategoryMigrationEngine:
             audiobook_tracks_count = len(audiobook_tracks)
             audiobook_progress_count = len(audiobook_progress)
             audiobook_track_progress_count = len(audiobook_track_progress)
+            videos_count = len(videos)
+            video_episodes_count = len(video_episodes)
+            video_progress_count = len(video_progress)
+            video_episode_progress_count = len(video_episode_progress)
             offsets_count = sum(
                 len(items) for items in offsets.values() if isinstance(items, list)
             )
@@ -440,8 +478,8 @@ class CategoryMigrationEngine:
             "size": path.stat().st_size,
             "export_version": str(manifest.get("export_version")),
             "created_at": manifest.get("created_at"),
-            "db_type": "audiobook" if is_audiobook else db_type,
-            "media_kind": "audiobook" if is_audiobook else "book",
+            "db_type": "audiobook" if is_audiobook else ("video" if is_video else db_type),
+            "media_kind": "audiobook" if is_audiobook else ("video" if is_video else "book"),
             "library_id": manifest.get("library_id"),
             "library_name": manifest.get("library_name") or library.get("name"),
             "books_count": books_count,
@@ -449,6 +487,10 @@ class CategoryMigrationEngine:
             "audiobook_tracks_count": audiobook_tracks_count,
             "audiobook_progress_count": audiobook_progress_count,
             "audiobook_track_progress_count": audiobook_track_progress_count,
+            "videos_count": videos_count,
+            "video_episodes_count": video_episodes_count,
+            "video_progress_count": video_progress_count,
+            "video_episode_progress_count": video_episode_progress_count,
             "covers_count": covers_count,
             "offsets_count": offsets_count,
             "user_progress_count": user_progress_count,
@@ -538,6 +580,75 @@ class CategoryMigrationEngine:
         return resolve_cover_path(str(self.cover_root), normalized)
 
     @staticmethod
+    def _same_file_content(left, right):
+        if left.stat().st_size != right.stat().st_size:
+            return False
+        with left.open("rb") as left_handle, right.open("rb") as right_handle:
+            while True:
+                left_chunk = left_handle.read(1024 * 1024)
+                right_chunk = right_handle.read(1024 * 1024)
+                if left_chunk != right_chunk:
+                    return False
+                if not left_chunk:
+                    return True
+
+    def _install_staged_covers(self, stage, final_cover_dir, staged_names, db_type):
+        if not staged_names:
+            return {}, [], False
+        if os.path.lexists(final_cover_dir):
+            if final_cover_dir.is_symlink() or not final_cover_dir.is_dir():
+                raise RuntimeError("표지 대상 경로가 일반 디렉터리가 아닙니다.")
+            created_directory = False
+        else:
+            final_cover_dir.mkdir(parents=True)
+            created_directory = True
+        installed = {}
+        created = []
+        try:
+            for filename in sorted(staged_names):
+                source = stage / filename
+                source_name = Path(filename)
+                sequence = 0
+                while True:
+                    if sequence == 0:
+                        candidate_name = source_name.name
+                    else:
+                        suffix = f"__{db_type}" if sequence == 1 else f"__{db_type}_{sequence}"
+                        candidate_name = f"{source_name.stem}{suffix}{source_name.suffix}"
+                    destination = final_cover_dir / candidate_name
+                    if os.path.lexists(destination):
+                        if destination.is_symlink() or not destination.is_file():
+                            raise RuntimeError(
+                                f"표지 대상 경로가 일반 파일이 아닙니다: {candidate_name}"
+                            )
+                        if self._same_file_content(source, destination):
+                            installed[filename] = candidate_name
+                            break
+                        sequence += 1
+                        continue
+                    try:
+                        with source.open("rb") as source_handle, destination.open("xb") as target_handle:
+                            shutil.copyfileobj(source_handle, target_handle, 1024 * 1024)
+                    except FileExistsError:
+                        continue
+                    except Exception:
+                        destination.unlink(missing_ok=True)
+                        raise
+                    created.append(candidate_name)
+                    installed[filename] = candidate_name
+                    break
+            return installed, created, created_directory
+        except Exception:
+            for filename in created:
+                (final_cover_dir / filename).unlink(missing_ok=True)
+            if created_directory:
+                try:
+                    final_cover_dir.rmdir()
+                except OSError:
+                    pass
+            raise
+
+    @staticmethod
     def _safe_filename(name, fallback):
         cleaned = "".join(
             character
@@ -584,6 +695,8 @@ class CategoryMigrationEngine:
         return {"db_type": db_type, "count": len(files), "files": files}
 
     def _export_one(self, db_path, db_type, library_id):
+        if str(db_type or "").strip().lower() == "video":
+            return self._export_video_one(db_path, library_id)
         if str(db_type or "").strip().lower() == "audiobook":
             return self._export_audiobook_one(db_path, library_id)
         connection = self._database_connection(db_path, db_type, readonly=True)
@@ -755,6 +868,178 @@ class CategoryMigrationEngine:
                     partial_path.unlink()
                 except OSError:
                     pass
+            raise
+        finally:
+            connection.close()
+
+    def _export_video_one(self, db_path, library_id):
+        connection = self._database_connection(db_path, "video", readonly=True)
+        partial_path = None
+        try:
+            tables = self._tables(connection)
+            required = {"libraries", "videos", "video_episodes"}
+            if not required.issubset(tables):
+                raise RuntimeError(
+                    "비디오 필수 테이블이 없습니다: "
+                    + ", ".join(sorted(required - tables))
+                )
+            if hasattr(connection, "begin"):
+                connection.begin()
+            else:
+                connection.execute("BEGIN")
+            library_row = connection.execute(
+                "SELECT * FROM libraries WHERE id = ?", (library_id,)
+            ).fetchone()
+            if library_row is None:
+                raise ValueError(f"비디오 카테고리 ID {library_id}를 찾을 수 없습니다.")
+            library = dict(library_row)
+            library_name = library.get("name") or f"category_{library_id}"
+            root_paths = self._root_paths(library.get("physical_path"))
+            columns = self._columns(connection, "videos")
+            active = (
+                "(is_deleted IS NULL OR is_deleted = 0)"
+                if "is_deleted" in columns else "1 = 1"
+            )
+            videos = [
+                dict(row) for row in connection.execute(
+                    f"SELECT * FROM videos WHERE library_id = ? AND {active}",
+                    (library_id,),
+                ).fetchall()
+            ]
+            video_payload = []
+            episode_payload = []
+            progress_payload = []
+            episode_progress_payload = []
+            cover_paths = {}
+            for video_index, video in enumerate(videos):
+                self._check_stop()
+                root_index, relative_folder = self._relative_path(
+                    video.get("folder_path"), root_paths
+                )
+                item = dict(video)
+                item.update(
+                    root_index=root_index,
+                    relative_folder_path=relative_folder,
+                )
+                video_payload.append(item)
+                poster = str(video.get("poster") or "").strip()
+                if poster and not poster.startswith(("http://", "https://")):
+                    cover = self._cover_path(poster)
+                    if cover is not None and cover.is_file():
+                        try:
+                            relative_cover = cover.resolve().relative_to(
+                                self.cover_root
+                            ).as_posix()
+                        except ValueError:
+                            relative_cover = cover.name
+                        cover_paths[relative_cover] = cover
+                number_by_id = {}
+                for row in connection.execute(
+                    "SELECT * FROM video_episodes WHERE video_id = ? "
+                    "ORDER BY episode_number, id",
+                    (video.get("id"),),
+                ).fetchall():
+                    episode = dict(row)
+                    number_by_id[int(episode.get("id") or 0)] = int(
+                        episode.get("episode_number") or 0
+                    )
+                    episode_root, relative_path = self._relative_path(
+                        episode.get("file_path"), root_paths
+                    )
+                    episode.update(
+                        video_export_index=video_index,
+                        root_index=episode_root,
+                        relative_path=relative_path,
+                    )
+                    episode_payload.append(episode)
+                if "video_progress" in tables:
+                    for row in connection.execute(
+                        "SELECT * FROM video_progress WHERE video_id = ?",
+                        (video.get("id"),),
+                    ).fetchall():
+                        progress = dict(row)
+                        progress["video_export_index"] = video_index
+                        progress["current_episode_number"] = number_by_id.get(
+                            int(progress.get("current_episode_id") or 0), 0
+                        )
+                        progress_payload.append(progress)
+                if "video_episode_progress" in tables:
+                    for row in connection.execute(
+                        "SELECT * FROM video_episode_progress WHERE video_id = ?",
+                        (video.get("id"),),
+                    ).fetchall():
+                        progress = dict(row)
+                        progress["video_export_index"] = video_index
+                        progress["episode_number"] = number_by_id.get(
+                            int(progress.get("episode_id") or 0), 0
+                        )
+                        episode_progress_payload.append(progress)
+                if video_index % 100 == 0 or video_index + 1 == len(videos):
+                    self._progress(
+                        "export_videos", video_index + 1, len(videos),
+                        f"{library_name} 비디오와 에피소드를 수집하고 있습니다.",
+                    )
+            output = self._package_output_path(library_name, "video", library_id)
+            partial_path = output.with_name(output.name + ".part")
+            manifest = {
+                "export_version": PACKAGE_VERSION,
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "db_type": "video", "media_kind": "video",
+                "library_id": library_id, "library_name": library_name,
+                "root_paths_count": len(root_paths), "books_count": 0,
+                "videos_count": len(video_payload),
+                "video_episodes_count": len(episode_payload),
+                "video_progress_count": len(progress_payload),
+                "video_episode_progress_count": len(episode_progress_payload),
+                "covers_count": len(cover_paths), "user_progress_count": 0,
+                "user_favorites_count": 0,
+            }
+            metadata = {
+                "library": {
+                    "id": library_id, "name": library_name,
+                    "physical_paths": root_paths,
+                    "cron_schedule": library.get("cron_schedule"),
+                    "scan_status": library.get("scan_status", "ready"),
+                    "is_remote": library.get("is_remote", 0),
+                    "vfs_refresh_before_scan": library.get(
+                        "vfs_refresh_before_scan", 0
+                    ),
+                    "rclone_rc_url": library.get("rclone_rc_url"),
+                    "icon": library.get("icon", "fa-video"),
+                    "color": library.get("color", "#94a3b8"),
+                    "hide_cover": library.get("hide_cover", 0),
+                },
+                "books": [], "offsets": {}, "videos": video_payload,
+                "video_episodes": episode_payload,
+                "video_progress": progress_payload,
+                "video_episode_progress": episode_progress_payload,
+                "user_progress": [], "user_favorites": [],
+            }
+            with zipfile.ZipFile(
+                str(partial_path), "w", compression=zipfile.ZIP_STORED
+            ) as archive:
+                archive.writestr(
+                    "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2)
+                )
+                archive.writestr(
+                    "metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2)
+                )
+                for index, (relative, cover_path) in enumerate(
+                    sorted(cover_paths.items()), 1
+                ):
+                    self._check_stop()
+                    archive.write(str(cover_path), arcname=f"covers/{relative}")
+                    self._progress(
+                        "export_covers", index, len(cover_paths),
+                        f"{library_name} 포스터를 패키징하고 있습니다.",
+                    )
+            os.replace(str(partial_path), str(output))
+            partial_path = None
+            return {**manifest, "path": str(output), "filename": output.name,
+                    "size": output.stat().st_size}
+        except Exception:
+            if partial_path is not None:
+                partial_path.unlink(missing_ok=True)
             raise
         finally:
             connection.close()
@@ -1105,6 +1390,371 @@ class CategoryMigrationEngine:
             )
         return int(existing["id"])
 
+    def _import_video_category(
+        self, db_path, package_path, target_paths, name=None, merge_to=None,
+        backup=True, inspection=None,
+    ):
+        inspection = inspection or self.inspect_package(package_path)
+        paths = parse_paths(target_paths)
+        if not paths:
+            raise ValueError("가져올 대상 물리 경로를 하나 이상 입력해 주세요.")
+        targets = []
+        for raw_path in paths:
+            target = Path(raw_path).expanduser()
+            if not target.is_absolute():
+                raise ValueError("대상 물리 경로는 절대 경로로 입력해 주세요.")
+            target.mkdir(parents=True, exist_ok=True)
+            targets.append(Path(os.path.abspath(str(target))))
+        connection = self._database_connection(db_path, "video", readonly=False)
+        try:
+            self._check_required_sqlite_modules(connection)
+            self._quick_check(connection, "video")
+        finally:
+            connection.close()
+        package = self._work_path(package_path, must_exist=True)
+        if inspection["cover_uncompressed_size"] > shutil.disk_usage(
+            str(self.cover_root)
+        ).free:
+            raise OSError("포스터 복원에 필요한 디스크 여유 공간이 부족합니다.")
+        backup_path = self._backup_database(db_path, "video") if backup else None
+        stage = Path(tempfile.mkdtemp(
+            prefix=".bookoasis_mate_video_import_", dir=str(self.cover_root)
+        ))
+        final_cover_dir = None
+        rollback_cover_dir = None
+        connection = None
+        moved_stage = False
+        moved_cover_names = []
+        backed_up_cover_names = []
+        created_merge_cover_dir = False
+        committed = False
+        try:
+            with zipfile.ZipFile(str(package), "r") as archive:
+                metadata = self._read_json_member(archive, "metadata.json")
+                library_meta = metadata["library"]
+                videos = metadata.get("videos", [])
+                episodes = metadata.get("video_episodes", [])
+                progress_rows = metadata.get("video_progress", [])
+                episode_progress_rows = metadata.get("video_episode_progress", [])
+                cover_members = [
+                    member for member in archive.infolist()
+                    if member.filename.startswith("covers/") and not member.is_dir()
+                ]
+                staged_names = set()
+                for index, member in enumerate(cover_members, 1):
+                    self._check_stop()
+                    filename = Path(member.filename).name
+                    if not filename or filename in staged_names:
+                        raise ValueError(
+                            f"중복되거나 잘못된 포스터 파일명입니다: {member.filename}"
+                        )
+                    staged_names.add(filename)
+                    with archive.open(member) as source, (stage / filename).open("wb") as out:
+                        shutil.copyfileobj(source, out, 1024 * 1024)
+                    self._progress(
+                        "import_covers", index, len(cover_members),
+                        "비디오 포스터를 임시 디렉터리에 복원하고 있습니다.",
+                    )
+            connection = self._database_connection(db_path, "video", readonly=False)
+            tables = self._tables(connection)
+            required = {"libraries", "videos", "video_episodes"}
+            if not required.issubset(tables):
+                raise RuntimeError(
+                    "비디오 필수 테이블이 없습니다: "
+                    + ", ".join(sorted(required - tables))
+                )
+            library_columns = self._columns(connection, "libraries")
+            video_columns = self._columns(connection, "videos")
+            episode_columns = self._columns(connection, "video_episodes")
+            if hasattr(connection, "begin"):
+                connection.begin(immediate=True)
+            else:
+                connection.execute("BEGIN IMMEDIATE")
+            merge_value = str(merge_to or "").strip()
+            mode = "merge" if merge_value else "new"
+            added_paths = []
+            if mode == "merge":
+                target_library = None
+                if merge_value.isdigit():
+                    target_library = connection.execute(
+                        "SELECT id, name, physical_path FROM libraries WHERE id = ?",
+                        (int(merge_value),),
+                    ).fetchone()
+                if target_library is None:
+                    target_library = connection.execute(
+                        "SELECT id, name, physical_path FROM libraries WHERE name = ?",
+                        (merge_value,),
+                    ).fetchone()
+                if target_library is None:
+                    raise ValueError(f"병합 대상 비디오 카테고리를 찾을 수 없습니다: {merge_value}")
+                library_id = int(target_library["id"])
+                library_name = str(target_library["name"])
+                physical_paths = self._root_paths(target_library["physical_path"])
+                for target in targets:
+                    if str(target) not in physical_paths:
+                        physical_paths.append(str(target))
+                        added_paths.append(str(target))
+                connection.execute(
+                    "UPDATE libraries SET physical_path = ? WHERE id = ?",
+                    ("\n".join(physical_paths), library_id),
+                )
+            else:
+                library_name = str(
+                    name or library_meta.get("name") or "Imported Videos"
+                ).strip()
+                if connection.execute(
+                    "SELECT id FROM libraries WHERE name = ?", (library_name,)
+                ).fetchone() is not None:
+                    library_name += f" (Imported {datetime.now().strftime('%H%M%S')})"
+                physical_paths = [str(target) for target in targets]
+                added_paths = list(physical_paths)
+                values = {
+                    "name": library_name,
+                    "physical_path": "\n".join(physical_paths),
+                    "cron_schedule": library_meta.get("cron_schedule"),
+                    "scan_status": "ready",
+                    "is_remote": library_meta.get("is_remote", 0),
+                    "vfs_refresh_before_scan": library_meta.get(
+                        "vfs_refresh_before_scan", 0
+                    ),
+                    "rclone_rc_url": library_meta.get("rclone_rc_url"),
+                    "icon": library_meta.get("icon", "fa-video"),
+                    "color": library_meta.get("color", "#94a3b8"),
+                    "hide_cover": library_meta.get("hide_cover", 0),
+                }
+                library_id = self._insert_row(
+                    connection, "libraries",
+                    {key: value for key, value in values.items() if key in library_columns},
+                )
+            existing_videos = int(connection.execute(
+                "SELECT COUNT(*) FROM videos WHERE library_id = ?", (library_id,)
+            ).fetchone()[0])
+            existing_episodes = int(connection.execute(
+                "SELECT COUNT(*) FROM video_episodes e JOIN videos v ON v.id=e.video_id "
+                "WHERE v.library_id = ?", (library_id,)
+            ).fetchone()[0])
+            final_cover_dir = self.cover_root / str(library_id)
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            index_to_id = {}
+            index_to_root = {}
+            episode_lookup = {}
+            imported_videos = skipped_videos = imported_episodes = skipped_episodes = 0
+            for index, video in enumerate(videos):
+                self._check_stop()
+                root_index = int(video.get("root_index") or 0)
+                if root_index < 0 or root_index >= len(targets):
+                    root_index = 0
+                root = targets[root_index]
+                index_to_root[index] = root
+                relative = self._safe_optional_relative_path(
+                    video.get("relative_folder_path")
+                )
+                folder_path = root.joinpath(*relative.parts)
+                duplicate = connection.execute(
+                    "SELECT id FROM videos WHERE folder_path = ?", (str(folder_path),)
+                ).fetchone()
+                if duplicate is not None:
+                    video_id = int(duplicate["id"])
+                    skipped_videos += 1
+                else:
+                    poster = str(video.get("poster") or "").strip()
+                    if poster and not poster.startswith(("http://", "https://")):
+                        poster = str(final_cover_dir / Path(poster).name)
+                    values = {key: video.get(key) for key in VIDEO_COLUMNS}
+                    values.update(
+                        library_id=library_id,
+                        title=video.get("title") or "Unknown Video",
+                        poster=poster,
+                        folder_name=video.get("folder_name") or folder_path.name,
+                        folder_path=str(folder_path),
+                        created_at=video.get("created_at") or now,
+                        updated_at=video.get("updated_at") or now,
+                    )
+                    video_id = self._insert_row(
+                        connection, "videos",
+                        {key: value for key, value in values.items() if key in video_columns},
+                    )
+                    imported_videos += 1
+                index_to_id[index] = int(video_id)
+                if index % 100 == 0 or index + 1 == len(videos):
+                    self._progress(
+                        "import_videos", index + 1, len(videos),
+                        "비디오 정보를 대상 카테고리에 저장하고 있습니다.",
+                    )
+            for index, episode in enumerate(episodes):
+                video_index = int(episode.get("video_export_index", -1))
+                if video_index not in index_to_id:
+                    continue
+                video_id = index_to_id[video_index]
+                root_index = int(episode.get("root_index") or 0)
+                root = targets[root_index] if 0 <= root_index < len(targets) else index_to_root[video_index]
+                relative = self._safe_relative_path(episode.get("relative_path"))
+                file_path = root.joinpath(*relative.parts)
+                duplicate = connection.execute(
+                    "SELECT id FROM video_episodes WHERE file_path = ?", (str(file_path),)
+                ).fetchone()
+                episode_number = int(episode.get("episode_number") or 0)
+                if duplicate is not None:
+                    episode_id = int(duplicate["id"])
+                    skipped_episodes += 1
+                else:
+                    values = {key: episode.get(key) for key in VIDEO_EPISODE_COLUMNS}
+                    values.update(
+                        video_id=video_id,
+                        filename=episode.get("filename") or file_path.name,
+                        file_path=str(file_path),
+                    )
+                    episode_id = self._insert_row(
+                        connection, "video_episodes",
+                        {key: value for key, value in values.items() if key in episode_columns},
+                    )
+                    imported_episodes += 1
+                if episode_number > 0:
+                    episode_lookup[(video_id, episode_number)] = int(episode_id)
+                if index % 200 == 0 or index + 1 == len(episodes):
+                    self._progress(
+                        "import_video_episodes", index + 1, len(episodes),
+                        "비디오 에피소드 정보를 저장하고 있습니다.",
+                    )
+            valid_users = {
+                int(row["id"]) for row in connection.execute(
+                    "SELECT id FROM users"
+                ).fetchall()
+            } if "users" in tables else set()
+            imported_progress = skipped_progress = 0
+            if "video_progress" in tables:
+                columns = self._columns(connection, "video_progress")
+                for row in progress_rows:
+                    index = int(row.get("video_export_index", -1))
+                    user_id = int(row.get("user_id") or 0)
+                    if index not in index_to_id or user_id not in valid_users:
+                        skipped_progress += 1
+                        continue
+                    video_id = index_to_id[index]
+                    episode_number = int(row.get("current_episode_number") or 0)
+                    values = {
+                        key: value for key, value in row.items()
+                        if key not in {"id", "video_id", "video_export_index",
+                                       "current_episode_id", "current_episode_number"}
+                        and key in columns
+                    }
+                    values.update(
+                        video_id=video_id, user_id=user_id,
+                        current_episode_id=episode_lookup.get((video_id, episode_number)),
+                    )
+                    self._upsert_row(
+                        connection, "video_progress", ("video_id", "user_id"), values
+                    )
+                    imported_progress += 1
+            imported_episode_progress = skipped_episode_progress = 0
+            if "video_episode_progress" in tables:
+                columns = self._columns(connection, "video_episode_progress")
+                for row in episode_progress_rows:
+                    index = int(row.get("video_export_index", -1))
+                    user_id = int(row.get("user_id") or 0)
+                    if index not in index_to_id or user_id not in valid_users:
+                        skipped_episode_progress += 1
+                        continue
+                    video_id = index_to_id[index]
+                    episode_id = episode_lookup.get(
+                        (video_id, int(row.get("episode_number") or 0))
+                    )
+                    if not episode_id:
+                        skipped_episode_progress += 1
+                        continue
+                    values = {
+                        key: value for key, value in row.items()
+                        if key not in {"id", "video_id", "episode_id",
+                                       "video_export_index", "episode_number"}
+                        and key in columns
+                    }
+                    values.update(video_id=video_id, episode_id=episode_id, user_id=user_id)
+                    self._upsert_row(
+                        connection, "video_episode_progress",
+                        ("video_id", "episode_id", "user_id"), values,
+                    )
+                    imported_episode_progress += 1
+            if mode == "new":
+                if final_cover_dir.exists():
+                    raise FileExistsError("신규 비디오 포스터 디렉터리가 이미 존재합니다.")
+                os.replace(str(stage), str(final_cover_dir))
+                moved_stage = True
+            elif staged_names:
+                if not final_cover_dir.exists():
+                    final_cover_dir.mkdir(parents=True)
+                    created_merge_cover_dir = True
+                rollback_cover_dir = Path(tempfile.mkdtemp(
+                    prefix=".bookoasis_mate_video_cover_rollback_",
+                    dir=str(self.cover_root),
+                ))
+                for filename in sorted(staged_names):
+                    source, destination = stage / filename, final_cover_dir / filename
+                    if destination.exists():
+                        os.replace(str(destination), str(rollback_cover_dir / filename))
+                        backed_up_cover_names.append(filename)
+                    os.replace(str(source), str(destination))
+                    moved_cover_names.append(filename)
+            verified_videos = int(connection.execute(
+                "SELECT COUNT(*) FROM videos WHERE library_id = ?", (library_id,)
+            ).fetchone()[0])
+            verified_episodes = int(connection.execute(
+                "SELECT COUNT(*) FROM video_episodes e JOIN videos v ON v.id=e.video_id "
+                "WHERE v.library_id = ?", (library_id,)
+            ).fetchone()[0])
+            if verified_videos != existing_videos + imported_videos:
+                raise RuntimeError("가져온 비디오 수 검증에 실패했습니다.")
+            if verified_episodes != existing_episodes + imported_episodes:
+                raise RuntimeError("가져온 비디오 에피소드 수 검증에 실패했습니다.")
+            connection.commit()
+            committed = True
+            if rollback_cover_dir is not None:
+                shutil.rmtree(str(rollback_cover_dir), ignore_errors=True)
+            return {
+                "mode": mode, "db_type": "video", "media_kind": "video",
+                "library_id": library_id, "library_name": library_name,
+                "physical_paths": physical_paths, "added_physical_paths": added_paths,
+                "videos_count": imported_videos,
+                "skipped_duplicate_videos_count": skipped_videos,
+                "video_episodes_count": imported_episodes,
+                "skipped_duplicate_episodes_count": skipped_episodes,
+                "video_progress_count": imported_progress,
+                "skipped_video_progress_count": skipped_progress,
+                "video_episode_progress_count": imported_episode_progress,
+                "skipped_video_episode_progress_count": skipped_episode_progress,
+                "covers_count": len(staged_names),
+                "backup_path": str(backup_path) if backup_path else "",
+                "package_path": str(package),
+            }
+        except Exception:
+            if connection is not None and not committed:
+                try:
+                    connection.rollback()
+                except Exception:
+                    pass
+            if not committed and final_cover_dir is not None:
+                if moved_stage:
+                    shutil.rmtree(str(final_cover_dir), ignore_errors=True)
+                for filename in moved_cover_names:
+                    (final_cover_dir / filename).unlink(missing_ok=True)
+                if rollback_cover_dir is not None:
+                    for filename in backed_up_cover_names:
+                        backup_cover = rollback_cover_dir / filename
+                        if backup_cover.exists():
+                            os.replace(str(backup_cover), str(final_cover_dir / filename))
+                if created_merge_cover_dir and final_cover_dir.exists():
+                    try:
+                        final_cover_dir.rmdir()
+                    except OSError:
+                        pass
+            raise
+        finally:
+            if connection is not None:
+                connection.close()
+            if stage.exists():
+                shutil.rmtree(str(stage), ignore_errors=True)
+            if rollback_cover_dir is not None and rollback_cover_dir.exists():
+                shutil.rmtree(str(rollback_cover_dir), ignore_errors=True)
+
     def _import_audiobook_category(
         self,
         db_path,
@@ -1156,11 +1806,8 @@ class CategoryMigrationEngine:
         )
         final_cover_dir = None
         connection = None
-        moved_stage = False
-        moved_cover_names = []
-        backed_up_cover_names = []
-        rollback_cover_dir = None
-        created_merge_cover_dir = False
+        created_cover_names = []
+        created_cover_dir = False
         database_committed = False
         try:
             with zipfile.ZipFile(str(package), "r") as archive:
@@ -1312,6 +1959,14 @@ class CategoryMigrationEngine:
                 (new_library_id,),
             ).fetchone()[0]
             final_cover_dir = self.cover_root / str(new_library_id)
+            cover_name_map, created_cover_names, created_cover_dir = (
+                self._install_staged_covers(
+                    stage,
+                    final_cover_dir,
+                    staged_names,
+                    "audiobook",
+                )
+            )
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             audiobook_index_to_id = {}
             audiobook_index_to_root = {}
@@ -1345,6 +2000,7 @@ class CategoryMigrationEngine:
                     poster = str(audiobook.get("poster") or "").strip()
                     if poster and not poster.startswith(("http://", "https://")):
                         poster_name = Path(poster).name
+                        poster_name = cover_name_map.get(poster_name, poster_name)
                         poster = str(final_cover_dir / poster_name)
                     values = {
                         "library_id": new_library_id,
@@ -1540,34 +2196,6 @@ class CategoryMigrationEngine:
                     )
                     imported_track_progress += 1
 
-            if mode == "new":
-                if final_cover_dir.exists():
-                    raise FileExistsError("신규 오디오북 포스터 디렉터리가 이미 존재합니다.")
-                os.replace(str(stage), str(final_cover_dir))
-                moved_stage = True
-            elif staged_names:
-                if not final_cover_dir.exists():
-                    final_cover_dir.mkdir(parents=True)
-                    created_merge_cover_dir = True
-                rollback_cover_dir = Path(
-                    tempfile.mkdtemp(
-                        prefix=".bookoasis_mate_audio_cover_rollback_",
-                        dir=str(self.cover_root),
-                    )
-                )
-                for filename in sorted(staged_names):
-                    source = stage / filename
-                    destination = final_cover_dir / filename
-                    if destination.exists():
-                        if destination.is_symlink() or not destination.is_file():
-                            raise RuntimeError(
-                                f"병합 대상 포스터 경로가 일반 파일이 아닙니다: {filename}"
-                            )
-                        os.replace(str(destination), str(rollback_cover_dir / filename))
-                        backed_up_cover_names.append(filename)
-                    os.replace(str(source), str(destination))
-                    moved_cover_names.append(filename)
-
             verified_audiobooks = connection.execute(
                 "SELECT COUNT(*) FROM audiobooks WHERE library_id = ?",
                 (new_library_id,),
@@ -1582,13 +2210,14 @@ class CategoryMigrationEngine:
                 raise RuntimeError("가져온 오디오북 수 검증에 실패했습니다.")
             if verified_tracks != existing_track_count + imported_tracks:
                 raise RuntimeError("가져온 오디오북 트랙 수 검증에 실패했습니다.")
-            if not all((final_cover_dir / filename).is_file() for filename in staged_names):
+            if not all(
+                (final_cover_dir / filename).is_file()
+                for filename in cover_name_map.values()
+            ):
                 raise RuntimeError("복원한 오디오북 포스터 수 검증에 실패했습니다.")
 
             connection.commit()
             database_committed = True
-            if rollback_cover_dir is not None:
-                shutil.rmtree(str(rollback_cover_dir), ignore_errors=True)
             self._progress("verify", 1, 1, "오디오북 가져오기 결과를 검증했습니다.")
             return {
                 "mode": mode,
@@ -1621,19 +2250,10 @@ class CategoryMigrationEngine:
                 except Exception:
                     pass
             if not database_committed:
-                if moved_stage and final_cover_dir is not None:
-                    shutil.rmtree(str(final_cover_dir), ignore_errors=True)
                 if final_cover_dir is not None:
-                    for filename in moved_cover_names:
-                        destination = final_cover_dir / filename
-                        if destination.exists():
-                            destination.unlink()
-                    if rollback_cover_dir is not None:
-                        for filename in backed_up_cover_names:
-                            backup_cover = rollback_cover_dir / filename
-                            if backup_cover.exists():
-                                os.replace(str(backup_cover), str(final_cover_dir / filename))
-                    if created_merge_cover_dir and final_cover_dir.exists():
+                    for filename in created_cover_names:
+                        (final_cover_dir / filename).unlink(missing_ok=True)
+                    if created_cover_dir and final_cover_dir.exists():
                         try:
                             final_cover_dir.rmdir()
                         except OSError:
@@ -1644,8 +2264,6 @@ class CategoryMigrationEngine:
                 connection.close()
             if stage.exists():
                 shutil.rmtree(str(stage), ignore_errors=True)
-            if rollback_cover_dir is not None and rollback_cover_dir.exists():
-                shutil.rmtree(str(rollback_cover_dir), ignore_errors=True)
 
     def import_category(
         self,
@@ -1661,8 +2279,21 @@ class CategoryMigrationEngine:
         inspection = inspection or self.inspect_package(package_path)
         selected_db_type = db_type or inspection["db_type"] or "general"
         package_is_audiobook = inspection.get("media_kind") == "audiobook"
+        package_is_video = inspection.get("media_kind") == "video"
+        if package_is_video != (selected_db_type == "video"):
+            raise ValueError("패키지 미디어 유형과 대상 DB 유형이 일치하지 않습니다.")
         if package_is_audiobook != (selected_db_type == "audiobook"):
             raise ValueError("패키지 미디어 유형과 대상 DB 유형이 일치하지 않습니다.")
+        if package_is_video:
+            return self._import_video_category(
+                db_path,
+                package_path,
+                target_paths,
+                name=name,
+                merge_to=merge_to,
+                backup=backup,
+                inspection=inspection,
+            )
         if package_is_audiobook:
             return self._import_audiobook_category(
                 db_path,
@@ -1709,11 +2340,8 @@ class CategoryMigrationEngine:
         stage = Path(tempfile.mkdtemp(prefix=".bookoasis_mate_import_", dir=str(self.cover_root)))
         final_cover_dir = None
         connection = None
-        moved_stage = False
-        moved_cover_names = []
-        backed_up_cover_names = []
-        rollback_cover_dir = None
-        created_merge_cover_dir = False
+        created_cover_names = []
+        created_cover_dir = False
         database_committed = False
         try:
             with zipfile.ZipFile(str(package), "r") as archive:
@@ -1868,6 +2496,15 @@ class CategoryMigrationEngine:
                     """,
                     (new_library_id,),
                 ).fetchone()[0]
+            final_cover_dir = self.cover_root / str(new_library_id)
+            cover_name_map, created_cover_names, created_cover_dir = (
+                self._install_staged_covers(
+                    stage,
+                    final_cover_dir,
+                    staged_names,
+                    selected_db_type,
+                )
+            )
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             imported_offsets = 0
             imported_books = 0
@@ -1892,7 +2529,11 @@ class CategoryMigrationEngine:
                 else:
                     cover_image = str(book.get("cover_image") or "").strip()
                     if cover_image:
-                        cover_image = f"{new_library_id}/{Path(cover_image).name}"
+                        original_name = Path(cover_image).name
+                        cover_image = (
+                            f"{new_library_id}/"
+                            f"{cover_name_map.get(original_name, original_name)}"
+                        )
                     values = {
                         "library_id": new_library_id,
                         "title": book.get("title") or "Unknown Title",
@@ -2035,40 +2676,6 @@ class CategoryMigrationEngine:
                         "refreshed_at = NULL WHERE id = 1"
                     )
 
-            final_cover_dir = self.cover_root / str(new_library_id)
-            if mode == "new":
-                if final_cover_dir.exists():
-                    raise FileExistsError(
-                        "신규 카테고리 표지 디렉터리가 이미 존재합니다."
-                    )
-                os.replace(str(stage), str(final_cover_dir))
-                moved_stage = True
-            elif staged_names:
-                if not final_cover_dir.exists():
-                    final_cover_dir.mkdir(parents=True)
-                    created_merge_cover_dir = True
-                rollback_cover_dir = Path(
-                    tempfile.mkdtemp(
-                        prefix=".bookoasis_mate_cover_rollback_",
-                        dir=str(self.cover_root),
-                    )
-                )
-                for filename in sorted(staged_names):
-                    source = stage / filename
-                    destination = final_cover_dir / filename
-                    if destination.exists():
-                        if destination.is_symlink() or not destination.is_file():
-                            raise RuntimeError(
-                                f"병합 대상 표지 경로가 일반 파일이 아닙니다: {filename}"
-                            )
-                        os.replace(
-                            str(destination),
-                            str(rollback_cover_dir / filename),
-                        )
-                        backed_up_cover_names.append(filename)
-                    os.replace(str(source), str(destination))
-                    moved_cover_names.append(filename)
-
             verified_books = connection.execute(
                 "SELECT COUNT(*) FROM books WHERE library_id = ?",
                 (new_library_id,),
@@ -2089,13 +2696,11 @@ class CategoryMigrationEngine:
                     raise RuntimeError("가져온 offset 수 검증에 실패했습니다.")
             if not all(
                 (final_cover_dir / filename).is_file()
-                for filename in staged_names
+                for filename in cover_name_map.values()
             ):
                 raise RuntimeError("복원한 표지 수 검증에 실패했습니다.")
             connection.commit()
             database_committed = True
-            if rollback_cover_dir is not None:
-                shutil.rmtree(str(rollback_cover_dir), ignore_errors=True)
             self._progress("verify", 1, 1, "가져오기 결과를 검증했습니다.")
             return {
                 "mode": mode,
@@ -2124,22 +2729,10 @@ class CategoryMigrationEngine:
                 except Exception:
                     pass
             if not database_committed:
-                if moved_stage and final_cover_dir is not None:
-                    shutil.rmtree(str(final_cover_dir), ignore_errors=True)
                 if final_cover_dir is not None:
-                    for filename in moved_cover_names:
-                        destination = final_cover_dir / filename
-                        if destination.exists():
-                            destination.unlink()
-                    if rollback_cover_dir is not None:
-                        for filename in backed_up_cover_names:
-                            backup_cover = rollback_cover_dir / filename
-                            if backup_cover.exists():
-                                os.replace(
-                                    str(backup_cover),
-                                    str(final_cover_dir / filename),
-                                )
-                    if created_merge_cover_dir and final_cover_dir.exists():
+                    for filename in created_cover_names:
+                        (final_cover_dir / filename).unlink(missing_ok=True)
+                    if created_cover_dir and final_cover_dir.exists():
                         try:
                             final_cover_dir.rmdir()
                         except OSError:
@@ -2150,5 +2743,3 @@ class CategoryMigrationEngine:
                 connection.close()
             if stage.exists():
                 shutil.rmtree(str(stage), ignore_errors=True)
-            if rollback_cover_dir is not None and rollback_cover_dir.exists():
-                shutil.rmtree(str(rollback_cover_dir), ignore_errors=True)

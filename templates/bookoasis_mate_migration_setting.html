@@ -21,7 +21,7 @@
 
   <div id="migration_export_panel" class="doctor-section doctor-card">
     <h4>내보내기 설정</h4>
-    <p class="doctor-muted">선택한 도서·오디오북 카테고리의 메타데이터, 진행률과 표지·포스터를 공식 2.0 패키지로 저장합니다.</p>
+    <p class="doctor-muted">선택한 도서·오디오북·비디오 카테고리의 메타데이터, 진행률과 표지·포스터를 공식 2.0 패키지로 저장합니다.</p>
     <div class="form-group row">
       <label class="col-sm-3 col-form-label">대상 DB</label>
       <div class="col-sm-9">
@@ -31,6 +31,7 @@
           <option value="adult" {% if arg['migration_export_db_type'] == 'adult' %}selected{% endif %}>성인 DB</option>
           {% endif %}
           <option value="audiobook" {% if arg['migration_export_db_type'] == 'audiobook' %}selected{% endif %}>오디오북 DB</option>
+          <option value="video" {% if arg['migration_export_db_type'] == 'video' %}selected{% endif %}>비디오 DB</option>
         </select>
       </div>
     </div>
@@ -80,6 +81,7 @@
           <option value="adult" {% if arg['migration_import_db_type'] == 'adult' %}selected{% endif %}>성인 DB</option>
           {% endif %}
           <option value="audiobook" {% if arg['migration_import_db_type'] == 'audiobook' %}selected{% endif %}>오디오북 DB</option>
+          <option value="video" {% if arg['migration_import_db_type'] == 'video' %}selected{% endif %}>비디오 DB</option>
         </select>
       </div>
     </div>
@@ -208,6 +210,7 @@ function migrationLoadPackages() {
 
 function migrationRenderPackageInfo(data) {
   var isAudio = data.media_kind === 'audiobook' || data.db_type === 'audiobook';
+  var isVideo = data.media_kind === 'video' || data.db_type === 'video';
   var deferredCounts = data.deferred_counts || [];
   var offsetSummary = deferredCounts.indexOf('offsets_count') !== -1
     ? ' · offset 가져오기 중 집계'
@@ -217,10 +220,15 @@ function migrationRenderPackageInfo(data) {
       ' · 트랙 ' + Number(data.audiobook_tracks_count || 0).toLocaleString() + '개' +
       ' · 재생 진행률 ' + Number(data.audiobook_progress_count || 0).toLocaleString() + '건' +
       ' · 트랙 진행률 ' + Number(data.audiobook_track_progress_count || 0).toLocaleString() + '건'
-    : ' · 도서 ' + Number(data.books_count || 0).toLocaleString() + '권' +
+    : (isVideo
+      ? ' · 비디오 ' + Number(data.videos_count || 0).toLocaleString() + '개' +
+        ' · 에피소드 ' + Number(data.video_episodes_count || 0).toLocaleString() + '개' +
+        ' · 재생 진행률 ' + Number(data.video_progress_count || 0).toLocaleString() + '건' +
+        ' · 에피소드 진행률 ' + Number(data.video_episode_progress_count || 0).toLocaleString() + '건'
+      : ' · 도서 ' + Number(data.books_count || 0).toLocaleString() + '권' +
       offsetSummary +
       ' · 진행률 ' + Number(data.user_progress_count || 0).toLocaleString() + '건' +
-      ' · 즐겨찾기 ' + Number(data.user_favorites_count || 0).toLocaleString() + '건';
+      ' · 즐겨찾기 ' + Number(data.user_favorites_count || 0).toLocaleString() + '건');
   var rootLines = (data.physical_paths || []).map(function(path, index) {
     return '<li><code>' + bookoasisMateEscape(path) + '</code></li>';
   }).join('');

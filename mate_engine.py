@@ -7,6 +7,7 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import quote, urlparse
 
 try:
@@ -136,6 +137,12 @@ class BookOasisMateEngine:
                     self.settings.get("audiobook_db_path"),
                 )
             )
+        if str(self.settings.get("video_db_path") or "").strip():
+            targets.append(
+                self.database_adapter.target(
+                    "video", "비디오", self.settings.get("video_db_path")
+                )
+            )
         return targets
 
     def get_target(self, db_type):
@@ -202,11 +209,11 @@ class BookOasisMateEngine:
         if include_duplicate_isbn and "isbn" in columns:
             duplicate_cte = """
                 WITH isbn_counts AS (
-                    SELECT TRIM(isbn) AS normalized_isbn, COUNT(*) AS item_count
+                    SELECT isbn AS normalized_isbn, COUNT(*) AS item_count
                     FROM books
-                    WHERE TRIM(COALESCE(isbn, '')) != ''
+                    WHERE isbn IS NOT NULL AND isbn != ''
                       AND {active_unaliased}
-                    GROUP BY TRIM(isbn)
+                    GROUP BY isbn
                     HAVING COUNT(*) > 1
                 )
             """.format(
@@ -216,7 +223,7 @@ class BookOasisMateEngine:
                     else "1 = 1"
                 )
             )
-            duplicate_join = "LEFT JOIN isbn_counts ic ON ic.normalized_isbn = TRIM(COALESCE(b.isbn, ''))"
+            duplicate_join = "LEFT JOIN isbn_counts ic ON ic.normalized_isbn = b.isbn"
             duplicate_count = "COALESCE(ic.item_count, 0)"
             expressions["duplicate_isbn"] = "COALESCE(ic.item_count, 0) > 1"
 
@@ -356,6 +363,82 @@ class BookOasisMateEngine:
             )
         return result
 
+    def _video_summary(self, connection):
+        tables = self._tables(connection)
+        if "videos" not in tables:
+            raise RuntimeError("videos 테이블이 없습니다.")
+        columns = self._columns(connection, "videos")
+        active = (
+            "(v.is_deleted = 0 OR v.is_deleted IS NULL)"
+            if "is_deleted" in columns
+            else "1 = 1"
+        )
+
+        def missing(column):
+            return f"TRIM(COALESCE(v.{column}, '')) = ''" if column in columns else "0"
+
+        poster = missing("poster")
+        description = missing("description")
+        genres = missing("genres")
+        episodes = "COALESCE(v.total_episodes, 0) <= 0" if "total_episodes" in columns else "0"
+        duration = "COALESCE(v.total_duration, 0) <= 0" if "total_duration" in columns else "0"
+        problem = " OR ".join((poster, description, genres, episodes, duration))
+        row = connection.execute(
+            f"""
+            SELECT COUNT(*) AS total_videos,
+                   SUM(CASE WHEN {poster} THEN 1 ELSE 0 END) AS poster,
+                   SUM(CASE WHEN {description} THEN 1 ELSE 0 END) AS description,
+                   SUM(CASE WHEN {genres} THEN 1 ELSE 0 END) AS genres,
+                   SUM(CASE WHEN {episodes} THEN 1 ELSE 0 END) AS episodes,
+                   SUM(CASE WHEN {duration} THEN 1 ELSE 0 END) AS duration,
+                   SUM(CASE WHEN {problem} THEN 1 ELSE 0 END) AS problem_videos
+            FROM videos v WHERE {active}
+            """
+        ).fetchone()
+        result = {key: int(row[key] or 0) for key in row.keys()}
+        result.update(
+            total_episodes=0,
+            episode_file_size_missing=0,
+            episode_duration_missing=0,
+            episode_resolution_missing=0,
+            needs_transcode=0,
+            container_unverified=0,
+        )
+        if "video_episodes" not in tables:
+            return result
+        episode_columns = self._columns(connection, "video_episodes")
+
+        def count_if(column, expression):
+            return (
+                f"SUM(CASE WHEN {expression} THEN 1 ELSE 0 END)"
+                if column in episode_columns
+                else "0"
+            )
+
+        episode_row = connection.execute(
+            f"""
+            SELECT COUNT(*) AS total_episodes,
+                   {count_if('file_size', 'COALESCE(e.file_size, 0) <= 0')} AS episode_file_size_missing,
+                   {count_if('duration', 'COALESCE(e.duration, 0) <= 0')} AS episode_duration_missing,
+                   {count_if('width', 'COALESCE(e.width, 0) <= 0 OR COALESCE(e.height, 0) <= 0')} AS episode_resolution_missing,
+                   {count_if('needs_transcode', 'COALESCE(e.needs_transcode, 0) = 1')} AS needs_transcode,
+                   {count_if('container_verified', 'COALESCE(e.container_verified, 0) = 0')} AS container_unverified
+            FROM video_episodes e
+            JOIN videos v ON v.id = e.video_id
+            WHERE {active}
+            """
+        ).fetchone()
+        for key in (
+            "total_episodes",
+            "episode_file_size_missing",
+            "episode_duration_missing",
+            "episode_resolution_missing",
+            "needs_transcode",
+            "container_unverified",
+        ):
+            result[key] = int(episode_row[key] or 0)
+        return result
+
     def _issue_diagnostics(self, item, issue_keys):
         reasons = []
         for issue_type in issue_keys:
@@ -484,30 +567,35 @@ class BookOasisMateEngine:
         try:
             with closing(self._connect(target)) as connection:
                 tables = self._tables(connection)
-                media_kind = "audiobook" if target.db_type == "audiobook" else "book"
-                summary = (
-                    self._audiobook_summary(connection)
-                    if media_kind == "audiobook"
-                    else self._book_summary(connection)
-                )
+                media_kind = target.db_type if target.db_type in {"audiobook", "video"} else "book"
+                if media_kind == "audiobook":
+                    summary = self._audiobook_summary(connection)
+                elif media_kind == "video":
+                    summary = self._video_summary(connection)
+                else:
+                    summary = self._book_summary(connection)
                 scanner = self._scanner_summary(connection)
                 engine_details = connection.engine_details()
                 database_size = connection.database_size()
-            problem_count = summary[
-                "problem_audiobooks" if media_kind == "audiobook" else "problem_books"
-            ]
+            problem_key = {
+                "audiobook": "problem_audiobooks",
+                "video": "problem_videos",
+            }.get(media_kind, "problem_books")
+            problem_count = summary[problem_key]
             status = "healthy" if problem_count == 0 and scanner["failed_libraries"] == 0 and scanner["recent_failed_tasks"] == 0 else "warning"
             status_reasons = []
             if problem_count:
                 status_reasons.append({
-                    "code": "problem_audiobooks" if media_kind == "audiobook" else "problem_books",
+                    "code": problem_key,
                     "label": (
                         "점검이 필요한 오디오북"
                         if media_kind == "audiobook"
+                        else "점검이 필요한 비디오"
+                        if media_kind == "video"
                         else "점검이 필요한 도서"
                     ),
                     "count": problem_count,
-                    "unit": "개" if media_kind == "audiobook" else "권",
+                    "unit": "개" if media_kind in {"audiobook", "video"} else "권",
                 })
             if scanner["failed_libraries"]:
                 status_reasons.append({
@@ -550,7 +638,7 @@ class BookOasisMateEngine:
         ) as error:
             return {
                 "db_type": target.db_type,
-                "media_kind": "audiobook" if target.db_type == "audiobook" else "book",
+                "media_kind": target.db_type if target.db_type in {"audiobook", "video"} else "book",
                 "label": target.label,
                 "path": target.path,
                 "database": target.database,
@@ -590,6 +678,7 @@ class BookOasisMateEngine:
                         WHERE table_schema = ?
                           AND table_name IN (
                             'books', 'audiobooks', 'audiobook_tracks',
+                            'videos', 'video_episodes',
                             'libraries', 'scanner_tasks'
                           )
                         ORDER BY table_name
@@ -706,12 +795,24 @@ class BookOasisMateEngine:
             "total_tracks": 0,
             "track_file_size_missing": 0,
         }
+        video_totals = {
+            key: 0
+            for key in (
+                "total_videos", "problem_videos", "poster", "description",
+                "genres", "episodes", "duration", "total_episodes",
+                "episode_file_size_missing", "episode_duration_missing",
+                "episode_resolution_missing", "needs_transcode", "container_unverified",
+            )
+        }
         for database in databases:
             if database.get("media_kind") == "audiobook":
                 for key in audiobook_totals:
                     audiobook_totals[key] += int(
                         database.get("summary", {}).get(key, 0) or 0
                     )
+            elif database.get("media_kind") == "video":
+                for key in video_totals:
+                    video_totals[key] += int(database.get("summary", {}).get(key, 0) or 0)
             else:
                 for key in totals:
                     totals[key] += int(database.get("summary", {}).get(key, 0) or 0)
@@ -724,6 +825,7 @@ class BookOasisMateEngine:
         elif (
             totals["problem_books"]
             or audiobook_totals["problem_audiobooks"]
+            or video_totals["problem_videos"]
             or scanner_totals["failed_libraries"]
             or scanner_totals["recent_failed_tasks"]
         ):
@@ -747,6 +849,7 @@ class BookOasisMateEngine:
             "totals": totals,
             "scanner": scanner_totals,
             "audiobook": audiobook_totals,
+            "video": video_totals,
             "stale_days": self.stale_days,
             "check_missing_isbn": self.check_missing_isbn,
             "duplicate_isbn_deferred": duplicate_isbn_deferred,
@@ -1342,21 +1445,29 @@ class BookOasisMateEngine:
             if should_stop and should_stop():
                 break
             with closing(self._connect(target)) as connection:
-                parts = self._book_query_parts(connection)
-                if "cover_image" not in parts["columns"]:
+                if target.db_type == "audiobook":
+                    table, alias, field = "audiobooks", "a", "poster"
+                elif target.db_type == "video":
+                    table, alias, field = "videos", "v", "poster"
+                else:
+                    table, alias, field = "books", "b", "cover_image"
+                if table not in self._tables(connection):
                     continue
-                conditions = [
-                    parts["active"],
-                    "TRIM(COALESCE(cover_image, '')) != ''",
-                ]
+                columns = self._columns(connection, table)
+                if field not in columns:
+                    continue
+                conditions = [f"TRIM(COALESCE({alias}.{field}, '')) != ''"]
+                if "is_deleted" in columns:
+                    conditions.append(
+                        f"({alias}.is_deleted = 0 OR {alias}.is_deleted IS NULL)"
+                    )
                 params = []
-                if selected_ids:
-                    if "library_id" in parts["columns"]:
-                        placeholders = ", ".join("?" for _ in selected_ids)
-                        conditions.append(f"b.library_id IN ({placeholders})")
-                        params.extend(selected_ids)
+                if selected_ids and "library_id" in columns:
+                    placeholders = ", ".join("?" for _ in selected_ids)
+                    conditions.append(f"{alias}.library_id IN ({placeholders})")
+                    params.extend(selected_ids)
                 cursor = connection.execute(
-                    "SELECT cover_image FROM books b WHERE "
+                    f"SELECT {alias}.{field} FROM {table} {alias} WHERE "
                     + " AND ".join(conditions),
                     params,
                 )
@@ -1367,7 +1478,26 @@ class BookOasisMateEngine:
                     if not rows:
                         break
                     for row in rows:
-                        normalized = normalize_cover_path(row[0])
+                        value = str(row[0] or "").strip()
+                        if value.lower().startswith(("http://", "https://")):
+                            continue
+                        raw_path = Path(value.split("?", 1)[0]).expanduser()
+                        if raw_path.is_absolute():
+                            cover_root_value = str(
+                                self.settings.get("cover_root_path") or ""
+                            ).strip()
+                            if not cover_root_value:
+                                continue
+                            cover_root = Path(cover_root_value).expanduser()
+                            try:
+                                value = raw_path.resolve().relative_to(
+                                    cover_root.resolve()
+                                ).as_posix()
+                            except ValueError:
+                                continue
+                        normalized = normalize_cover_path(value)
+                        if normalized == "NO_COVER":
+                            continue
                         if normalized:
                             references.add(normalized)
                     read_count += len(rows)
@@ -1447,6 +1577,7 @@ class BookOasisMateEngine:
             with closing(self._connect(target)) as connection:
                 tables = self._tables(connection)
                 database_size = connection.database_size()
+                engine_details = connection.engine_details()
                 libraries = []
                 if "libraries" in tables:
                     columns = self._columns(connection, "libraries")
@@ -1460,13 +1591,14 @@ class BookOasisMateEngine:
             return {
                 "success": True,
                 "db_type": target.db_type,
-                "media_kind": "audiobook" if target.db_type == "audiobook" else "book",
+                "media_kind": target.db_type if target.db_type in {"audiobook", "video"} else "book",
                 "label": target.label,
                 "path": target.path,
                 "database": target.database,
                 "engine": target.engine,
                 "file_size": database_size,
                 "libraries": libraries,
+                **engine_details,
                 "duration_ms": round(
                     (datetime.now(timezone.utc) - started).total_seconds() * 1000
                 ),
@@ -1481,7 +1613,7 @@ class BookOasisMateEngine:
             return {
                 "success": False,
                 "db_type": target.db_type,
-                "media_kind": "audiobook" if target.db_type == "audiobook" else "book",
+                "media_kind": target.db_type if target.db_type in {"audiobook", "video"} else "book",
                 "label": target.label,
                 "path": target.path,
                 "database": target.database,

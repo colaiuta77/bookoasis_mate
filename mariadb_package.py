@@ -31,7 +31,7 @@ except ImportError:
 
 PACKAGE_FORMAT = "bookoasis-mate-mariadb"
 PACKAGE_VERSION = "1.0"
-DB_TYPES = ("general", "adult", "audiobook")
+DB_TYPES = ("general", "adult", "audiobook", "video")
 MAX_MANIFEST_SIZE = 2 * 1024 * 1024
 COPY_CHUNK_SIZE = 1024 * 1024
 WRITE_BATCH_SIZE = 500
@@ -160,10 +160,14 @@ class MariaDBPackageEngine:
                             "physical_path": str(row["physical_path"] or ""),
                         }
                     )
-            item_table = "audiobooks" if db_type == "audiobook" else "books"
-            progress_table = (
-                "audiobook_progress" if db_type == "audiobook" else "user_progress"
-            )
+            item_table = {
+                "audiobook": "audiobooks",
+                "video": "videos",
+            }.get(db_type, "books")
+            progress_table = {
+                "audiobook": "audiobook_progress",
+                "video": "video_progress",
+            }.get(db_type, "user_progress")
             items_count = (
                 int(connection.execute(f"SELECT COUNT(*) AS cnt FROM `{item_table}`").fetchone()["cnt"] or 0)
                 if item_table in tables
@@ -184,8 +188,9 @@ class MariaDBPackageEngine:
                 "database": self.database.target(db_type).database,
                 "libraries": libraries,
                 "libraries_count": len(libraries),
-                "books_count": items_count if db_type != "audiobook" else 0,
+                "books_count": items_count if db_type in {"general", "adult"} else 0,
                 "audiobooks_count": items_count if db_type == "audiobook" else 0,
+                "videos_count": items_count if db_type == "video" else 0,
                 "users_count": users_count,
                 "progress_count": progress_count,
             }
@@ -263,7 +268,7 @@ class MariaDBPackageEngine:
 
     def inspect_database_archive(self, archive_path):
         archive_path = Path(archive_path)
-        expected = {"manifest.json"} | {
+        allowed = {"manifest.json"} | {
             f"db/media_{db_type}.sql" for db_type in DB_TYPES
         }
         found = set()
@@ -281,7 +286,7 @@ class MariaDBPackageEngine:
                         if name != "db":
                             raise ValueError(f"DB 패키지 디렉터리가 올바르지 않습니다: {name}")
                         continue
-                    if not member.isfile() or name not in expected:
+                    if not member.isfile() or name not in allowed:
                         raise ValueError(f"DB 패키지에 허용되지 않은 파일이 있습니다: {name}")
                     if name in found:
                         raise ValueError(f"중복된 압축 항목입니다: {name}")
@@ -307,7 +312,10 @@ class MariaDBPackageEngine:
                         sizes[name] = total
         except (tarfile.TarError, EOFError, OSError, json.JSONDecodeError) as error:
             raise ValueError(f"MariaDB DB 패키지를 읽을 수 없습니다: {error}") from error
-        missing = sorted(expected - found)
+        missing = sorted(
+            {"manifest.json", "db/media_general.sql", "db/media_adult.sql"}
+            - found
+        )
         if missing:
             raise ValueError("DB 패키지 필수 파일이 없습니다: " + ", ".join(missing))
         if not isinstance(manifest, dict):
@@ -317,12 +325,18 @@ class MariaDBPackageEngine:
         if str(manifest.get("version") or "") != PACKAGE_VERSION:
             raise ValueError("지원하지 않는 MariaDB 통DB 패키지 버전입니다.")
         manifest_files = manifest.get("files") or {}
-        for name in expected - {"manifest.json"}:
+        database_files = sorted(found - {"manifest.json"})
+        for name in database_files:
             metadata = manifest_files.get(name) or {}
             if hashes.get(name) != metadata.get("sha256"):
                 raise ValueError(f"DB 패키지 SHA-256 검증에 실패했습니다: {name}")
             if int(metadata.get("size") or -1) != sizes.get(name):
                 raise ValueError(f"DB 패키지 크기 검증에 실패했습니다: {name}")
+        manifest["db_types"] = [
+            db_type
+            for db_type in DB_TYPES
+            if f"db/media_{db_type}.sql" in found
+        ]
         return manifest
 
     def preview(self, archive_path, path_mappings=""):
@@ -342,6 +356,7 @@ class MariaDBPackageEngine:
             "mode": "package",
             "package_engine": "mariadb",
             "package_version": manifest.get("version"),
+            "package_db_types": list(manifest.get("db_types") or []),
             "dry_run": True,
             "inspection_scope": "database",
             "database_package": {
@@ -354,6 +369,7 @@ class MariaDBPackageEngine:
             "libraries_count": sum(int(item.get("libraries_count") or 0) for item in databases),
             "books_count": sum(int(item.get("books_count") or 0) for item in databases),
             "audiobooks_count": sum(int(item.get("audiobooks_count") or 0) for item in databases),
+            "videos_count": sum(int(item.get("videos_count") or 0) for item in databases),
             "users_count": sum(int(item.get("users_count") or 0) for item in databases),
             "progress_count": sum(int(item.get("progress_count") or 0) for item in databases),
             "cover_references_count": 0,
@@ -420,8 +436,11 @@ class MariaDBPackageEngine:
         changed_items = 0
         try:
             tables = connection.tables()
-            item_table = "audiobooks" if db_type == "audiobook" else "books"
-            path_column = "folder_path" if db_type == "audiobook" else "file_path"
+            folder_media = db_type in {"audiobook", "video"}
+            item_table = {"audiobook": "audiobooks", "video": "videos"}.get(
+                db_type, "books"
+            )
+            path_column = "folder_path" if folder_media else "file_path"
             if item_table not in tables:
                 return {"changed_libraries_count": 0, "changed_items_count": 0}
             self._check_path_collisions(
@@ -448,10 +467,10 @@ class MariaDBPackageEngine:
                     )
                     changed_libraries = len(updates)
             updates = []
-            if db_type == "audiobook":
+            if folder_media:
                 select_sql = (
                     "SELECT id, folder_path AS item_path, poster "
-                    "FROM audiobooks ORDER BY id"
+                    f"FROM {item_table} ORDER BY id"
                 )
             else:
                 select_sql = (
@@ -462,7 +481,7 @@ class MariaDBPackageEngine:
             for row in self._iter_rows(cursor):
                 current = str(row["item_path"] or "")
                 mapped = _apply_mapping(current, mappings)
-                if db_type == "audiobook":
+                if folder_media:
                     poster = str(row["poster"] or "")
                     mapped_poster = (
                         poster
@@ -497,9 +516,9 @@ class MariaDBPackageEngine:
                         continue
                     updates.append((mapped, cover, int(row["id"])))
                 if len(updates) >= WRITE_BATCH_SIZE:
-                    if db_type == "audiobook":
+                    if folder_media:
                         connection.executemany(
-                            "UPDATE audiobooks SET folder_path=?, poster=? WHERE id=?",
+                            f"UPDATE {item_table} SET folder_path=?, poster=? WHERE id=?",
                             updates,
                         )
                     else:
@@ -510,9 +529,9 @@ class MariaDBPackageEngine:
                     changed_items += len(updates)
                     updates = []
             if updates:
-                if db_type == "audiobook":
+                if folder_media:
                     connection.executemany(
-                        "UPDATE audiobooks SET folder_path=?, poster=? WHERE id=?",
+                        f"UPDATE {item_table} SET folder_path=?, poster=? WHERE id=?",
                         updates,
                     )
                 else:
@@ -542,6 +561,28 @@ class MariaDBPackageEngine:
                     connection.executemany(
                         "UPDATE audiobook_tracks SET file_path=? WHERE id=?",
                         track_updates,
+                    )
+            if db_type == "video" and "video_episodes" in tables:
+                episode_updates = []
+                for row in self._iter_rows(
+                    connection.execute(
+                        "SELECT id, file_path FROM video_episodes ORDER BY id"
+                    )
+                ):
+                    current = str(row["file_path"] or "")
+                    mapped = _apply_mapping(current, mappings)
+                    if mapped != current:
+                        episode_updates.append((mapped, int(row["id"])))
+                    if len(episode_updates) >= WRITE_BATCH_SIZE:
+                        connection.executemany(
+                            "UPDATE video_episodes SET file_path=? WHERE id=?",
+                            episode_updates,
+                        )
+                        episode_updates = []
+                if episode_updates:
+                    connection.executemany(
+                        "UPDATE video_episodes SET file_path=? WHERE id=?",
+                        episode_updates,
                     )
             connection.commit()
             return {
@@ -613,20 +654,21 @@ class MariaDBPackageEngine:
             extract_cover(cover_archive, stage, cover_metadata)
             if (self.health_check() or {}).get("success"):
                 raise RuntimeError("패키지 검증 중 BookOasis가 다시 실행되었습니다.")
-            for db_type in DB_TYPES:
+            package_db_types = list(preview.get("package_db_types") or DB_TYPES)
+            for db_type in package_db_types:
                 self._check_stop()
-                self._progress("backup", len(database_backups), len(DB_TYPES), f"{db_type} DB를 백업하고 있습니다.")
+                self._progress("backup", len(database_backups), len(package_db_types), f"{db_type} DB를 백업하고 있습니다.")
                 database_backups[db_type] = str(
                     self.database.backup(db_type, reason="before_package")
                 )
-            for index, db_type in enumerate(DB_TYPES, start=1):
+            for index, db_type in enumerate(package_db_types, start=1):
                 self._check_stop()
-                self._progress("restore", index - 1, len(DB_TYPES), f"{db_type} DB를 복원하고 있습니다.")
+                self._progress("restore", index - 1, len(package_db_types), f"{db_type} DB를 복원하고 있습니다.")
                 restored.append(db_type)
                 self._restore_sql(db_type, stage / "db" / f"media_{db_type}.sql")
                 self._apply_mappings(db_type, mappings, stage / "covers")
                 self.database.integrity_check(db_type)
-                self._progress("restore", index, len(DB_TYPES), f"{db_type} DB 복원을 완료했습니다.")
+                self._progress("restore", index, len(package_db_types), f"{db_type} DB 복원을 완료했습니다.")
 
             self.cover_root.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(str(stage / "covers"), str(incoming_cover))
@@ -640,7 +682,7 @@ class MariaDBPackageEngine:
                     "dry_run": False,
                     "database_backups": database_backups,
                     "cover_backup_path": cover_backup or "",
-                    "imported_databases": list(DB_TYPES),
+                    "imported_databases": package_db_types,
                 }
             )
             return preview
