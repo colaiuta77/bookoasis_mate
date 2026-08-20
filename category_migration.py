@@ -580,6 +580,75 @@ class CategoryMigrationEngine:
         return resolve_cover_path(str(self.cover_root), normalized)
 
     @staticmethod
+    def _same_file_content(left, right):
+        if left.stat().st_size != right.stat().st_size:
+            return False
+        with left.open("rb") as left_handle, right.open("rb") as right_handle:
+            while True:
+                left_chunk = left_handle.read(1024 * 1024)
+                right_chunk = right_handle.read(1024 * 1024)
+                if left_chunk != right_chunk:
+                    return False
+                if not left_chunk:
+                    return True
+
+    def _install_staged_covers(self, stage, final_cover_dir, staged_names, db_type):
+        if not staged_names:
+            return {}, [], False
+        if os.path.lexists(final_cover_dir):
+            if final_cover_dir.is_symlink() or not final_cover_dir.is_dir():
+                raise RuntimeError("표지 대상 경로가 일반 디렉터리가 아닙니다.")
+            created_directory = False
+        else:
+            final_cover_dir.mkdir(parents=True)
+            created_directory = True
+        installed = {}
+        created = []
+        try:
+            for filename in sorted(staged_names):
+                source = stage / filename
+                source_name = Path(filename)
+                sequence = 0
+                while True:
+                    if sequence == 0:
+                        candidate_name = source_name.name
+                    else:
+                        suffix = f"__{db_type}" if sequence == 1 else f"__{db_type}_{sequence}"
+                        candidate_name = f"{source_name.stem}{suffix}{source_name.suffix}"
+                    destination = final_cover_dir / candidate_name
+                    if os.path.lexists(destination):
+                        if destination.is_symlink() or not destination.is_file():
+                            raise RuntimeError(
+                                f"표지 대상 경로가 일반 파일이 아닙니다: {candidate_name}"
+                            )
+                        if self._same_file_content(source, destination):
+                            installed[filename] = candidate_name
+                            break
+                        sequence += 1
+                        continue
+                    try:
+                        with source.open("rb") as source_handle, destination.open("xb") as target_handle:
+                            shutil.copyfileobj(source_handle, target_handle, 1024 * 1024)
+                    except FileExistsError:
+                        continue
+                    except Exception:
+                        destination.unlink(missing_ok=True)
+                        raise
+                    created.append(candidate_name)
+                    installed[filename] = candidate_name
+                    break
+            return installed, created, created_directory
+        except Exception:
+            for filename in created:
+                (final_cover_dir / filename).unlink(missing_ok=True)
+            if created_directory:
+                try:
+                    final_cover_dir.rmdir()
+                except OSError:
+                    pass
+            raise
+
+    @staticmethod
     def _safe_filename(name, fallback):
         cleaned = "".join(
             character
@@ -1737,11 +1806,8 @@ class CategoryMigrationEngine:
         )
         final_cover_dir = None
         connection = None
-        moved_stage = False
-        moved_cover_names = []
-        backed_up_cover_names = []
-        rollback_cover_dir = None
-        created_merge_cover_dir = False
+        created_cover_names = []
+        created_cover_dir = False
         database_committed = False
         try:
             with zipfile.ZipFile(str(package), "r") as archive:
@@ -1893,6 +1959,14 @@ class CategoryMigrationEngine:
                 (new_library_id,),
             ).fetchone()[0]
             final_cover_dir = self.cover_root / str(new_library_id)
+            cover_name_map, created_cover_names, created_cover_dir = (
+                self._install_staged_covers(
+                    stage,
+                    final_cover_dir,
+                    staged_names,
+                    "audiobook",
+                )
+            )
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             audiobook_index_to_id = {}
             audiobook_index_to_root = {}
@@ -1926,6 +2000,7 @@ class CategoryMigrationEngine:
                     poster = str(audiobook.get("poster") or "").strip()
                     if poster and not poster.startswith(("http://", "https://")):
                         poster_name = Path(poster).name
+                        poster_name = cover_name_map.get(poster_name, poster_name)
                         poster = str(final_cover_dir / poster_name)
                     values = {
                         "library_id": new_library_id,
@@ -2121,34 +2196,6 @@ class CategoryMigrationEngine:
                     )
                     imported_track_progress += 1
 
-            if mode == "new":
-                if final_cover_dir.exists():
-                    raise FileExistsError("신규 오디오북 포스터 디렉터리가 이미 존재합니다.")
-                os.replace(str(stage), str(final_cover_dir))
-                moved_stage = True
-            elif staged_names:
-                if not final_cover_dir.exists():
-                    final_cover_dir.mkdir(parents=True)
-                    created_merge_cover_dir = True
-                rollback_cover_dir = Path(
-                    tempfile.mkdtemp(
-                        prefix=".bookoasis_mate_audio_cover_rollback_",
-                        dir=str(self.cover_root),
-                    )
-                )
-                for filename in sorted(staged_names):
-                    source = stage / filename
-                    destination = final_cover_dir / filename
-                    if destination.exists():
-                        if destination.is_symlink() or not destination.is_file():
-                            raise RuntimeError(
-                                f"병합 대상 포스터 경로가 일반 파일이 아닙니다: {filename}"
-                            )
-                        os.replace(str(destination), str(rollback_cover_dir / filename))
-                        backed_up_cover_names.append(filename)
-                    os.replace(str(source), str(destination))
-                    moved_cover_names.append(filename)
-
             verified_audiobooks = connection.execute(
                 "SELECT COUNT(*) FROM audiobooks WHERE library_id = ?",
                 (new_library_id,),
@@ -2163,13 +2210,14 @@ class CategoryMigrationEngine:
                 raise RuntimeError("가져온 오디오북 수 검증에 실패했습니다.")
             if verified_tracks != existing_track_count + imported_tracks:
                 raise RuntimeError("가져온 오디오북 트랙 수 검증에 실패했습니다.")
-            if not all((final_cover_dir / filename).is_file() for filename in staged_names):
+            if not all(
+                (final_cover_dir / filename).is_file()
+                for filename in cover_name_map.values()
+            ):
                 raise RuntimeError("복원한 오디오북 포스터 수 검증에 실패했습니다.")
 
             connection.commit()
             database_committed = True
-            if rollback_cover_dir is not None:
-                shutil.rmtree(str(rollback_cover_dir), ignore_errors=True)
             self._progress("verify", 1, 1, "오디오북 가져오기 결과를 검증했습니다.")
             return {
                 "mode": mode,
@@ -2202,19 +2250,10 @@ class CategoryMigrationEngine:
                 except Exception:
                     pass
             if not database_committed:
-                if moved_stage and final_cover_dir is not None:
-                    shutil.rmtree(str(final_cover_dir), ignore_errors=True)
                 if final_cover_dir is not None:
-                    for filename in moved_cover_names:
-                        destination = final_cover_dir / filename
-                        if destination.exists():
-                            destination.unlink()
-                    if rollback_cover_dir is not None:
-                        for filename in backed_up_cover_names:
-                            backup_cover = rollback_cover_dir / filename
-                            if backup_cover.exists():
-                                os.replace(str(backup_cover), str(final_cover_dir / filename))
-                    if created_merge_cover_dir and final_cover_dir.exists():
+                    for filename in created_cover_names:
+                        (final_cover_dir / filename).unlink(missing_ok=True)
+                    if created_cover_dir and final_cover_dir.exists():
                         try:
                             final_cover_dir.rmdir()
                         except OSError:
@@ -2225,8 +2264,6 @@ class CategoryMigrationEngine:
                 connection.close()
             if stage.exists():
                 shutil.rmtree(str(stage), ignore_errors=True)
-            if rollback_cover_dir is not None and rollback_cover_dir.exists():
-                shutil.rmtree(str(rollback_cover_dir), ignore_errors=True)
 
     def import_category(
         self,
@@ -2303,11 +2340,8 @@ class CategoryMigrationEngine:
         stage = Path(tempfile.mkdtemp(prefix=".bookoasis_mate_import_", dir=str(self.cover_root)))
         final_cover_dir = None
         connection = None
-        moved_stage = False
-        moved_cover_names = []
-        backed_up_cover_names = []
-        rollback_cover_dir = None
-        created_merge_cover_dir = False
+        created_cover_names = []
+        created_cover_dir = False
         database_committed = False
         try:
             with zipfile.ZipFile(str(package), "r") as archive:
@@ -2462,6 +2496,15 @@ class CategoryMigrationEngine:
                     """,
                     (new_library_id,),
                 ).fetchone()[0]
+            final_cover_dir = self.cover_root / str(new_library_id)
+            cover_name_map, created_cover_names, created_cover_dir = (
+                self._install_staged_covers(
+                    stage,
+                    final_cover_dir,
+                    staged_names,
+                    selected_db_type,
+                )
+            )
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             imported_offsets = 0
             imported_books = 0
@@ -2486,7 +2529,11 @@ class CategoryMigrationEngine:
                 else:
                     cover_image = str(book.get("cover_image") or "").strip()
                     if cover_image:
-                        cover_image = f"{new_library_id}/{Path(cover_image).name}"
+                        original_name = Path(cover_image).name
+                        cover_image = (
+                            f"{new_library_id}/"
+                            f"{cover_name_map.get(original_name, original_name)}"
+                        )
                     values = {
                         "library_id": new_library_id,
                         "title": book.get("title") or "Unknown Title",
@@ -2629,40 +2676,6 @@ class CategoryMigrationEngine:
                         "refreshed_at = NULL WHERE id = 1"
                     )
 
-            final_cover_dir = self.cover_root / str(new_library_id)
-            if mode == "new":
-                if final_cover_dir.exists():
-                    raise FileExistsError(
-                        "신규 카테고리 표지 디렉터리가 이미 존재합니다."
-                    )
-                os.replace(str(stage), str(final_cover_dir))
-                moved_stage = True
-            elif staged_names:
-                if not final_cover_dir.exists():
-                    final_cover_dir.mkdir(parents=True)
-                    created_merge_cover_dir = True
-                rollback_cover_dir = Path(
-                    tempfile.mkdtemp(
-                        prefix=".bookoasis_mate_cover_rollback_",
-                        dir=str(self.cover_root),
-                    )
-                )
-                for filename in sorted(staged_names):
-                    source = stage / filename
-                    destination = final_cover_dir / filename
-                    if destination.exists():
-                        if destination.is_symlink() or not destination.is_file():
-                            raise RuntimeError(
-                                f"병합 대상 표지 경로가 일반 파일이 아닙니다: {filename}"
-                            )
-                        os.replace(
-                            str(destination),
-                            str(rollback_cover_dir / filename),
-                        )
-                        backed_up_cover_names.append(filename)
-                    os.replace(str(source), str(destination))
-                    moved_cover_names.append(filename)
-
             verified_books = connection.execute(
                 "SELECT COUNT(*) FROM books WHERE library_id = ?",
                 (new_library_id,),
@@ -2683,13 +2696,11 @@ class CategoryMigrationEngine:
                     raise RuntimeError("가져온 offset 수 검증에 실패했습니다.")
             if not all(
                 (final_cover_dir / filename).is_file()
-                for filename in staged_names
+                for filename in cover_name_map.values()
             ):
                 raise RuntimeError("복원한 표지 수 검증에 실패했습니다.")
             connection.commit()
             database_committed = True
-            if rollback_cover_dir is not None:
-                shutil.rmtree(str(rollback_cover_dir), ignore_errors=True)
             self._progress("verify", 1, 1, "가져오기 결과를 검증했습니다.")
             return {
                 "mode": mode,
@@ -2718,22 +2729,10 @@ class CategoryMigrationEngine:
                 except Exception:
                     pass
             if not database_committed:
-                if moved_stage and final_cover_dir is not None:
-                    shutil.rmtree(str(final_cover_dir), ignore_errors=True)
                 if final_cover_dir is not None:
-                    for filename in moved_cover_names:
-                        destination = final_cover_dir / filename
-                        if destination.exists():
-                            destination.unlink()
-                    if rollback_cover_dir is not None:
-                        for filename in backed_up_cover_names:
-                            backup_cover = rollback_cover_dir / filename
-                            if backup_cover.exists():
-                                os.replace(
-                                    str(backup_cover),
-                                    str(final_cover_dir / filename),
-                                )
-                    if created_merge_cover_dir and final_cover_dir.exists():
+                    for filename in created_cover_names:
+                        (final_cover_dir / filename).unlink(missing_ok=True)
+                    if created_cover_dir and final_cover_dir.exists():
                         try:
                             final_cover_dir.rmdir()
                         except OSError:
@@ -2744,5 +2743,3 @@ class CategoryMigrationEngine:
                 connection.close()
             if stage.exists():
                 shutil.rmtree(str(stage), ignore_errors=True)
-            if rollback_cover_dir is not None and rollback_cover_dir.exists():
-                shutil.rmtree(str(rollback_cover_dir), ignore_errors=True)

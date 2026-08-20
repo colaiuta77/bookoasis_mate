@@ -7,6 +7,7 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import quote, urlparse
 
 try:
@@ -1444,21 +1445,29 @@ class BookOasisMateEngine:
             if should_stop and should_stop():
                 break
             with closing(self._connect(target)) as connection:
-                parts = self._book_query_parts(connection)
-                if "cover_image" not in parts["columns"]:
+                if target.db_type == "audiobook":
+                    table, alias, field = "audiobooks", "a", "poster"
+                elif target.db_type == "video":
+                    table, alias, field = "videos", "v", "poster"
+                else:
+                    table, alias, field = "books", "b", "cover_image"
+                if table not in self._tables(connection):
                     continue
-                conditions = [
-                    parts["active"],
-                    "TRIM(COALESCE(cover_image, '')) != ''",
-                ]
+                columns = self._columns(connection, table)
+                if field not in columns:
+                    continue
+                conditions = [f"TRIM(COALESCE({alias}.{field}, '')) != ''"]
+                if "is_deleted" in columns:
+                    conditions.append(
+                        f"({alias}.is_deleted = 0 OR {alias}.is_deleted IS NULL)"
+                    )
                 params = []
-                if selected_ids:
-                    if "library_id" in parts["columns"]:
-                        placeholders = ", ".join("?" for _ in selected_ids)
-                        conditions.append(f"b.library_id IN ({placeholders})")
-                        params.extend(selected_ids)
+                if selected_ids and "library_id" in columns:
+                    placeholders = ", ".join("?" for _ in selected_ids)
+                    conditions.append(f"{alias}.library_id IN ({placeholders})")
+                    params.extend(selected_ids)
                 cursor = connection.execute(
-                    "SELECT cover_image FROM books b WHERE "
+                    f"SELECT {alias}.{field} FROM {table} {alias} WHERE "
                     + " AND ".join(conditions),
                     params,
                 )
@@ -1469,7 +1478,26 @@ class BookOasisMateEngine:
                     if not rows:
                         break
                     for row in rows:
-                        normalized = normalize_cover_path(row[0])
+                        value = str(row[0] or "").strip()
+                        if value.lower().startswith(("http://", "https://")):
+                            continue
+                        raw_path = Path(value.split("?", 1)[0]).expanduser()
+                        if raw_path.is_absolute():
+                            cover_root_value = str(
+                                self.settings.get("cover_root_path") or ""
+                            ).strip()
+                            if not cover_root_value:
+                                continue
+                            cover_root = Path(cover_root_value).expanduser()
+                            try:
+                                value = raw_path.resolve().relative_to(
+                                    cover_root.resolve()
+                                ).as_posix()
+                            except ValueError:
+                                continue
+                        normalized = normalize_cover_path(value)
+                        if normalized == "NO_COVER":
+                            continue
                         if normalized:
                             references.add(normalized)
                     read_count += len(rows)
