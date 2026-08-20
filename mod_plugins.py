@@ -29,6 +29,7 @@ class ModulePlugins(PluginModuleBase):
             "plugin_manager_gitea_token": "",
             "plugin_manager_gitea_verify_ssl": "True",
             "plugin_manager_gitea_allow_http": "False",
+            "plugin_manager_gitea_servers": "[]",
             "plugins_auto_start": "False",
             "plugins_interval": "720",
         }
@@ -147,6 +148,7 @@ class ModulePlugins(PluginModuleBase):
             self.manager.normalized_settings(arg)["gitea_token_configured"]
         )
         arg["plugin_manager_gitea_token"] = ""
+        arg["plugin_manager_gitea_servers"] = self.manager.public_gitea_servers(arg)
         arg["effective_paths"] = self.manager.effective_paths(arg)
         return render_template(f"{P.package_name}_{self.name}.html", arg=arg)
 
@@ -217,6 +219,43 @@ class ModulePlugins(PluginModuleBase):
             if command == "gitea_test":
                 data = self.manager.test_gitea_connection(settings)
                 return jsonify({"ret": "success", "msg": "Gitea 연결과 토큰 권한을 확인했습니다.", "data": data})
+            if command == "gitea_servers":
+                return jsonify({"ret": "success", "data": self.manager.public_gitea_servers(settings)})
+            if command == "gitea_server_add":
+                servers = self.manager.add_gitea_server(
+                    settings,
+                    req.form.get("base_url"),
+                    req.form.get("token"),
+                    req.form.get("verify_ssl"),
+                    req.form.get("allow_http"),
+                )
+                P.ModelSetting.set(
+                    "plugin_manager_gitea_servers",
+                    self.manager.serialize_gitea_servers(servers),
+                )
+                P.ModelSetting.set("plugin_manager_gitea_base_url", "")
+                P.ModelSetting.set("plugin_manager_gitea_token", "")
+                return jsonify({"ret": "success", "msg": "Gitea 서버를 확인하고 저장했습니다.", "data": self.manager.public_gitea_servers(self._settings())})
+            if command == "gitea_server_test":
+                data = self.manager.test_gitea_connection(
+                    settings, req.form.get("server_id")
+                )
+                return jsonify({"ret": "success", "msg": "Gitea 연결과 토큰 권한을 확인했습니다.", "data": data})
+            if command in {"gitea_server_toggle", "gitea_server_delete"}:
+                servers = self.manager.update_gitea_server(
+                    settings,
+                    req.form.get("server_id"),
+                    enabled=req.form.get("enabled"),
+                    delete=command == "gitea_server_delete",
+                )
+                P.ModelSetting.set(
+                    "plugin_manager_gitea_servers",
+                    self.manager.serialize_gitea_servers(servers),
+                )
+                P.ModelSetting.set("plugin_manager_gitea_base_url", "")
+                P.ModelSetting.set("plugin_manager_gitea_token", "")
+                message = "Gitea 서버를 삭제했습니다." if command == "gitea_server_delete" else "Gitea 서버 사용 상태를 저장했습니다."
+                return jsonify({"ret": "success", "msg": message, "data": self.manager.public_gitea_servers(self._settings())})
             if command == "catalog":
                 return jsonify(
                     {
@@ -321,6 +360,7 @@ class ModulePlugins(PluginModuleBase):
                     req.form.get("verified"),
                     settings,
                     source=req.form.get("source") or "github",
+                    gitea_server_id=req.form.get("gitea_server_id") or "",
                 )
                 return jsonify(
                     {
@@ -373,6 +413,7 @@ class ModulePlugins(PluginModuleBase):
                     req.form.get("ref"),
                     req.form.get("plugin_id"),
                     settings,
+                    req.form.get("gitea_server_id") or "",
                 )
                 return jsonify(
                     {
