@@ -399,9 +399,21 @@
 .doctor-plugin-badge-update { color:#9a3412; background:#ffedd5; }
 .doctor-plugin-badge-warning { color:#92400e; background:#fef3c7; }
 .doctor-plugin-card-footer { display:flex; align-items:center; justify-content:flex-end; gap:7px; margin-top:14px; padding-top:12px; border-top:1px solid #edf0f2; }
+.doctor-plugin-repo-link { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; padding:0; border-radius:50%; font-size:.72rem; font-weight:800; }
+.doctor-plugin-switch { display:inline-flex; align-items:center; gap:7px; margin:0 auto 0 0; cursor:pointer; }
+.doctor-plugin-switch input { position:absolute; opacity:0; pointer-events:none; }
+.doctor-plugin-switch-track { position:relative; width:38px; height:21px; border-radius:999px; background:#adb5bd; transition:background .15s ease; }
+.doctor-plugin-switch-track::after { position:absolute; top:3px; left:3px; width:15px; height:15px; border-radius:50%; background:#fff; content:""; transition:transform .15s ease; box-shadow:0 1px 2px rgba(0,0,0,.25); }
+.doctor-plugin-switch input:checked + .doctor-plugin-switch-track { background:#6f42c1; }
+.doctor-plugin-switch input:checked + .doctor-plugin-switch-track::after { transform:translateX(17px); }
+.doctor-plugin-switch input:focus + .doctor-plugin-switch-track { box-shadow:0 0 0 3px rgba(111,66,193,.2); }
+.doctor-plugin-switch-text { font-size:.78rem; color:#495057; }
+.doctor-plugin-update-action { box-shadow:0 2px 8px rgba(40,167,69,.25); font-weight:700; }
 .doctor-plugin-source-card { max-width:900px; padding:20px; }
 .doctor-plugin-source-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .doctor-plugin-job { margin-top:8px; padding:20px; }
+.doctor-plugin-job-completed { border-color:#86d49a; background:#f4fff7; }
+.doctor-plugin-job-failed { border-color:#f2a7ad; background:#fff7f8; }
 .doctor-plugin-progress { height:18px; margin:14px 0; }
 .doctor-plugin-manifest { margin:12px 0; padding:13px; border:1px solid #dee2e6; border-radius:7px; background:#f8f9fa; }
 .doctor-plugin-manifest p { margin:6px 0 0; }

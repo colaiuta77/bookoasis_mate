@@ -7,56 +7,70 @@
 <div class="doctor-plugin-manager-head">
   <div>
     <h3>BookOasis 플러그인 관리</h3>
-    <p class="doctor-muted mb-0">검증된 카탈로그 또는 사용자가 지정한 공개 GitHub·ZIP 패키지를 BookOasis <code>plugins/metadata</code> 경로에 설치합니다.</p>
+    <p class="doctor-muted mb-0">검증된 카탈로그 또는 사용자가 지정한 GitHub·Gitea·ZIP 패키지를 BookOasis <code>plugins/metadata</code> 경로에 설치합니다.</p>
   </div>
-  <button id="plugin_settings_toggle" type="button" class="btn btn-sm btn-outline-secondary">경로 및 안전 제한</button>
 </div>
 
 <div class="alert alert-warning doctor-plugin-security">
   <strong>보안 주의.</strong> BookOasis 플러그인은 서버에서 실행되는 Python 코드입니다. GitHub·ZIP 직접 설치는 소유자와 소스를 신뢰할 수 있을 때만 진행하세요. 설치 후 BookOasis 재시작을 권장합니다.
 </div>
 
-<div id="plugin_settings_panel" class="doctor-card doctor-plugin-settings" style="display:none">
-  <div class="doctor-section-heading">
-    <div><h4>설치 경로와 제한</h4><p class="doctor-muted mb-0">두 컨테이너가 공유하는 FF 기준 경로를 입력합니다.</p></div>
-    <button id="plugin_settings_save" type="button" class="btn btn-sm btn-primary">설정 저장</button>
-  </div>
-  <form id="plugin_manager_settings">
-    {{ macros.setting_input_text_and_buttons('plugin_manager_plugins_path', 'plugins/metadata 경로', [['plugin_root_select_btn', '경로 선택']], value=arg.get('plugin_manager_plugins_path', ''), desc=['비우면 <BookOasis 기본 경로>/plugins/metadata를 사용합니다.', 'FF 컨테이너에서 쓰기 가능한 경로여야 합니다.']) }}
-    {{ macros.setting_input_text_and_buttons('plugin_manager_work_dir', '작업·백업 경로', [['plugin_work_select_btn', '경로 선택']], value=arg.get('plugin_manager_work_dir', ''), desc=['비우면 <BookOasis 기본 경로>/temp/bookoasis_mate_plugins를 사용합니다.', 'plugins/metadata 경로 밖에 지정합니다.']) }}
-    {{ macros.setting_input_int('plugin_manager_backup_keep', '플러그인별 백업 보관 수', value=arg.get('plugin_manager_backup_keep', '5'), desc=['1~30개']) }}
-    {{ macros.setting_input_int('plugin_manager_max_archive_mb', 'ZIP 최대 크기(MB)', value=arg.get('plugin_manager_max_archive_mb', '100'), desc=['업로드와 GitHub 다운로드 압축 파일에 적용합니다.']) }}
-    {{ macros.setting_input_int('plugin_manager_max_extracted_mb', '해제 후 최대 크기(MB)', value=arg.get('plugin_manager_max_extracted_mb', '500'), desc=['ZIP 폭탄과 비정상 패키지를 차단합니다.']) }}
-    {{ macros.setting_input_int('plugin_manager_max_files', '최대 파일 수', value=arg.get('plugin_manager_max_files', '2000'), desc=['10~20,000개']) }}
-    {{ macros.setting_input_text('plugin_manager_discovery_topics', 'GitHub 탐색 Topic', value=arg.get('plugin_manager_discovery_topics', 'bookoasis-plugin'), desc=['쉼표로 구분하며 최대 5개까지 사용합니다.', '기본값 bookoasis-plugin']) }}
-    {{ macros.setting_input_int('plugin_manager_discovery_cache_hours', 'Topic 탐색 캐시(시간)', value=arg.get('plugin_manager_discovery_cache_hours', '6'), desc=['1~168시간']) }}
-  </form>
-  <div class="doctor-plugin-effective-paths">
-    <div><strong>적용 플러그인 경로</strong><span id="plugin_effective_root" class="doctor-path">{{ arg.get('effective_paths', {}).get('plugin_root', '') or '미설정' }}</span></div>
-    <div><strong>적용 작업 경로</strong><span id="plugin_effective_work" class="doctor-path">{{ arg.get('effective_paths', {}).get('work_dir', '') or '미설정' }}</span></div>
-  </div>
-</div>
-
 <ul class="nav nav-tabs doctor-setting-tabs doctor-plugin-tabs" role="tablist">
+  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_settings_tab" role="tab">설정</a></li>
   <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#plugin_catalog_tab" role="tab">카탈로그</a></li>
   <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_installed_tab" role="tab">설치 플러그인</a></li>
-  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_github_tab" role="tab">GitHub 설치</a></li>
+  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_github_tab" role="tab">저장소 설치</a></li>
   <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_zip_tab" role="tab">ZIP 설치</a></li>
   <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_history_tab" role="tab">작업 이력</a></li>
 </ul>
 
 <div class="tab-content doctor-plugin-content">
+  <div id="plugin_settings_tab" class="tab-pane fade" role="tabpanel">
+    <div class="doctor-card doctor-plugin-settings">
+      <div class="doctor-section-heading">
+        <div><h4>설치 경로와 안전 제한</h4><p class="doctor-muted mb-0">두 컨테이너가 공유하는 FF 기준 경로를 입력합니다.</p></div>
+        <button id="plugin_settings_save" type="button" class="btn btn-sm btn-primary">설정 저장</button>
+      </div>
+      <form id="plugin_manager_settings">
+        {{ macros.setting_input_text_and_buttons('plugin_manager_plugins_path', 'plugins/metadata 경로', [['plugin_root_select_btn', '경로 선택']], value=arg.get('plugin_manager_plugins_path', ''), desc=['비우면 <BookOasis 기본 경로>/plugins/metadata를 사용합니다.', 'FF 컨테이너에서 쓰기 가능한 경로여야 합니다.']) }}
+        {{ macros.setting_input_text_and_buttons('plugin_manager_work_dir', '작업·백업 경로', [['plugin_work_select_btn', '경로 선택']], value=arg.get('plugin_manager_work_dir', ''), desc=['비우면 <BookOasis 기본 경로>/temp/bookoasis_mate_plugins를 사용합니다.', 'plugins/metadata 경로 밖에 지정합니다.']) }}
+        {{ macros.setting_input_int('plugin_manager_backup_keep', '플러그인별 백업 보관 수', value=arg.get('plugin_manager_backup_keep', '5'), desc=['1~30개']) }}
+        {{ macros.setting_input_int('plugin_manager_max_archive_mb', 'ZIP 최대 크기(MB)', value=arg.get('plugin_manager_max_archive_mb', '100'), desc=['업로드와 저장소 다운로드 압축 파일에 적용합니다.']) }}
+        {{ macros.setting_input_int('plugin_manager_max_extracted_mb', '해제 후 최대 크기(MB)', value=arg.get('plugin_manager_max_extracted_mb', '500'), desc=['ZIP 폭탄과 비정상 패키지를 차단합니다.']) }}
+        {{ macros.setting_input_int('plugin_manager_max_files', '최대 파일 수', value=arg.get('plugin_manager_max_files', '2000'), desc=['10~20,000개']) }}
+        {{ macros.setting_input_text('plugin_manager_discovery_topics', 'GitHub 탐색 Topic', value=arg.get('plugin_manager_discovery_topics', 'bookoasis-plugin'), desc=['쉼표로 구분하며 최대 5개까지 사용합니다.', '기본값 bookoasis-plugin']) }}
+        {{ macros.setting_input_int('plugin_manager_discovery_cache_hours', 'Topic 탐색 캐시(시간)', value=arg.get('plugin_manager_discovery_cache_hours', '6'), desc=['1~168시간']) }}
+        <hr><h5>비공개 Gitea</h5>
+        <div class="form-check mb-3"><input id="plugin_manager_gitea_enabled" class="form-check-input" type="checkbox" {% if arg.get('plugin_manager_gitea_enabled') in [True, 'True', 'true', 'On', 'on', '1'] %}checked{% endif %}><label class="form-check-label" for="plugin_manager_gitea_enabled">Gitea 사용</label></div>
+        <div class="form-group"><label for="plugin_manager_gitea_base_url">Gitea 서버 주소</label><input id="plugin_manager_gitea_base_url" class="form-control" value="{{ arg.get('plugin_manager_gitea_base_url', '') }}" placeholder="https://git.example.com"></div>
+        <div class="form-group"><label for="plugin_manager_gitea_username">사용자명</label><input id="plugin_manager_gitea_username" class="form-control" value="{{ arg.get('plugin_manager_gitea_username', '') }}" autocomplete="username"></div>
+        <div class="form-group"><label for="plugin_manager_gitea_token">Personal Access Token</label><input id="plugin_manager_gitea_token" class="form-control" type="password" value="" placeholder="{% if arg.get('plugin_manager_gitea_token_configured') %}저장된 토큰 유지{% else %}repo 읽기 권한 토큰{% endif %}" autocomplete="new-password"><small class="form-text text-muted">비워 두면 기존 토큰을 유지합니다. 환경변수 <code>BOOKOASIS_MATE_GITEA_TOKEN</code>이 있으면 우선 사용합니다.</small></div>
+        <div class="form-check"><input id="plugin_manager_gitea_token_clear" class="form-check-input" type="checkbox"><label class="form-check-label" for="plugin_manager_gitea_token_clear">저장된 토큰 삭제</label></div>
+        <div class="form-check"><input id="plugin_manager_gitea_verify_ssl" class="form-check-input" type="checkbox" {% if arg.get('plugin_manager_gitea_verify_ssl', 'True') in [True, 'True', 'true', 'On', 'on', '1'] %}checked{% endif %}><label class="form-check-label" for="plugin_manager_gitea_verify_ssl">SSL 인증서 검증</label></div>
+        <div class="form-check mb-3"><input id="plugin_manager_gitea_allow_http" class="form-check-input" type="checkbox" {% if arg.get('plugin_manager_gitea_allow_http') in [True, 'True', 'true', 'On', 'on', '1'] %}checked{% endif %}><label class="form-check-label" for="plugin_manager_gitea_allow_http">내부 HTTP 주소 허용</label></div>
+        <button id="plugin_gitea_test" type="button" class="btn btn-sm btn-outline-primary">저장된 설정 연결 테스트</button>
+        <hr><h5>업데이트 확인 예약</h5>
+        <div class="form-check mb-3"><input id="plugins_auto_start" class="form-check-input" type="checkbox" {% if arg.get('plugins_auto_start') in [True, 'True', 'true', 'On', 'on', '1'] %}checked{% endif %}><label class="form-check-label" for="plugins_auto_start">자동 업데이트 확인</label></div>
+        {{ macros.setting_input_int('plugins_interval', '확인 주기(분)', value=arg.get('plugins_interval', '720'), desc=['기본값 720분(12시간)']) }}
+      </form>
+      <div class="doctor-plugin-effective-paths">
+        <div><strong>적용 플러그인 경로</strong><span id="plugin_effective_root" class="doctor-path">{{ arg.get('effective_paths', {}).get('plugin_root', '') or '미설정' }}</span></div>
+        <div><strong>적용 작업 경로</strong><span id="plugin_effective_work" class="doctor-path">{{ arg.get('effective_paths', {}).get('work_dir', '') or '미설정' }}</span></div>
+      </div>
+    </div>
+  </div>
   <div id="plugin_catalog_tab" class="tab-pane fade show active" role="tabpanel">
     <div class="doctor-plugin-toolbar">
       <p class="doctor-muted mb-0">검증·사용자 카탈로그와 GitHub Topic에서 찾은 미설치 플러그인을 같은 목록으로 표시합니다.</p>
       <button id="plugin_discovery_refresh" type="button" class="btn btn-sm btn-outline-primary">Topic 새로고침</button>
     </div>
     <details id="plugin_custom_catalog_editor" class="doctor-card doctor-plugin-catalog-editor">
-      <summary>사용자 GitHub 플러그인 추가</summary>
-      <p class="doctor-muted">새 플러그인의 공개 GitHub 주소를 저장해 카탈로그에서 계속 관리합니다. 사용자 항목은 반드시 패키지 검사 후 설치합니다.</p>
+      <summary>사용자 저장소 플러그인 추가</summary>
+      <p class="doctor-muted">GitHub 또는 설정한 비공개 Gitea 저장소를 카탈로그에서 계속 관리합니다. 사용자 항목은 반드시 패키지 검사 후 설치합니다.</p>
+      <div class="form-group"><label for="plugin_custom_source">저장소 종류</label><select id="plugin_custom_source" class="form-control"><option value="github">GitHub</option><option value="gitea">Gitea</option></select></div>
       <div class="form-group">
-        <label for="plugin_custom_repository">GitHub 저장소</label>
-        <input id="plugin_custom_repository" class="form-control" type="url" placeholder="https://github.com/owner/repository">
+        <label for="plugin_custom_repository">저장소</label>
+        <input id="plugin_custom_repository" class="form-control" type="text" placeholder="https://github.com/owner/repository">
       </div>
       <div class="doctor-plugin-source-row">
         <div class="form-group"><label for="plugin_custom_ref">브랜치·태그</label><input id="plugin_custom_ref" class="form-control" value="main"></div>
@@ -94,17 +108,18 @@
 
   <div id="plugin_github_tab" class="tab-pane fade" role="tabpanel">
     <div class="doctor-card doctor-plugin-source-card">
-      <h4>공개 GitHub 저장소 검사</h4>
+      <h4>저장소 패키지 검사</h4>
       <p class="doctor-muted">저장소를 임시 경로에 내려받아 구조·문법·파일 제한을 검사합니다. 검사 완료 후 별도 확인을 거쳐 설치합니다.</p>
+      <div class="form-group"><label for="plugin_repository_source">저장소 종류</label><select id="plugin_repository_source" class="form-control"><option value="github">GitHub</option><option value="gitea">Gitea</option></select></div>
       <div class="form-group">
-        <label for="plugin_github_repository">GitHub 저장소</label>
-        <input id="plugin_github_repository" class="form-control" type="url" placeholder="https://github.com/owner/repository">
+        <label for="plugin_github_repository">저장소</label>
+        <input id="plugin_github_repository" class="form-control" type="text" placeholder="https://github.com/owner/repository">
       </div>
       <div class="doctor-plugin-source-row">
         <div class="form-group"><label for="plugin_github_ref">브랜치·태그</label><input id="plugin_github_ref" class="form-control" value="main"></div>
         <div class="form-group"><label for="plugin_github_id">플러그인 ID</label><input id="plugin_github_id" class="form-control" placeholder="repository_name"></div>
       </div>
-      <button id="plugin_github_inspect" type="button" class="btn btn-primary">GitHub 패키지 검사</button>
+      <button id="plugin_github_inspect" type="button" class="btn btn-primary">저장소 패키지 검사</button>
     </div>
   </div>
 
@@ -188,9 +203,10 @@ function pluginManagerRenderCards(targetId, items, catalogMode) {
     (item.dependencies || []).forEach(function(value) { badges.appendChild(pluginManagerBadge('필수 ' + value, '')); });
     card.appendChild(badges);
     var footer = pluginManagerText('div', 'doctor-plugin-card-footer', '');
-    if (item.repository) {
-      var link = pluginManagerText('a', 'btn btn-sm btn-outline-secondary', 'GitHub');
-      link.href = item.repository; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    if (item.repository_url) {
+      var label = item.source === 'gitea' ? 'GT' : 'GH';
+      var link = pluginManagerText('a', 'btn btn-sm btn-outline-secondary doctor-plugin-repo-link', label);
+      link.href = item.repository_url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.title = item.source === 'gitea' ? 'Gitea 저장소' : 'GitHub 저장소'; link.setAttribute('aria-label', link.title);
       footer.appendChild(link);
     }
     if (catalogMode) {
@@ -299,14 +315,14 @@ function pluginManagerRenderInstalled(payload) {
     card.appendChild(badges);
     card.appendChild(pluginManagerText('p', 'doctor-plugin-description', item.load_message || item.description || '설치된 BookOasis 플러그인입니다.'));
     var footer = pluginManagerText('div', 'doctor-plugin-card-footer', '');
-    var github = pluginManagerInstalledGitHubLink(item);
-    if (github) footer.appendChild(github);
+    var repositoryLink = pluginManagerInstalledRepositoryLink(item);
+    if (repositoryLink) footer.appendChild(repositoryLink);
     if (item.runtime_available) {
-      var toggle = pluginManagerText('button', 'btn btn-sm btn-outline-primary', item.enabled ? '비활성화' : '활성화'); toggle.type='button'; toggle.dataset.pluginId=item.id; toggle.dataset.enabled=item.enabled ? 'false' : 'true'; toggle.addEventListener('click', pluginRuntimeToggle); footer.appendChild(toggle);
+      var switchLabel = pluginManagerText('label', 'doctor-plugin-switch', ''); var toggle = document.createElement('input'); toggle.type='checkbox'; toggle.checked=!!item.enabled; toggle.dataset.pluginId=item.id; toggle.addEventListener('change', pluginRuntimeToggle); switchLabel.appendChild(toggle); switchLabel.appendChild(pluginManagerText('span', 'doctor-plugin-switch-track', '')); switchLabel.appendChild(pluginManagerText('span', 'doctor-plugin-switch-text', item.enabled ? '사용 중' : '사용 안 함')); footer.appendChild(switchLabel);
       if ((item.config_fields || []).length) { var config = pluginManagerText('button', 'btn btn-sm btn-outline-secondary', '설정'); config.type='button'; config.dataset.pluginId=item.id; config.addEventListener('click', pluginRuntimeOpenConfig); footer.appendChild(config); }
     }
     if (item.update_available) {
-      var update = pluginManagerText('button', 'btn btn-sm btn-outline-success', '업데이트'); update.type='button'; update.dataset.pluginId=item.id; update.dataset.pluginName=item.name||item.id;
+      var update = pluginManagerText('button', 'btn btn-sm btn-success doctor-plugin-update-action', '업데이트'); update.type='button'; update.dataset.pluginId=item.id; update.dataset.pluginName=item.name||item.id;
       update.addEventListener('click', item.update_supported ? pluginRuntimeUpdate : pluginManagerInstallCatalog); footer.appendChild(update);
     }
     var remove = pluginManagerText('button', 'btn btn-sm btn-outline-danger', '삭제'); remove.type='button'; remove.dataset.pluginId=item.id; remove.dataset.pluginName=item.name||item.id; remove.addEventListener('click', pluginManagerDeleteInstalled); footer.appendChild(remove);
@@ -314,10 +330,11 @@ function pluginManagerRenderInstalled(payload) {
   });
 }
 
-function pluginManagerInstalledGitHubLink(item) {
-  if (!item || !item.repository) return null;
-  var link = pluginManagerText('a', 'btn btn-sm btn-outline-secondary', 'GitHub');
-  link.href = item.repository; link.target = '_blank'; link.rel = 'noopener noreferrer';
+function pluginManagerInstalledRepositoryLink(item) {
+  if (!item || !item.repository_url) return null;
+  var isGitea = item.source === 'gitea';
+  var link = pluginManagerText('a', 'btn btn-sm btn-outline-secondary doctor-plugin-repo-link', isGitea ? 'GT' : 'GH');
+  link.href = item.repository_url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.title = isGitea ? 'Gitea 저장소' : 'GitHub 저장소'; link.setAttribute('aria-label', link.title);
   return link;
 }
 
@@ -351,7 +368,7 @@ function pluginManagerStartInstalledUpdateRefresh() {
   });
 }
 
-function pluginRuntimeToggle(event) { var button=event.currentTarget; bookoasisMateAjax('plugins','runtime_toggle',{plugin_id:button.dataset.pluginId,enabled:button.dataset.enabled},function(ret){ if(ret.msg) notify(ret.msg,ret.ret||'info'); pluginManagerLoadInstalled(false); }); }
+function pluginRuntimeToggle(event) { var input=event.currentTarget; input.disabled=true; bookoasisMateAjax('plugins','runtime_toggle',{plugin_id:input.dataset.pluginId,enabled:input.checked?'true':'false'},function(ret){ if(ret.msg) notify(ret.msg,ret.ret||'info'); pluginManagerLoadInstalled(false); },function(){ input.checked=!input.checked; input.disabled=false; }); }
 function pluginRuntimeUpdate(event) { var id=event.currentTarget.dataset.pluginId; if(!confirm(id+' 플러그인의 네이티브 업데이트를 실행할까요?')) return; bookoasisMateAjax('plugins','runtime_update',{plugin_id:id},function(ret){ if(ret.msg) notify(ret.msg,ret.ret||'info'); pluginManagerLoadInstalled(false); }); }
 function pluginRuntimeOpenConfig(event) {
   var item=pluginRuntimeItems[event.currentTarget.dataset.pluginId]; if(!item) return; pluginRuntimeConfigId=item.id; $('#plugin_config_title').text((item.name||item.id)+' 설정'); var target=document.getElementById('plugin_config_fields'); bookoasisMateClear(target);
@@ -425,6 +442,7 @@ function pluginManagerRenderJob(job) {
   var active = ['ready','running','stopping'].indexOf(job.status) >= 0;
   var percent = Math.max(0, Math.min(100, Number(job.percent || 0)));
   $('#plugin_job_message').text((job.status_label || '대기') + ' · ' + (job.message || ''));
+  $('.doctor-plugin-job').removeClass('doctor-plugin-job-completed doctor-plugin-job-failed').addClass(job.status === 'completed' ? 'doctor-plugin-job-completed' : (job.status === 'failed' ? 'doctor-plugin-job-failed' : ''));
   $('#plugin_job_progress').css('width', percent + '%').text(percent + '%').toggleClass('progress-bar-animated', active);
   $('#plugin_job_stop').prop('disabled', !active);
   $('#plugin_job_error').text(job.error || '');
@@ -467,19 +485,30 @@ function pluginManagerSelectFolder(title, inputId) {
   globalSelectLocalFolder(title, input.val().trim() || '/', function(result) { input.val(result); });
 }
 
-$('#plugin_settings_toggle').click(function() { $('#plugin_settings_panel').slideToggle(150); });
 $('#plugin_root_select_btn').click(function() { pluginManagerSelectFolder('BookOasis plugins/metadata 폴더 선택', 'plugin_manager_plugins_path'); });
 $('#plugin_work_select_btn').click(function() { pluginManagerSelectFolder('플러그인 작업·백업 폴더 선택', 'plugin_manager_work_dir'); });
 $('#plugin_settings_save').click(function() {
-  $.ajax({url:'/' + PACKAGE_NAME + '/ajax/setting_save', type:'POST', data:getFormdata('#plugin_manager_settings'), dataType:'json', success:function(ret) {
-    notify(ret ? '플러그인 관리 설정을 저장했습니다.' : '설정 저장에 실패했습니다.', ret ? 'success' : 'warning');
+  var data = getFormdata('#plugin_manager_settings');
+  ['plugin_manager_gitea_enabled','plugin_manager_gitea_verify_ssl','plugin_manager_gitea_allow_http','plugins_auto_start'].forEach(function(key) { data[key] = $('#' + key).prop('checked') ? 'True' : 'False'; });
+  data.plugin_manager_gitea_token_clear = $('#plugin_manager_gitea_token_clear').prop('checked') ? 'true' : 'false';
+  bookoasisMateAjax('plugins', 'manager_settings_save', data, function(ret) {
+    notify(ret.msg || '플러그인 관리 설정을 저장했습니다.', ret.ret || 'success');
+    $('#plugin_manager_gitea_token').val(''); $('#plugin_manager_gitea_token_clear').prop('checked', false);
     bookoasisMateAjax('plugins', 'paths', {}, function(pathRet) {
       $('#plugin_effective_root').text((pathRet.data || {}).plugin_root || '미설정');
       $('#plugin_effective_work').text((pathRet.data || {}).work_dir || '미설정');
       pluginManagerLoadCatalog(); pluginManagerLoadInstalled(false);
     }, null, {global:false});
-  }});
+  });
 });
+$('#plugin_gitea_test').click(function() { bookoasisMateAjax('plugins', 'gitea_test', {}, function(ret) { notify((ret.msg || 'Gitea 연결에 성공했습니다.') + ((ret.data || {}).username ? ' · ' + ret.data.username : ''), ret.ret || 'success'); }); });
+function pluginManagerUpdateRepositoryPlaceholder() {
+  var customGitea = $('#plugin_custom_source').val() === 'gitea';
+  $('#plugin_custom_repository').attr('placeholder', customGitea ? 'owner/repository' : 'https://github.com/owner/repository');
+  var inspectGitea = $('#plugin_repository_source').val() === 'gitea';
+  $('#plugin_github_repository').attr('placeholder', inspectGitea ? 'owner/repository' : 'https://github.com/owner/repository');
+}
+$('#plugin_custom_source, #plugin_repository_source').change(pluginManagerUpdateRepositoryPlaceholder);
 $('#plugin_discovery_refresh').click(pluginManagerStartDiscoveryRefresh);
 $('#plugin_custom_save').click(function() {
   bookoasisMateAjax('plugins', 'custom_catalog_save', {
@@ -488,7 +517,8 @@ $('#plugin_custom_save').click(function() {
     plugin_id:$('#plugin_custom_id').val(),
     name:$('#plugin_custom_name').val(),
     description:$('#plugin_custom_description').val(),
-    verified:$('#plugin_custom_verified').val()
+    verified:$('#plugin_custom_verified').val(),
+    source:$('#plugin_custom_source').val()
   }, function(ret) {
     if (ret.msg) notify(ret.msg, ret.ret || 'info');
     $('#plugin_custom_repository, #plugin_custom_id, #plugin_custom_name, #plugin_custom_description').val('');
@@ -503,7 +533,8 @@ $('a[href="#plugin_installed_tab"]').on('shown.bs.tab', function() { pluginManag
 $('#plugin_history_refresh').click(pluginManagerLoadHistory);
 
 $('#plugin_github_inspect').click(function() {
-  bookoasisMateAjax('plugins', 'github_inspect', {repository:$('#plugin_github_repository').val(), ref:$('#plugin_github_ref').val(), plugin_id:$('#plugin_github_id').val()}, function(ret) {
+  var command = $('#plugin_repository_source').val() === 'gitea' ? 'gitea_inspect' : 'github_inspect';
+  bookoasisMateAjax('plugins', command, {repository:$('#plugin_github_repository').val(), ref:$('#plugin_github_ref').val(), plugin_id:$('#plugin_github_id').val()}, function(ret) {
     pluginManagerRenderJob(ret.data || {}); pluginManagerStartPolling();
   });
 });
@@ -528,6 +559,7 @@ $('#plugin_prepared_install').click(function() {
 $('#plugin_job_stop').click(function() { bookoasisMateAjax('plugins', 'stop', {}, function() { pluginManagerRequestStatus(); }); });
 
 $(function() {
+  pluginManagerUpdateRepositoryPlaceholder();
   pluginManagerLoadCatalog();
   pluginManagerLoadInstalled(false);
   pluginManagerLoadHistory();
