@@ -38,13 +38,12 @@
         {{ macros.setting_input_int('plugin_manager_max_archive_mb', 'ZIP 최대 크기(MB)', value=arg.get('plugin_manager_max_archive_mb', '100'), desc=['업로드와 저장소 다운로드 압축 파일에 적용합니다.']) }}
         {{ macros.setting_input_int('plugin_manager_max_extracted_mb', '해제 후 최대 크기(MB)', value=arg.get('plugin_manager_max_extracted_mb', '500'), desc=['ZIP 폭탄과 비정상 패키지를 차단합니다.']) }}
         {{ macros.setting_input_int('plugin_manager_max_files', '최대 파일 수', value=arg.get('plugin_manager_max_files', '2000'), desc=['10~20,000개']) }}
-        {{ macros.setting_input_text('plugin_manager_discovery_topics', 'GitHub 탐색 Topic', value=arg.get('plugin_manager_discovery_topics', 'bookoasis-plugin'), desc=['쉼표로 구분하며 최대 5개까지 사용합니다.', '기본값 bookoasis-plugin']) }}
+        {{ macros.setting_input_text('plugin_manager_discovery_topics', 'GitHub·Gitea 탐색 Topic', value=arg.get('plugin_manager_discovery_topics', 'bookoasis-plugin,security-bookoasis-plugin'), desc=['쉼표로 구분하며 최대 5개까지 사용합니다.', 'bookoasis-plugin과 security-bookoasis-plugin은 항상 포함됩니다.']) }}
         {{ macros.setting_input_int('plugin_manager_discovery_cache_hours', 'Topic 탐색 캐시(시간)', value=arg.get('plugin_manager_discovery_cache_hours', '6'), desc=['1~168시간']) }}
         <hr><h5>비공개 Gitea</h5>
-        <div class="form-check mb-3"><input id="plugin_manager_gitea_enabled" class="form-check-input" type="checkbox" {% if arg.get('plugin_manager_gitea_enabled') in [True, 'True', 'true', 'On', 'on', '1'] %}checked{% endif %}><label class="form-check-label" for="plugin_manager_gitea_enabled">Gitea 사용</label></div>
-        <div class="form-group"><label for="plugin_manager_gitea_base_url">Gitea 서버 주소</label><input id="plugin_manager_gitea_base_url" class="form-control" value="{{ arg.get('plugin_manager_gitea_base_url', '') }}" placeholder="https://git.example.com"></div>
-        <div class="form-group"><label for="plugin_manager_gitea_username">사용자명</label><input id="plugin_manager_gitea_username" class="form-control" value="{{ arg.get('plugin_manager_gitea_username', '') }}" autocomplete="username"></div>
-        <div class="form-group"><label for="plugin_manager_gitea_token">Personal Access Token</label><input id="plugin_manager_gitea_token" class="form-control" type="password" value="" placeholder="{% if arg.get('plugin_manager_gitea_token_configured') %}저장된 토큰 유지{% else %}repo 읽기 권한 토큰{% endif %}" autocomplete="new-password"><small class="form-text text-muted">비워 두면 기존 토큰을 유지합니다. 환경변수 <code>BOOKOASIS_MATE_GITEA_TOKEN</code>이 있으면 우선 사용합니다.</small></div>
+        <p class="doctor-muted">대표 주소와 저장소 읽기 토큰을 모두 저장하면 비공개 Gitea Topic 탐색과 설치가 활성화됩니다.</p>
+        <div class="form-group"><label for="plugin_manager_gitea_base_url">Gitea 대표 주소</label><input id="plugin_manager_gitea_base_url" class="form-control" value="{{ arg.get('plugin_manager_gitea_base_url', '') }}" placeholder="https://git.example.com"></div>
+        <div class="form-group"><label for="plugin_manager_gitea_token">저장소 읽기 토큰</label><input id="plugin_manager_gitea_token" class="form-control" type="password" value="" placeholder="{% if arg.get('plugin_manager_gitea_token_configured') %}저장된 토큰 유지{% else %}저장소 읽기 권한 토큰{% endif %}" autocomplete="new-password"><small class="form-text text-muted">비워 두면 기존 토큰을 유지합니다. 환경변수 <code>BOOKOASIS_MATE_GITEA_TOKEN</code>이 있으면 우선 사용합니다.</small></div>
         <div class="form-check"><input id="plugin_manager_gitea_token_clear" class="form-check-input" type="checkbox"><label class="form-check-label" for="plugin_manager_gitea_token_clear">저장된 토큰 삭제</label></div>
         <div class="form-check"><input id="plugin_manager_gitea_verify_ssl" class="form-check-input" type="checkbox" {% if arg.get('plugin_manager_gitea_verify_ssl', 'True') in [True, 'True', 'true', 'On', 'on', '1'] %}checked{% endif %}><label class="form-check-label" for="plugin_manager_gitea_verify_ssl">SSL 인증서 검증</label></div>
         <div class="form-check mb-3"><input id="plugin_manager_gitea_allow_http" class="form-check-input" type="checkbox" {% if arg.get('plugin_manager_gitea_allow_http') in [True, 'True', 'true', 'On', 'on', '1'] %}checked{% endif %}><label class="form-check-label" for="plugin_manager_gitea_allow_http">내부 HTTP 주소 허용</label></div>
@@ -61,7 +60,7 @@
   </div>
   <div id="plugin_catalog_tab" class="tab-pane fade show active" role="tabpanel">
     <div class="doctor-plugin-toolbar">
-      <p class="doctor-muted mb-0">검증·사용자 카탈로그와 GitHub Topic에서 찾은 미설치 플러그인을 같은 목록으로 표시합니다.</p>
+      <p class="doctor-muted mb-0">검증·사용자 카탈로그와 GitHub·Gitea Topic에서 찾은 미설치 플러그인을 같은 목록으로 표시합니다.</p>
       <button id="plugin_discovery_refresh" type="button" class="btn btn-sm btn-outline-primary">Topic 새로고침</button>
     </div>
     <details id="plugin_custom_catalog_editor" class="doctor-card doctor-plugin-catalog-editor">
@@ -168,9 +167,24 @@ var pluginDiscoveryPollTimer = null;
 var pluginInstalledUpdatePollTimer = null;
 var pluginRuntimeItems = {};
 var pluginRuntimeConfigId = '';
+var pluginManagerRepositoryIcons = {
+  github: "{{ url_for('bookoasis_mate.static', filename='img/github-mark.svg') }}",
+  gitea: "{{ url_for('bookoasis_mate.static', filename='img/gitea-logo.svg') }}"
+};
 
 function pluginManagerText(tag, className, value) {
   return bookoasisMateText(tag, className, value);
+}
+
+function pluginManagerRepositoryLink(source, url) {
+  if (!url) return null;
+  var type = source === 'gitea' ? 'gitea' : 'github';
+  var title = type === 'gitea' ? 'Gitea 저장소' : 'GitHub 저장소';
+  var link = pluginManagerText('a', 'btn btn-sm btn-outline-secondary doctor-plugin-repo-link', '');
+  var icon = document.createElement('img');
+  icon.src = pluginManagerRepositoryIcons[type]; icon.alt = ''; icon.setAttribute('aria-hidden', 'true');
+  link.appendChild(icon); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.title = title; link.setAttribute('aria-label', title);
+  return link;
 }
 
 function pluginManagerBadge(value, className) {
@@ -204,10 +218,7 @@ function pluginManagerRenderCards(targetId, items, catalogMode) {
     card.appendChild(badges);
     var footer = pluginManagerText('div', 'doctor-plugin-card-footer', '');
     if (item.repository_url) {
-      var label = item.source === 'gitea' ? 'GT' : 'GH';
-      var link = pluginManagerText('a', 'btn btn-sm btn-outline-secondary doctor-plugin-repo-link', label);
-      link.href = item.repository_url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.title = item.source === 'gitea' ? 'Gitea 저장소' : 'GitHub 저장소'; link.setAttribute('aria-label', link.title);
-      footer.appendChild(link);
+      footer.appendChild(pluginManagerRepositoryLink(item.source, item.repository_url));
     }
     if (catalogMode) {
       var button = pluginManagerText('button', 'btn btn-sm btn-primary', '설치');
@@ -331,11 +342,7 @@ function pluginManagerRenderInstalled(payload) {
 }
 
 function pluginManagerInstalledRepositoryLink(item) {
-  if (!item || !item.repository_url) return null;
-  var isGitea = item.source === 'gitea';
-  var link = pluginManagerText('a', 'btn btn-sm btn-outline-secondary doctor-plugin-repo-link', isGitea ? 'GT' : 'GH');
-  link.href = item.repository_url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.title = isGitea ? 'Gitea 저장소' : 'GitHub 저장소'; link.setAttribute('aria-label', link.title);
-  return link;
+  return item ? pluginManagerRepositoryLink(item.source, item.repository_url) : null;
 }
 
 function pluginManagerStopInstalledUpdatePolling() {
@@ -489,7 +496,7 @@ $('#plugin_root_select_btn').click(function() { pluginManagerSelectFolder('BookO
 $('#plugin_work_select_btn').click(function() { pluginManagerSelectFolder('플러그인 작업·백업 폴더 선택', 'plugin_manager_work_dir'); });
 $('#plugin_settings_save').click(function() {
   var data = getFormdata('#plugin_manager_settings');
-  ['plugin_manager_gitea_enabled','plugin_manager_gitea_verify_ssl','plugin_manager_gitea_allow_http','plugins_auto_start'].forEach(function(key) { data[key] = $('#' + key).prop('checked') ? 'True' : 'False'; });
+  ['plugin_manager_gitea_verify_ssl','plugin_manager_gitea_allow_http','plugins_auto_start'].forEach(function(key) { data[key] = $('#' + key).prop('checked') ? 'True' : 'False'; });
   data.plugin_manager_gitea_token_clear = $('#plugin_manager_gitea_token_clear').prop('checked') ? 'true' : 'false';
   bookoasisMateAjax('plugins', 'manager_settings_save', data, function(ret) {
     notify(ret.msg || '플러그인 관리 설정을 저장했습니다.', ret.ret || 'success');

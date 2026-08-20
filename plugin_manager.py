@@ -99,6 +99,23 @@ class GiteaClient:
             raise PluginManagerError("Gitea API 응답을 해석할 수 없습니다.") from error
         return {"success": True, "server": urlparse(self.base_url).netloc, "username": str(data.get("login") or self.username or "")}
 
+    def search_repositories(self, topic):
+        query = urlencode(
+            {"q": str(topic or "").strip(), "topic": "true", "private": "true", "limit": 100}
+        )
+        with self._open(f"/api/v1/repos/search?{query}") as response:
+            payload = response.read(2 * 1024 * 1024 + 1)
+        if len(payload) > 2 * 1024 * 1024:
+            raise PluginManagerError("Gitea 저장소 검색 응답이 허용 크기를 초과했습니다.")
+        try:
+            data = json.loads(payload.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError) as error:
+            raise PluginManagerError("Gitea 저장소 검색 응답을 해석할 수 없습니다.") from error
+        repositories = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(repositories, list):
+            raise PluginManagerError("Gitea 저장소 검색 응답 형식이 올바르지 않습니다.")
+        return repositories
+
     def read_file(self, owner, repository, ref, filename, limit):
         query = urlencode({"ref": ref})
         path = f"/api/v1/repos/{quote(owner, safe='')}/{quote(repository, safe='')}/contents/{quote(filename, safe='')}?{query}"
@@ -316,6 +333,20 @@ class BookOasisPluginManager:
         token = str(os.environ.get("BOOKOASIS_MATE_GITEA_TOKEN") or raw.get("plugin_manager_gitea_token") or "").strip()
         allow_http = str(raw.get("plugin_manager_gitea_allow_http") or "").strip().lower() in {"1", "true", "yes", "on"}
         gitea_base_url = str(raw.get("plugin_manager_gitea_base_url") or "").strip().rstrip("/")
+        configured_topics = [
+            value.strip().lower()
+            for value in re.split(
+                r"[,\r\n]+",
+                str(raw.get("plugin_manager_discovery_topics") or ""),
+            )
+            if value.strip()
+        ]
+        topics = list(
+            dict.fromkeys(
+                ["bookoasis-plugin", "security-bookoasis-plugin"]
+                + configured_topics
+            )
+        )[:5]
         return {
             "plugin_root": plugin_root,
             "work_dir": work_dir,
@@ -335,17 +366,11 @@ class BookOasisPluginManager:
             "max_files": cls._as_int(
                 raw.get("plugin_manager_max_files"), 2000, 10, 20000
             ),
-            "discovery_topics": [
-                value.strip().lower()
-                for value in re.split(r"[,\r\n]+", str(raw.get("plugin_manager_discovery_topics") or "bookoasis-plugin"))
-                if value.strip()
-            ][:5],
+            "discovery_topics": topics,
             "discovery_cache_hours": cls._as_int(
                 raw.get("plugin_manager_discovery_cache_hours"), 6, 1, 168
             ),
-            "gitea_enabled": str(raw.get("plugin_manager_gitea_enabled") or "").strip().lower() in {"1", "true", "yes", "on"},
             "gitea_base_url": cls.normalize_gitea_base_url(gitea_base_url, allow_http) if gitea_base_url else "",
-            "gitea_username": str(raw.get("plugin_manager_gitea_username") or "").strip(),
             "gitea_token": token,
             "gitea_token_configured": bool(token),
             "gitea_verify_ssl": str(raw.get("plugin_manager_gitea_verify_ssl", "True")).strip().lower() not in {"0", "false", "no", "off"},
@@ -426,8 +451,6 @@ class BookOasisPluginManager:
     @classmethod
     def _gitea_client(cls, settings):
         normalized = cls.normalized_settings(settings)
-        if not normalized["gitea_enabled"]:
-            raise PluginManagerError("설정에서 Gitea 사용을 활성화해 주세요.")
         if not normalized["gitea_base_url"]:
             raise PluginManagerError("Gitea 서버 주소를 설정해 주세요.")
         if not normalized["gitea_token"]:
@@ -435,7 +458,7 @@ class BookOasisPluginManager:
         return GiteaClient(
             normalized["gitea_base_url"],
             normalized["gitea_token"],
-            normalized["gitea_username"],
+            "",
             normalized["gitea_verify_ssl"],
             cls.DOWNLOAD_TIMEOUT,
         )
@@ -543,21 +566,43 @@ class BookOasisPluginManager:
         for raw in payload.get("items", []):
             if not isinstance(raw, dict):
                 continue
+            source = str(raw.get("source") or "github").lower()
             try:
-                owner, repository_name = self.parse_github_url(raw.get("repository"))
+                if source == "gitea":
+                    owner, repository_name = self.parse_gitea_repository(
+                        raw.get("repository")
+                    )
+                else:
+                    owner, repository_name = self.parse_github_url(
+                        raw.get("repository")
+                    )
                 plugin_id = self._validate_plugin_id(raw.get("id") or repository_name)
                 ref = self._validate_ref(raw.get("ref"))
             except PluginManagerError:
                 continue
+            repository_value = (
+                f"{owner}/{repository_name}"
+                if source == "gitea"
+                else f"https://github.com/{owner}/{repository_name}"
+            )
+            repository_url = str(raw.get("repository_url") or "").strip()
+            if not repository_url:
+                repository_url = (
+                    f"{self.normalized_settings(settings)['gitea_base_url']}/{repository_value}"
+                    if source == "gitea"
+                    else repository_value
+                )
             result.append(
                 {
                     "id": plugin_id,
                     "name": str(raw.get("name") or plugin_id).strip(),
                     "description": str(
                         raw.get("description")
-                        or "GitHub Topic에서 확인한 BookOasis 플러그인입니다."
+                        or "Topic에서 확인한 BookOasis 플러그인입니다."
                     ).strip(),
-                    "repository": f"https://github.com/{owner}/{repository_name}",
+                    "repository": repository_value,
+                    "repository_url": repository_url,
+                    "source": source,
                     "ref": ref,
                     "catalog_version": str(raw.get("catalog_version") or "").strip(),
                     "dependencies": [],
@@ -610,7 +655,7 @@ class BookOasisPluginManager:
                 return copy.deepcopy(self._discovery_job)
             self._discovery_job = {
                 "status": "running",
-                "message": "GitHub Topic에서 플러그인 후보를 찾고 있습니다.",
+                "message": "GitHub·Gitea Topic에서 플러그인을 찾고 있습니다.",
                 "error": "",
                 "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "finished_at": "",
@@ -628,6 +673,10 @@ class BookOasisPluginManager:
         try:
             normalized = self.normalized_settings(settings)
             payload = self._discovery.discover(normalized["discovery_topics"])
+            items = list(payload.get("items") or [])
+            if normalized["gitea_base_url"] and normalized["gitea_token"]:
+                items.extend(self._discover_gitea(settings, normalized["discovery_topics"]))
+            payload["items"] = items
             now = time.time()
             payload.update({
                 "fetched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -637,17 +686,73 @@ class BookOasisPluginManager:
             with self._lock:
                 self._discovery_job.update({
                     "status": "completed",
-                    "message": f"GitHub 플러그인 후보 {len(payload.get('items', []))}개를 확인했습니다.",
+                    "message": f"GitHub·Gitea 플러그인 {len(items)}개를 확인했습니다.",
                     "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 })
         except Exception as error:
             with self._lock:
                 self._discovery_job.update({
                     "status": "failed",
-                    "message": "GitHub Topic 발견 작업에 실패했습니다.",
+                    "message": "GitHub·Gitea Topic 발견 작업에 실패했습니다.",
                     "error": str(error)[:500],
                     "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 })
+
+    def _discover_gitea(self, settings, topics):
+        client = self._gitea_client(settings)
+        normalized = self.normalized_settings(settings)
+        seen = set()
+        items = []
+        for topic in topics:
+            for repository in client.search_repositories(topic):
+                if repository.get("fork") or repository.get("archived"):
+                    continue
+                owner_data = repository.get("owner") or {}
+                owner = str(owner_data.get("login") or owner_data.get("username") or "").strip()
+                repository_name = str(repository.get("name") or "").strip()
+                key = f"{owner}/{repository_name}".lower()
+                if not owner or not repository_name or key in seen:
+                    continue
+                seen.add(key)
+                plugin_id = repository_name.replace("-", "_").lower()
+                ref = str(repository.get("default_branch") or "main")
+                version = ""
+                name = plugin_id
+                validation_status = "candidate"
+                validation_error = ""
+                try:
+                    plugin_id = self._validate_plugin_id(plugin_id)
+                    ref = self._validate_ref(ref)
+                    version_data = json.loads(
+                        client.read_file(owner, repository_name, ref, "VERSION", 65536).decode("utf-8-sig")
+                    )
+                    version = str(version_data.get("plugin version") or version_data.get("version") or "") if isinstance(version_data, dict) else str(version_data or "")
+                    source = client.read_file(owner, repository_name, ref, f"{plugin_id}.py", 524288).decode("utf-8-sig")
+                    name = self._extract_provider_name(source, plugin_id) or plugin_id
+                    validation_status = "validated"
+                except Exception as error:
+                    validation_error = str(error)[:240]
+                items.append(
+                    {
+                        "id": plugin_id,
+                        "name": name,
+                        "description": str(repository.get("description") or "Gitea Topic에서 발견한 BookOasis 플러그인입니다."),
+                        "repository": f"{owner}/{repository_name}",
+                        "repository_url": f"{normalized['gitea_base_url']}/{owner}/{repository_name}",
+                        "source": "gitea",
+                        "ref": ref,
+                        "catalog_version": version.strip(),
+                        "latest_version": version.strip(),
+                        "validation_status": validation_status,
+                        "validation_error": validation_error,
+                        "stars": int(repository.get("stars_count") or 0),
+                        "updated_at": str(repository.get("updated_at") or ""),
+                        "discovered": True,
+                        "custom": True,
+                        "trusted": False,
+                    }
+                )
+        return items
 
     def _custom_catalog_path(self, settings, create=False):
         normalized = self.normalized_settings(settings)

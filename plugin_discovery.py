@@ -91,6 +91,8 @@ class GitHubPluginDiscovery:
                     "name": name,
                     "description": str(repository.get("description") or "GitHub Topic에서 발견한 BookOasis 플러그인 후보입니다."),
                     "repository": repository_url,
+                    "repository_url": repository_url,
+                    "source": "github",
                     "ref": branch,
                     "catalog_version": version,
                     "latest_version": version,
