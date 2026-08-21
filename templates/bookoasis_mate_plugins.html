@@ -393,7 +393,7 @@ function pluginManagerRenderInstalled(payload) {
     }
     if (item.update_available) {
       var update = pluginManagerText('button', 'btn btn-sm btn-success doctor-plugin-update-action', '업데이트'); update.type='button'; update.dataset.pluginId=item.id; update.dataset.pluginName=item.name||item.id;
-      update.addEventListener('click', item.update_supported ? pluginRuntimeUpdate : pluginManagerInstallCatalog); footer.appendChild(update);
+      update.addEventListener('click', item.native_update_preferred ? pluginRuntimeUpdate : pluginManagerInstallCatalog); footer.appendChild(update);
     }
     var remove = pluginManagerText('button', 'btn btn-sm btn-outline-danger', '삭제'); remove.type='button'; remove.dataset.pluginId=item.id; remove.dataset.pluginName=item.name||item.id; remove.addEventListener('click', pluginManagerDeleteInstalled); footer.appendChild(remove);
     card.appendChild(footer); target.appendChild(card);
@@ -568,8 +568,7 @@ function pluginManagerSelectFolder(title, inputId) {
 $('#plugin_root_select_btn').click(function() { pluginManagerSelectFolder('BookOasis plugins/metadata 폴더 선택', 'plugin_manager_plugins_path'); });
 $('#plugin_work_select_btn').click(function() { pluginManagerSelectFolder('플러그인 작업·백업 폴더 선택', 'plugin_manager_work_dir'); });
 $('#plugin_settings_save').click(function() {
-  var data = getFormdata('#plugin_manager_settings');
-  data.plugins_auto_start = $('#plugins_auto_start').prop('checked') ? 'True' : 'False';
+  var data = getFormdata('#plugin_manager_settings') + '&plugins_auto_start=' + ($('#plugins_auto_start').prop('checked') ? 'True' : 'False');
   bookoasisMateAjax('plugins', 'manager_settings_save', data, function(ret) {
     notify(ret.msg || '플러그인 관리 설정을 저장했습니다.', ret.ret || 'success');
     bookoasisMateAjax('plugins', 'paths', {}, function(pathRet) {
