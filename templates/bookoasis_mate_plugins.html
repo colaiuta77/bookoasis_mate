@@ -565,8 +565,8 @@ function pluginManagerSelectFolder(title, inputId) {
   globalSelectLocalFolder(title, input.val().trim() || '/', function(result) { input.val(result); });
 }
 
-$('#plugin_root_select_btn').click(function() { pluginManagerSelectFolder('BookOasis plugins/metadata 폴더 선택', 'plugin_manager_plugins_path'); });
-$('#plugin_work_select_btn').click(function() { pluginManagerSelectFolder('플러그인 작업·백업 폴더 선택', 'plugin_manager_work_dir'); });
+$('#plugin_root_select_btn').click(function(event) { event.preventDefault(); pluginManagerSelectFolder('BookOasis plugins/metadata 폴더 선택', 'plugin_manager_plugins_path'); });
+$('#plugin_work_select_btn').click(function(event) { event.preventDefault(); pluginManagerSelectFolder('플러그인 작업·백업 폴더 선택', 'plugin_manager_work_dir'); });
 $('#plugin_settings_save').click(function() {
   var data = getFormdata('#plugin_manager_settings') + '&plugins_auto_start=' + ($('#plugins_auto_start').prop('checked') ? 'True' : 'False');
   bookoasisMateAjax('plugins', 'manager_settings_save', data, function(ret) {
