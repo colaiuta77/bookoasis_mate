@@ -393,7 +393,7 @@ function pluginManagerRenderInstalled(payload) {
     }
     if (item.update_available) {
       var update = pluginManagerText('button', 'btn btn-sm btn-success doctor-plugin-update-action', '업데이트'); update.type='button'; update.dataset.pluginId=item.id; update.dataset.pluginName=item.name||item.id;
-      update.addEventListener('click', item.update_supported ? pluginRuntimeUpdate : pluginManagerInstallCatalog); footer.appendChild(update);
+      update.addEventListener('click', item.native_update_preferred ? pluginRuntimeUpdate : pluginManagerInstallCatalog); footer.appendChild(update);
     }
     var remove = pluginManagerText('button', 'btn btn-sm btn-outline-danger', '삭제'); remove.type='button'; remove.dataset.pluginId=item.id; remove.dataset.pluginName=item.name||item.id; remove.addEventListener('click', pluginManagerDeleteInstalled); footer.appendChild(remove);
     card.appendChild(footer); target.appendChild(card);

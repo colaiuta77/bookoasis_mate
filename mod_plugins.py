@@ -125,6 +125,11 @@ class ModulePlugins(PluginModuleBase):
                     "update_supported": bool(
                         runtime and runtime.get("update_supported")
                     ),
+                    "native_update_preferred": bool(
+                        runtime
+                        and runtime.get("update_supported")
+                        and item.get("source") != "gitea"
+                    ),
                     "custom_settings_ui": bool(
                         runtime and runtime.get("custom_settings_ui")
                     ),
