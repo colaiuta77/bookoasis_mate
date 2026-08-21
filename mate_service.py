@@ -1803,7 +1803,7 @@ class BookOasisMateService:
                 "name": str(item.get("name") or plugin_id),
                 "enabled": bool(item.get("enabled")),
                 "is_searchable": bool(item.get("is_searchable", True)),
-                "load_status": str(load.get("status") or "unknown"),
+                "load_status": str(load.get("status") or "success"),
                 "load_message": str(load.get("message") or ""),
                 "load_occurred_at": str(load.get("occurred_at") or ""),
                 "config_fields": fields,
