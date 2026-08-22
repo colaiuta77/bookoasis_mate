@@ -560,6 +560,8 @@ class ReadOnlySqlTool:
     @staticmethod
     def _guard_mariadb_sensitive(query):
         sanitized = _strip_literals_and_comments(query).lower()
+        if re.search(r"\binto\s+(outfile|dumpfile)\b", sanitized):
+            raise ValueError("읽기 전용 SQL에서는 MariaDB 파일 출력(OUTFILE/DUMPFILE)을 사용할 수 없습니다.")
         if re.search(r"\b(password_hash|load_file|sleep|benchmark)\b", sanitized):
             raise ValueError("민감 컬럼 또는 위험한 MariaDB 함수를 조회할 수 없습니다.")
         if re.search(r"\b(information_schema|performance_schema|mysql|sys)\s*\.", sanitized):

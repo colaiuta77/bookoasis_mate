@@ -2,18 +2,24 @@
 import ast
 import json
 import os
+import time
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 
 class GitHubPluginDiscovery:
+    REQUEST_ATTEMPTS = 3
+    RETRYABLE_HTTP_STATUS = {408, 500, 502, 503, 504}
+    RETRY_BASE_DELAY = 0.5
+
     def __init__(self, fetch_json=None, fetch_bytes=None):
         self._fetch_json = fetch_json or self._request_json
         self._fetch_bytes = fetch_bytes or self._request_bytes
 
-    @staticmethod
-    def _request_bytes(url, limit):
+    @classmethod
+    def _request_bytes(cls, url, limit):
         request = Request(
             url,
             headers={
@@ -21,11 +27,24 @@ class GitHubPluginDiscovery:
                 "User-Agent": "BookOasis-Mate-Plugin-Discovery/1",
             },
         )
-        with urlopen(request, timeout=12) as response:
-            payload = response.read(limit + 1)
-        if len(payload) > limit:
-            raise ValueError("GitHub 응답이 허용 크기를 초과했습니다.")
-        return payload
+        for attempt in range(cls.REQUEST_ATTEMPTS):
+            try:
+                with urlopen(request, timeout=12) as response:
+                    payload = response.read(limit + 1)
+                if len(payload) > limit:
+                    raise ValueError("GitHub 응답이 허용 크기를 초과했습니다.")
+                return payload
+            except HTTPError as error:
+                if (
+                    error.code not in cls.RETRYABLE_HTTP_STATUS
+                    or attempt + 1 >= cls.REQUEST_ATTEMPTS
+                ):
+                    raise
+            except (URLError, TimeoutError):
+                if attempt + 1 >= cls.REQUEST_ATTEMPTS:
+                    raise
+            time.sleep(cls.RETRY_BASE_DELAY * (2**attempt))
+        raise RuntimeError("GitHub 요청 재시도 상태가 올바르지 않습니다.")
 
     @classmethod
     def _request_json(cls, url):

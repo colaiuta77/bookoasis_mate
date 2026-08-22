@@ -37,7 +37,7 @@
   <p class="doctor-muted">대용량 작업은 FlaskFarm 웹 요청과 분리된 작업 프로세스에서 실행되며 이관 상태에서 진행률을 확인할 수 있습니다.</p>
 
   <h5>4. 공통 패키지 확인</h5>
-  <p>MariaDB 연결용 PyMySQL과 논리 백업·복원용 mariadb-client 설치 방법은 최상단 <strong>매뉴얼</strong> 메뉴에서 확인합니다.</p>
+  <p>MariaDB 연결용 PyMySQL과 논리 백업·복원용 mariadb-client의 상태 확인·설치는 <strong>설정 → DB 연결 → MariaDB 필수 구성요소</strong>에서 진행합니다.</p>
 </div>
 
 <div class="doctor-section doctor-card">
@@ -49,7 +49,7 @@
     <li>BookOasis 패키지 가져오기는 패키지에 포함된 일반·성인·오디오북·비디오 DB와 전체 표지를 교체하며 기존 데이터와 병합하지 않습니다.</li>
     <li>공유 DB의 사용자 계정과 독서 진행률도 함께 바뀌므로 출처와 BookOasis 스키마 버전을 신뢰할 수 있는 패키지만 사용합니다.</li>
     <li>SQLite DB 패키지는 <code>db/media_*.db</code>, MariaDB 패키지는 검증용 manifest와 <code>db/media_*.sql</code> 구조이며 표지 패키지는 <code>covers/</code> 트리여야 합니다.</li>
-    <li>MariaDB 내보내기·가져오기에는 최상단 매뉴얼에 안내된 PyMySQL과 <code>mariadb-dump</code>·<code>mariadb</code> 또는 호환 <code>mysql</code> 클라이언트가 필요합니다.</li>
+    <li>MariaDB 내보내기·가져오기에는 <strong>설정 → DB 연결 → MariaDB 필수 구성요소</strong>에서 확인할 수 있는 PyMySQL과 <code>mariadb-dump</code>·<code>mariadb</code> 또는 호환 <code>mysql</code> 클라이언트가 필요합니다.</li>
     <li>통DB 패키지는 생성 엔진과 같은 엔진에만 복원할 수 있습니다. SQLite와 MariaDB 사이의 변환 도구로 사용하지 않습니다.</li>
     <li>경로 매핑은 보관함과 도서 경로, 표준 <code>book_해시.webp</code> 참조·파일명에 적용됩니다. 사용자 지정 표지와 <code>series_</code> 표지는 이름을 바꾸지 않습니다.</li>
     <li>압축 경로 이탈, 심볼릭 링크, 필수 DB 누락, DB 무결성 검사 실패나 도서·오디오북·비디오 경로 충돌이 발견되면 실제 적용이 차단됩니다.</li>

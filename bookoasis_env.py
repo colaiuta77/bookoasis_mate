@@ -8,10 +8,60 @@ from pathlib import Path
 
 
 ENV_MAX_BYTES = 1024 * 1024
+ENV_BACKUP_KEEP = 5
 
 
 class EnvFileError(ValueError):
     pass
+
+
+def _secure_backup_copy(source, destination):
+    source = Path(source)
+    destination = Path(destination)
+    try:
+        if os.name == "nt":
+            shutil.copy2(source, destination)
+            return
+        descriptor = os.open(
+            str(destination),
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        try:
+            with source.open("rb") as input_file, os.fdopen(descriptor, "wb") as output_file:
+                descriptor = None
+                shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
+                output_file.flush()
+                os.fsync(output_file.fileno())
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+        os.chmod(destination, 0o600)
+    except OSError as error:
+        try:
+            destination.unlink()
+        except OSError:
+            pass
+        raise EnvFileError(".env 백업 파일을 안전하게 생성하지 못했습니다.") from error
+
+
+def _prune_env_backups(root, keep=ENV_BACKUP_KEEP):
+    keep = max(1, int(keep or ENV_BACKUP_KEEP))
+    backups = []
+    for candidate in Path(root).glob(".env.bookoasis_mate_*.bak"):
+        try:
+            if candidate.is_symlink() or not candidate.is_file():
+                continue
+            stat_result = candidate.stat()
+        except OSError:
+            continue
+        backups.append((stat_result.st_mtime_ns, candidate.name, candidate))
+    backups.sort(reverse=True)
+    for unused_mtime, unused_name, candidate in backups[keep:]:
+        try:
+            candidate.unlink()
+        except OSError:
+            pass
 
 
 def _resolve_env_path(root_value):
@@ -80,7 +130,7 @@ def save_env_file(root_value, content, max_bytes=ENV_MAX_BYTES):
         original_stat = env_path.stat()
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         backup_path = root / f".env.bookoasis_mate_{stamp}.bak"
-        shutil.copy2(env_path, backup_path)
+        _secure_backup_copy(env_path, backup_path)
 
     temp_path = None
     try:
@@ -108,6 +158,8 @@ def save_env_file(root_value, content, max_bytes=ENV_MAX_BYTES):
                 raise EnvFileError("기존 .env 파일 소유권을 유지할 권한이 없습니다.") from error
         os.replace(temp_path, env_path)
         temp_path = None
+        if backup_path is not None:
+            _prune_env_backups(root)
     finally:
         if temp_path is not None:
             try:

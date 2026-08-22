@@ -240,10 +240,11 @@
 .doctor-setting-tabs { margin-top:14px; }
 .doctor-setting-tabs .nav-link { padding:.7rem 1.1rem; }
 .doctor-setting-content { padding-top:2px; }
+.doctor-setting-database-pane { width:100%; max-width:1180px; margin-right:auto; }
 .doctor-section-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:14px; }
 .doctor-section-heading h4 { margin-bottom:4px; }
-.doctor-db-action-grid { display:grid; grid-template-columns:repeat(3,minmax(220px,1fr)); gap:12px; }
-.doctor-db-action-card { display:flex; flex-direction:column; justify-content:space-between; gap:14px; min-height:142px; padding:15px; border:1px solid #dee2e6; border-radius:8px; background:rgba(127,127,127,.035); }
+.doctor-db-action-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.doctor-db-action-card { display:flex; flex-direction:column; justify-content:space-between; gap:12px; min-height:126px; padding:13px; border:1px solid #dee2e6; border-radius:8px; background:rgba(127,127,127,.035); }
 .doctor-db-action-card > div:first-child { display:grid; grid-template-columns:auto 1fr; gap:4px 9px; align-items:center; }
 .doctor-db-action-card strong { font-size:1rem; }
 .doctor-db-action-card small { grid-column:2; color:#6c757d; font-family:monospace; }
@@ -336,10 +337,10 @@
 @media (max-width: 1180px) {
   .doctor-gdrive-filter { grid-template-columns:repeat(3,minmax(120px,1fr)); }
   .doctor-gdrive-search { grid-column:span 3; }
-  .doctor-db-action-grid { grid-template-columns:1fr; }
   .doctor-statistics-grid { grid-template-columns:1fr; }
 }
 @media (max-width: 900px) {
+  .doctor-db-action-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .doctor-summary-content { grid-template-columns:1fr; }
   .doctor-summary-health-card { min-height:360px; }
 }
@@ -363,6 +364,7 @@
   .doctor-sql-wide { margin-top:0 !important; }
   .doctor-setting-tabs .nav-link { padding:.6rem .7rem; font-size:.84rem; }
   .doctor-db-modal-summary { grid-template-columns:repeat(2,minmax(100px,1fr)); }
+  .doctor-db-action-grid { grid-template-columns:1fr; }
   .doctor-guide-grid { grid-template-columns:1fr; }
   .doctor-dependency-grid { grid-template-columns:1fr; }
   .doctor-statistics-toolbar { align-items:stretch; }
@@ -432,4 +434,125 @@
   .doctor-plugin-server-row { align-items:stretch; flex-wrap:wrap; }
   .doctor-plugin-server-info { flex-basis:calc(100% - 30px); }
   .doctor-plugin-effective-paths, .doctor-plugin-source-row { grid-template-columns:1fr; }
+}
+
+/* Mate 버전·업데이트 상태와 매뉴얼 Changelog */
+.doctor-setting-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.doctor-setting-toolbar-actions > :last-child { margin-bottom: 0 !important; }
+.doctor-release-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  color: #59636e;
+}
+.doctor-release-label { font-size: .9rem; }
+.doctor-release-summary strong { color: #343a40; white-space: nowrap; }
+.doctor-mate-github-link { display: inline-flex; align-items: center; justify-content: center; }
+.doctor-release-update {
+  display: inline-flex;
+  align-items: center;
+  padding: .25rem .55rem;
+  border-radius: 999px;
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffe69c;
+  font-size: .8rem;
+  font-weight: 700;
+  text-decoration: none !important;
+  white-space: nowrap;
+}
+.doctor-release-update[hidden] { display: none !important; }
+.doctor-manual-tab-content { padding-top: 1rem; }
+.doctor-changelog-list { display: grid; gap: 12px; margin-top: 14px; }
+.doctor-changelog-release {
+  border: 1px solid #e3e7eb;
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: #fff;
+}
+.doctor-changelog-release-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.doctor-changelog-release-head strong { font-size: 1rem; color: #343a40; }
+.doctor-changelog-release-head time { color: #7a858f; font-size: .82rem; white-space: nowrap; }
+.doctor-changelog-release ul { margin: 0; padding-left: 1.25rem; }
+.doctor-changelog-release li + li { margin-top: 4px; }
+@media (max-width: 768px) {
+  .doctor-setting-toolbar { align-items: flex-start; }
+  .doctor-release-summary { width: 100%; }
+  .doctor-changelog-release-head { align-items: flex-start; flex-direction: column; gap: 2px; }
+}
+
+/* 환경 파일 하위 편집기 */
+.doctor-file-editor-tabs { margin: 0 0 1rem; }
+.doctor-file-editor-content { min-height: 240px; }
+.doctor-file-editor-card { margin-top: 0; }
+.doctor-file-editor-card .doctor-env-editor {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  line-height: 1.45;
+  white-space: pre;
+  overflow: auto;
+}
+
+/* BookOasis 단일 서비스 Docker 관리 */
+.doctor-docker-management-card { margin-bottom: 1rem; }
+.doctor-docker-safety { margin: 12px 0; }
+.doctor-docker-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.doctor-docker-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid #e6e9ed;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+.doctor-docker-summary span,
+.doctor-docker-detail span { color: #6c757d; font-size: .78rem; }
+.doctor-docker-summary strong { overflow-wrap: anywhere; }
+.doctor-docker-update-available { color: #198754; }
+.doctor-docker-update-latest { color: #198754; }
+.doctor-docker-update-error { color: #b02a37; }
+.doctor-docker-update-action { box-shadow: 0 2px 8px rgba(25,135,84,.25); font-weight: 700; }
+.doctor-docker-detail {
+  display: grid;
+  grid-template-columns: 85px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  margin: 7px 0;
+}
+.doctor-docker-detail code { overflow-wrap: anywhere; white-space: normal; }
+.doctor-docker-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 8px; }
+.doctor-docker-log {
+  max-height: 240px;
+  margin: 10px 0 0;
+  padding: 12px;
+  overflow: auto;
+  color: #d7dce2;
+  background: #20252b;
+  border-radius: 7px;
+  font-size: .78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+@media (max-width: 768px) {
+  .doctor-docker-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .doctor-docker-detail { grid-template-columns: 1fr; gap: 2px; }
 }

@@ -1,7 +1,7 @@
 {# BookOasis Mate의 공통 요구사항과 설치 방법을 안내합니다. #}
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=dependency-installer-1">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=dependency-settings-1">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 <div class="doctor-section doctor-card">
@@ -9,6 +9,13 @@
   <p>모든 기능에 공통으로 적용되는 연결 조건, 필수 패키지, 파일 권한과 안전 수칙을 안내합니다. 기능별 세부 절차는 각 메뉴의 매뉴얼을 확인하세요.</p>
 </div>
 
+<ul class="nav nav-tabs doctor-setting-tabs doctor-manual-tabs" role="tablist">
+  <li class="nav-item"><a class="nav-link active" id="manual-guide-tab" data-toggle="tab" href="#manual-guide-pane" role="tab">사용 안내</a></li>
+  <li class="nav-item"><a class="nav-link" id="manual-changelog-tab" data-toggle="tab" href="#manual-changelog-pane" role="tab">변경 내역</a></li>
+</ul>
+
+<div class="tab-content doctor-manual-tab-content">
+<div class="tab-pane fade show active" id="manual-guide-pane" role="tabpanel" aria-labelledby="manual-guide-tab">
 <div class="doctor-section doctor-card">
   <h4>1. 공통 연결 조건</h4>
   <ul>
@@ -22,75 +29,15 @@
 
 <div class="doctor-section doctor-card">
   <h4>2. MariaDB 필수 패키지</h4>
-  <p><strong>PyMySQL 1.1 이상</strong>은 FF가 MariaDB에 직접 연결할 때 사용하는 Python 드라이버입니다. 실행 중인 FF 컨테이너와 같은 Python에 설치합니다.</p>
-  <div class="doctor-code-window">
-    <div class="doctor-code-window-header">Bash</div>
-    <pre><code>docker exec -u 0 flaskfarm python -m pip install --no-cache-dir "PyMySQL&gt;=1.1"
-docker exec flaskfarm python -c "import pymysql; print(pymysql.__version__)"</code></pre>
-  </div>
+  <p><strong>PyMySQL 1.1 이상 2.0 미만</strong>은 FlaskFarm이 MariaDB에 직접 연결할 때 사용하는 Python 드라이버입니다.</p>
   <p><strong>mariadb-client</strong>는 MariaDB 통DB·카테고리·Kavita 이관의 논리 백업과 복원에 사용하는 <code>mariadb</code>와 <code>mariadb-dump</code> 명령을 제공합니다.</p>
-  <div class="doctor-code-window">
-    <div class="doctor-code-window-header">Bash</div>
-    <pre><code>docker exec -u 0 flaskfarm sh -lc 'apt-get update &amp;&amp; apt-get install -y --no-install-recommends mariadb-client &amp;&amp; rm -rf /var/lib/apt/lists/*'
-docker exec flaskfarm sh -lc 'mariadb --version &amp;&amp; mariadb-dump --version'</code></pre>
-  </div>
-  <p class="doctor-muted">컨테이너 이름이 다르면 <code>flaskfarm</code>을 실제 이름으로 바꿉니다. 배포판은 <code>docker exec flaskfarm cat /etc/os-release</code>로 확인하며 Alpine 계열은 <code>apk add --no-cache mariadb-client</code>를 사용합니다.</p>
-</div>
-
-<div class="doctor-section doctor-card">
-  <div class="doctor-section-heading">
-    <div>
-      <h4>3. 플러그인에서 설치</h4>
-      <p class="doctor-muted mb-0">현재 FF 컨테이너에 필요한 패키지를 백그라운드로 설치합니다. 설치 버튼을 누른 뒤 반드시 확인 창에서 승인해야 시작됩니다.</p>
-    </div>
-    <div class="doctor-dependency-actions">
-      <button type="button" id="dependency_refresh" class="btn btn-sm btn-outline-secondary">상태 새로고침</button>
-      <button type="button" id="dependency_install_all" class="btn btn-sm btn-primary">전체 설치</button>
-    </div>
-  </div>
-  <div class="doctor-dependency-grid">
-    <div class="doctor-dependency-card" data-dependency="pymysql">
-      <div>
-        <strong>PyMySQL</strong>
-        <code>PyMySQL&gt;=1.1</code>
-      </div>
-      <div class="doctor-dependency-meta">
-        <span class="doctor-dependency-state">확인 중</span>
-        <span class="doctor-dependency-version"></span>
-      </div>
-      <p class="doctor-dependency-message doctor-muted"></p>
-      <button type="button" class="btn btn-sm btn-outline-primary dependency-install" data-key="pymysql">설치</button>
-    </div>
-    <div class="doctor-dependency-card" data-dependency="mariadb-client">
-      <div>
-        <strong>mariadb-client</strong>
-        <code>mariadb · mariadb-dump</code>
-      </div>
-      <div class="doctor-dependency-meta">
-        <span class="doctor-dependency-state">확인 중</span>
-        <span class="doctor-dependency-version"></span>
-      </div>
-      <p class="doctor-dependency-message doctor-muted"></p>
-      <button type="button" class="btn btn-sm btn-outline-primary dependency-install" data-key="mariadb-client">설치</button>
-    </div>
-  </div>
-  <div id="dependency_platform" class="doctor-muted doctor-dependency-platform"></div>
-  <div id="dependency_job" class="doctor-dependency-job" hidden>
-    <div class="doctor-dependency-job-head">
-      <strong id="dependency_job_title">설치 작업</strong>
-      <span id="dependency_job_percent">0%</span>
-    </div>
-    <div class="doctor-live-progress-track"><div id="dependency_job_bar" class="doctor-live-progress-bar"></div></div>
-    <p id="dependency_job_message" class="doctor-muted mb-0"></p>
-    <pre id="dependency_job_output" class="doctor-dependency-output"></pre>
-  </div>
-  <div class="alert alert-warning mt-3 mb-0">
-    시스템 패키지 설치는 FF 프로세스가 root로 실행되고 컨테이너에 <code>apt-get</code> 또는 <code>apk</code>가 있을 때만 가능합니다. 설치 중에는 FF 컨테이너를 재시작하지 마세요.
+  <div class="alert alert-info mb-0">
+    설치 상태 확인, 설치·재설치와 필요한 패키지 자동 설치는 <strong>설정 → DB 연결 → MariaDB 필수 구성요소</strong>에서 진행합니다.
   </div>
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>4. 컨테이너 재생성 후에도 유지하기</h4>
+  <h4>3. 컨테이너 재생성 후에도 유지하기</h4>
   <p>실행 중인 컨테이너에 직접 설치한 패키지는 단순 재시작에는 남지만 이미지 업데이트나 컨테이너 재생성 시 사라집니다. 계속 사용할 환경은 사용자 이미지를 권장합니다.</p>
   <div class="doctor-code-window">
     <div class="doctor-code-window-header">Dockerfile</div>
@@ -106,7 +53,7 @@ RUN apt-get update \
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>5. 안전 수칙</h4>
+  <h4>4. 안전 수칙</h4>
   <ul>
     <li>카테고리·Kavita·통DB 실제 이관 전에는 Dry Run과 별도 외부 백업을 완료합니다.</li>
     <li>DB를 변경하거나 교체하는 동안 BookOasis, 스캐너와 메타데이터 변경 작업을 중지합니다.</li>
@@ -117,7 +64,7 @@ RUN apt-get update \
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>6. BookOasis 공식 구현 참고</h4>
+  <h4>5. BookOasis 공식 구현 참고</h4>
   <ul>
     <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/database.py" target="_blank" rel="noopener noreferrer">database.py</a> — 일반·성인·오디오북·비디오 DB 역할과 공통 스키마.</li>
     <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/docs/api_endpoints.md" target="_blank" rel="noopener noreferrer">api_endpoints.md</a> — 상태 조회, 스캔, 도서 작업과 상세 화면 연동 API 계약.</li>
@@ -132,7 +79,7 @@ RUN apt-get update \
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>7. 오디오북 공통 지원</h4>
+  <h4>6. 오디오북 공통 지원</h4>
   <ul>
     <li>SQLite의 <code>db/media_audiobook.db</code> 또는 MariaDB의 오디오북 DB를 별도로 연결하며 상태 요약, DB 무결성 검사, DB 정보·보관함 확인, 스캔 상태와 읽기 전용 SQL에서 사용할 수 있습니다.</li>
     <li>Google Drive 변경 연동은 MP3·M4B·M4A·FLAC·AAC·WAV·OGG·OPUS·WMA 이벤트를 오디오북 보관함에 연결해 VFS 갱신과 보관함 스캔을 요청할 수 있습니다.</li>
@@ -141,7 +88,7 @@ RUN apt-get update \
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>8. 비디오북 공통 지원</h4>
+  <h4>7. 비디오북 공통 지원</h4>
   <ul>
     <li>SQLite의 <code>db/media_video.db</code> 또는 MariaDB의 비디오 DB를 별도로 연결하며 상태 요약, 라이브러리 통계, DB 정보·보관함 확인, 스캔 상태와 읽기 전용 SQL에서 사용할 수 있습니다.</li>
     <li>Google Drive 변경 연동은 MP4·MKV·AVI·WEBM·MOV·M4V·TS와 SMI·SRT·VTT 이벤트를 비디오 보관함의 개별 경로 스캔으로 연결합니다.</li>
@@ -150,7 +97,7 @@ RUN apt-get update \
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>9. 네이티브 플러그인 관리</h4>
+  <h4>8. 네이티브 플러그인 관리</h4>
   <ul>
     <li><strong>카탈로그</strong>는 Mate에서 확인한 저장소와 사용자가 등록한 저장소를 관리하며, 실제 설치 전에 ZIP 구조와 Python 패키지를 검사합니다.</li>
     <li><strong>실행 상태</strong>는 최신 BookOasis 관리 API에서 설치 발견 여부, 활성화 여부와 실제 로드 성공·오류를 구분해 표시합니다.</li>
@@ -161,7 +108,7 @@ RUN apt-get update \
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>10. 기능별 안내 위치</h4>
+  <h4>9. 기능별 안내 위치</h4>
   <div class="doctor-guide-grid">
     <div><strong>라이브러리 진단</strong><span>판정 기준, 스캔 상태, 표지·고아 파일 동작 방식.</span></div>
     <div><strong>카테고리 이관</strong><span>내보내기, 신규 가져오기, 기존 카테고리 병합.</span></div>
@@ -170,101 +117,75 @@ RUN apt-get update \
     <div><strong>커스텀 폰트</strong><span>공유 마운트 경로, 파일 업로드와 BookOasis 재시작 조건.</span></div>
   </div>
 </div>
+</div>
+
+<div class="tab-pane fade" id="manual-changelog-pane" role="tabpanel" aria-labelledby="manual-changelog-tab">
+  <div class="doctor-section doctor-card doctor-changelog-card">
+    <div class="doctor-section-heading">
+      <div>
+        <h4>BookOasis Mate 변경 내역</h4>
+        <p class="doctor-muted mb-0">GitHub <code>main/README.md</code>의 <code>## Changelog</code> 섹션을 불러옵니다.</p>
+      </div>
+      <div class="doctor-cleanup-actions">
+        <a class="btn btn-sm btn-outline-secondary doctor-plugin-repo-link" href="https://github.com/colaiuta77/bookoasis_mate#changelog" target="_blank" rel="noopener noreferrer" title="GitHub Changelog 원문" aria-label="GitHub Changelog 원문"><img src="{{ url_for('bookoasis_mate.static', filename='img/github-mark.svg') }}" alt="" aria-hidden="true"></a>
+        <button type="button" id="manual_changelog_refresh" class="btn btn-sm btn-outline-primary">새로고침</button>
+      </div>
+    </div>
+    <div id="manual_changelog_status" class="doctor-query-status">변경 내역 탭을 열면 GitHub에서 불러옵니다.</div>
+    <div id="manual_changelog" class="doctor-changelog-list"></div>
+  </div>
+</div>
+</div>
 
 <script type="text/javascript">
-var dependencyPollTimer = null;
-var dependencyInitialStatus = {{ arg['dependency_status']|tojson }};
+var manualChangelogLoaded = false;
 
-function dependencySetText(selector, value) {
-  var node = document.querySelector(selector);
-  if (node) node.textContent = value == null ? '' : String(value);
+function manualChangelogText(tag, className, value) {
+  var node = document.createElement(tag);
+  if (className) node.className = className;
+  node.textContent = value == null ? '' : String(value);
+  return node;
 }
 
-function dependencyRenderPackage(key, item) {
-  var card = document.querySelector('[data-dependency="' + key + '"]');
-  if (!card || !item) return;
-  var state = card.querySelector('.doctor-dependency-state');
-  state.textContent = item.ready ? '사용 가능' : (item.installed ? '업데이트 필요' : '미설치');
-  state.className = 'doctor-dependency-state doctor-status ' + (item.ready ? 'doctor-status-healthy' : 'doctor-status-warning');
-  card.querySelector('.doctor-dependency-version').textContent = item.version || '';
-  card.querySelector('.doctor-dependency-message').textContent = item.message || '';
-  card.querySelector('.dependency-install').textContent = item.installed ? '재설치' : '설치';
-}
-
-function dependencyRenderJob(job) {
-  var container = document.getElementById('dependency_job');
-  if (!job) {
-    container.hidden = true;
-    return;
-  }
-  container.hidden = false;
-  var percent = Math.max(0, Math.min(100, Number(job.percent || 0)));
-  dependencySetText('#dependency_job_title', '설치 작업 · ' + (job.status_label || job.status || ''));
-  dependencySetText('#dependency_job_percent', percent + '%');
-  dependencySetText('#dependency_job_message', job.message || '');
-  dependencySetText('#dependency_job_output', job.output || '출력 대기 중입니다.');
-  document.getElementById('dependency_job_bar').style.width = percent + '%';
-  var running = job.status === 'ready' || job.status === 'running';
-  document.querySelectorAll('.dependency-install, #dependency_install_all').forEach(function(button) {
-    button.disabled = running;
+function manualRenderChangelog(data) {
+  var target = document.getElementById('manual_changelog');
+  bookoasisMateClear(target);
+  (data.releases || []).forEach(function(release) {
+    var card = manualChangelogText('section', 'doctor-changelog-release', '');
+    var head = manualChangelogText('div', 'doctor-changelog-release-head', '');
+    head.appendChild(manualChangelogText('strong', '', 'v' + (release.version || '-')));
+    if (release.date) head.appendChild(manualChangelogText('time', '', release.date));
+    card.appendChild(head);
+    var list = document.createElement('ul');
+    (release.items || []).forEach(function(item) { list.appendChild(manualChangelogText('li', '', item)); });
+    card.appendChild(list);
+    target.appendChild(card);
   });
-  if (running) dependencyStartPolling();
-  else dependencyStopPolling();
+  $('#manual_changelog_status').text((data.releases || []).length + '개 버전의 변경 내역을 불러왔습니다.');
 }
 
-function dependencyRenderStatus(data) {
-  if (!data) return;
-  var packages = data.packages || {};
-  dependencyRenderPackage('pymysql', packages.pymysql);
-  dependencyRenderPackage('mariadb-client', packages['mariadb-client']);
-  dependencyRenderJob(data.job);
-  var platform = data.platform || {};
-  var manager = platform.package_manager || '지원 안 됨';
-  var privilege = platform.is_root ? 'root' : '일반 사용자';
-  dependencySetText('#dependency_platform', 'FF Python ' + (platform.python || '-') + ' · 시스템 패키지 관리자 ' + manager + ' · 실행 권한 ' + privilege);
-  var clientButton = document.querySelector('[data-key="mariadb-client"]');
-  var allButton = document.getElementById('dependency_install_all');
-  var blocked = !platform.system_install_supported || !platform.is_root;
-  if (!data.job || (data.job.status !== 'ready' && data.job.status !== 'running')) {
-    if (clientButton) clientButton.disabled = blocked;
-    if (allButton) allButton.disabled = blocked;
-  }
+function manualLoadChangelog(force) {
+  $('#manual_changelog_status').addClass('doctor-query-status-active').text('GitHub 변경 내역을 불러오는 중입니다.');
+  bookoasisMateAjax('manual', 'changelog', {force:force ? 'true' : 'false'}, function(ret) {
+    if (ret.ret !== 'success' || !ret.data) {
+      manualChangelogLoaded = false;
+      $('#manual_changelog_status').removeClass('doctor-query-status-active').text(ret.msg || 'GitHub 변경 내역을 불러오지 못했습니다.');
+      return;
+    }
+    manualChangelogLoaded = true;
+    manualRenderChangelog(ret.data);
+  }, function() {
+    $('#manual_changelog_status').removeClass('doctor-query-status-active');
+  }, {global:false, silent:false, error:function(xhr) {
+    var message = ((xhr.responseJSON || {}).msg || 'GitHub 변경 내역을 불러오지 못했습니다.');
+    $('#manual_changelog_status').removeClass('doctor-query-status-active').text(message);
+  }});
 }
 
-function dependencyRefresh(silent) {
-  bookoasisMateAjax('manual', 'dependency_status', {}, function(ret) {
-    dependencyRenderStatus(ret.data);
-  }, null, {global:false, silent:!!silent});
-}
-
-function dependencyStartPolling() {
-  if (dependencyPollTimer) return;
-  dependencyPollTimer = window.setInterval(function() { dependencyRefresh(true); }, 2000);
-}
-
-function dependencyStopPolling() {
-  if (!dependencyPollTimer) return;
-  window.clearInterval(dependencyPollTimer);
-  dependencyPollTimer = null;
-}
-
-function dependencyInstall(key) {
-  var label = key === 'all' ? 'PyMySQL과 mariadb-client' : key;
-  if (!window.confirm(label + ' 설치를 시작할까요? 실행 중인 FF 컨테이너가 변경됩니다.')) return;
-  bookoasisMateAjax('manual', 'install_dependency', {
-    key:key,
-    confirm_install:'true'
-  }, function(ret) {
-    if (ret.data) dependencyRenderJob(ret.data);
-    dependencyStartPolling();
-  });
-}
-
-document.getElementById('dependency_refresh').addEventListener('click', function() { dependencyRefresh(false); });
-document.getElementById('dependency_install_all').addEventListener('click', function() { dependencyInstall('all'); });
-document.querySelectorAll('.dependency-install').forEach(function(button) {
-  button.addEventListener('click', function() { dependencyInstall(button.getAttribute('data-key')); });
+$('#manual-changelog-tab').on('shown.bs.tab', function() {
+  if (!manualChangelogLoaded) manualLoadChangelog(false);
 });
-dependencyRenderStatus(dependencyInitialStatus);
+document.getElementById('manual_changelog_refresh').addEventListener('click', function() { manualLoadChangelog(true); });
+
 </script>
 {% endblock %}

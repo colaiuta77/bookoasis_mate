@@ -1,16 +1,29 @@
 {# BookOasis 연결·DB·진단 설정을 기능별 탭으로 제공합니다. #}
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=database-layout-1">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
-{{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['connection_test_btn', '연결 테스트']]) }}
+<div class="doctor-setting-toolbar">
+  <div class="doctor-setting-toolbar-actions">
+    {{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['connection_test_btn', '연결 테스트']]) }}
+  </div>
+  <div class="doctor-release-summary" aria-label="BookOasis Mate 버전 정보">
+    <span class="doctor-release-label">Mate</span>
+    <strong id="mate_release_version">v{{ arg.get('mate_version') or '-' }}</strong>
+    <a class="btn btn-sm btn-outline-secondary doctor-plugin-repo-link doctor-mate-github-link" href="{{ arg.get('mate_repository_url') }}" target="_blank" rel="noopener noreferrer" title="BookOasis Mate GitHub 저장소" aria-label="BookOasis Mate GitHub 저장소">
+      <img src="{{ url_for('bookoasis_mate.static', filename='img/github-mark.svg') }}" alt="" aria-hidden="true">
+    </a>
+    <a id="mate_release_update" class="doctor-release-update" href="{{ arg.get('mate_repository_url') }}" target="_blank" rel="noopener noreferrer" hidden>업데이트</a>
+  </div>
+</div>
 
 <ul class="nav nav-tabs doctor-setting-tabs" role="tablist">
   <li class="nav-item"><a class="nav-link active" id="setting-basic-tab" data-toggle="tab" href="#setting-basic" role="tab">기본 연결</a></li>
   <li class="nav-item"><a class="nav-link" id="setting-database-tab" data-toggle="tab" href="#setting-database" role="tab">DB 연결</a></li>
   <li class="nav-item"><a class="nav-link" id="setting-diagnosis-tab" data-toggle="tab" href="#setting-diagnosis" role="tab">진단 정책</a></li>
   <li class="nav-item"><a class="nav-link" id="setting-env-tab" data-toggle="tab" href="#setting-env" role="tab">환경 파일</a></li>
+  <li class="nav-item"><a class="nav-link" id="setting-docker-tab" data-toggle="tab" href="#setting-docker" role="tab">Docker 관리</a></li>
 </ul>
 
 <form id="setting">
@@ -27,7 +40,7 @@
       </div>
     </div>
 
-    <div class="tab-pane fade" id="setting-database" role="tabpanel" aria-labelledby="setting-database-tab">
+    <div class="tab-pane fade doctor-setting-database-pane" id="setting-database" role="tabpanel" aria-labelledby="setting-database-tab">
       <div class="doctor-section doctor-card">
         <h4>DB 엔진과 기본 경로</h4>
         <div class="form-group row">
@@ -66,10 +79,63 @@
         {{ macros.setting_input_int('mariadb_connect_timeout', 'MariaDB 연결 제한 시간(초)', value=arg.get('mariadb_connect_timeout', '10'), desc=['1~60초']) }}
         {{ macros.setting_input_int('mariadb_read_timeout', 'MariaDB 읽기 제한 시간(초)', value=arg.get('mariadb_read_timeout', '30'), desc=['1~600초']) }}
         {{ macros.setting_input_int('mariadb_write_timeout', 'MariaDB 쓰기 제한 시간(초)', value=arg.get('mariadb_write_timeout', '30'), desc=['카테고리·Kavita·통DB 실제 이관의 MariaDB 쓰기 작업에 적용합니다.', '1~600초 · 기본값 30']) }}
-        <p class="doctor-muted mb-0">MariaDB에 필요한 PyMySQL과 클라이언트 설치 방법은 최상단 <strong>매뉴얼</strong> 메뉴에서 확인할 수 있습니다.</p>
       </div>
 
-      <div class="doctor-section doctor-card">
+      <div id="mariadb_dependency_settings" class="doctor-section doctor-card">
+        <div class="doctor-section-heading">
+          <div>
+            <h4>MariaDB 필수 구성요소</h4>
+            <p class="doctor-muted mb-0">현재 FlaskFarm 컨테이너에서 MariaDB 연결·백업·복원에 필요한 구성요소를 확인하고 설치합니다.</p>
+          </div>
+          <div class="doctor-dependency-actions">
+            <button type="button" id="dependency_refresh" class="btn btn-sm btn-outline-secondary">상태 새로고침</button>
+            <button type="button" id="dependency_install_needed" class="btn btn-sm btn-primary">필요 패키지 설치</button>
+          </div>
+        </div>
+        <div class="doctor-dependency-grid">
+          <div class="doctor-dependency-card" data-dependency="pymysql">
+            <div>
+              <strong>PyMySQL</strong>
+              <code>PyMySQL&gt;=1.1,&lt;2</code>
+              <small class="doctor-muted">MariaDB 연결 및 SQL 기능에 사용합니다.</small>
+            </div>
+            <div class="doctor-dependency-meta">
+              <span class="doctor-dependency-state">확인 중</span>
+              <span class="doctor-dependency-version"></span>
+            </div>
+            <p class="doctor-dependency-message doctor-muted"></p>
+            <button type="button" class="btn btn-sm btn-outline-primary dependency-install" data-key="pymysql">설치</button>
+          </div>
+          <div class="doctor-dependency-card" data-dependency="mariadb-client">
+            <div>
+              <strong>mariadb-client</strong>
+              <code>mariadb · mariadb-dump</code>
+              <small class="doctor-muted">DB 백업·복원 및 이관 작업에 사용합니다.</small>
+            </div>
+            <div class="doctor-dependency-meta">
+              <span class="doctor-dependency-state">확인 중</span>
+              <span class="doctor-dependency-version"></span>
+            </div>
+            <p class="doctor-dependency-message doctor-muted"></p>
+            <button type="button" class="btn btn-sm btn-outline-primary dependency-install" data-key="mariadb-client">설치</button>
+          </div>
+        </div>
+        <div id="dependency_platform" class="doctor-muted doctor-dependency-platform"></div>
+        <div id="dependency_job" class="doctor-dependency-job" hidden>
+          <div class="doctor-dependency-job-head">
+            <strong id="dependency_job_title">설치 작업</strong>
+            <span id="dependency_job_percent">0%</span>
+          </div>
+          <div class="doctor-live-progress-track"><div id="dependency_job_bar" class="doctor-live-progress-bar"></div></div>
+          <p id="dependency_job_message" class="doctor-muted mb-0"></p>
+          <pre id="dependency_job_output" class="doctor-dependency-output"></pre>
+        </div>
+        <div class="alert alert-warning mt-3 mb-0">
+          시스템 패키지 설치는 FlaskFarm 프로세스가 root로 실행되고 컨테이너에 <code>apt-get</code> 또는 <code>apk</code>가 있을 때만 가능합니다. 설치 중에는 FlaskFarm 컨테이너를 재시작하지 마세요.
+        </div>
+      </div>
+
+      <div class="doctor-section doctor-card doctor-db-action-section">
         <div class="doctor-section-heading">
           <div><h4>DB 정보와 보관함</h4><p class="doctor-muted mb-0">선택한 엔진에서 DB 크기·식별 정보와 등록된 보관함을 확인합니다.</p></div>
         </div>
@@ -123,23 +189,115 @@
 
     <div class="tab-pane fade" id="setting-env" role="tabpanel" aria-labelledby="setting-env-tab">
       <div class="doctor-section doctor-card">
+        <h4>BookOasis 환경 파일</h4>
+        <p class="doctor-muted">BookOasis의 <code>.env</code>와 Docker Compose 파일을 안전하게 편집합니다. 경로를 변경한 경우 먼저 <strong>설정 저장</strong>을 눌러 주세요.</p>
+        {{ macros.setting_input_text_and_buttons('bookoasis_docker_path', 'BookOasis Docker 경로', [['select_bookoasis_docker_path_btn', '경로 선택']], value=arg.get('bookoasis_docker_path') or arg.get('bookoasis_root_path', ''), desc=['FF 컨테이너에서 보이는 Docker Compose 파일 디렉터리입니다.', '비워 두면 BookOasis 기본 경로를 사용합니다.', 'docker-compose.yml/.yaml 및 docker-compose.override.yml/.yaml을 이 경로에서 찾습니다.']) }}
+        <div class="alert alert-warning doctor-env-warning mb-0">
+          저장 전 기존 파일을 자동 백업합니다. Compose 파일에는 비밀번호·토큰이 포함될 수 있으므로 백업 파일은 0600 권한으로 보관하며 최근 5개만 유지합니다.
+        </div>
+      </div>
+
+      <ul class="nav nav-tabs doctor-file-editor-tabs" role="tablist">
+        <li class="nav-item"><a class="nav-link active" id="env-editor-tab" data-toggle="tab" href="#env-editor-pane" role="tab">.env</a></li>
+        <li class="nav-item"><a class="nav-link" id="compose-editor-tab" data-toggle="tab" href="#compose-editor-pane" role="tab">Docker Compose</a></li>
+        <li class="nav-item"><a class="nav-link" id="compose-override-editor-tab" data-toggle="tab" href="#compose-override-editor-pane" role="tab">Compose Override</a></li>
+      </ul>
+
+      <div class="tab-content doctor-file-editor-content">
+        <div class="tab-pane fade show active" id="env-editor-pane" role="tabpanel" aria-labelledby="env-editor-tab">
+          <div class="doctor-section doctor-card doctor-file-editor-card">
+            <div class="doctor-section-heading">
+              <div>
+                <h4>BookOasis .env 편집</h4>
+                <p class="doctor-muted mb-0">BookOasis 기본 경로 바로 아래 <code>.env</code> 파일을 편집합니다.</p>
+              </div>
+              <div class="doctor-cleanup-actions">
+                <button id="env_file_load_btn" type="button" class="btn btn-sm btn-outline-primary">파일 불러오기</button>
+                <button id="env_file_save_btn" type="button" class="btn btn-sm btn-primary" disabled>백업 후 저장</button>
+              </div>
+            </div>
+            <div id="env_file_path" class="doctor-path doctor-env-path">BookOasis 기본 경로를 확인한 뒤 파일을 불러오세요.</div>
+            <textarea id="env_file_content" class="form-control doctor-env-editor" rows="24" spellcheck="false" autocomplete="off" disabled></textarea>
+            <div id="env_file_status" class="doctor-env-status doctor-muted" role="status" aria-live="polite">파일을 불러오기 전에는 저장할 수 없습니다.</div>
+          </div>
+        </div>
+
+        <div class="tab-pane fade" id="compose-editor-pane" role="tabpanel" aria-labelledby="compose-editor-tab">
+          <div class="doctor-section doctor-card doctor-file-editor-card">
+            <div class="doctor-section-heading">
+              <div>
+                <h4>기본 Docker Compose 편집</h4>
+                <p class="doctor-muted mb-0"><code>docker-compose.yml</code> 또는 <code>docker-compose.yaml</code> 중 존재하는 파일을 자동으로 찾습니다. 기본 Compose 파일은 Mate가 새로 생성하지 않습니다.</p>
+              </div>
+              <div class="doctor-cleanup-actions">
+                <button id="compose_file_load_btn" type="button" class="btn btn-sm btn-outline-primary">파일 불러오기</button>
+                <button id="compose_file_save_btn" type="button" class="btn btn-sm btn-primary" disabled>백업 후 저장</button>
+              </div>
+            </div>
+            <div id="compose_file_path" class="doctor-path doctor-env-path">BookOasis Docker 경로를 확인한 뒤 파일을 불러오세요.</div>
+            <textarea id="compose_file_content" class="form-control doctor-env-editor" rows="28" spellcheck="false" autocomplete="off" disabled></textarea>
+            <div id="compose_file_status" class="doctor-env-status doctor-muted" role="status" aria-live="polite">기본 Compose 파일을 불러오기 전에는 저장할 수 없습니다.</div>
+          </div>
+        </div>
+
+        <div class="tab-pane fade" id="compose-override-editor-pane" role="tabpanel" aria-labelledby="compose-override-editor-tab">
+          <div class="doctor-section doctor-card doctor-file-editor-card">
+            <div class="doctor-section-heading">
+              <div>
+                <h4>Compose Override 편집</h4>
+                <p class="doctor-muted mb-0"><code>docker-compose.override.yml</code> 또는 <code>.yaml</code>을 자동 탐지합니다. 파일이 없으면 공식 설치 방식에 맞춰 <code>docker-compose.override.yml</code>을 새로 만들 수 있습니다.</p>
+              </div>
+              <div class="doctor-cleanup-actions">
+                <button id="compose_override_load_btn" type="button" class="btn btn-sm btn-outline-primary">파일 불러오기</button>
+                <button id="compose_override_save_btn" type="button" class="btn btn-sm btn-primary" disabled>백업 후 저장</button>
+              </div>
+            </div>
+            <div id="compose_override_path" class="doctor-path doctor-env-path">BookOasis Docker 경로를 확인한 뒤 파일을 불러오세요.</div>
+            <textarea id="compose_override_content" class="form-control doctor-env-editor" rows="28" spellcheck="false" autocomplete="off" disabled></textarea>
+            <div id="compose_override_status" class="doctor-env-status doctor-muted" role="status" aria-live="polite">파일이 없으면 불러오기 후 새 Override를 작성할 수 있습니다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane fade" id="setting-docker" role="tabpanel" aria-labelledby="setting-docker-tab">
+      <div id="docker_management_card" class="doctor-section doctor-card doctor-docker-management-card">
         <div class="doctor-section-heading">
           <div>
-            <h4>BookOasis .env 편집</h4>
-            <p class="doctor-muted mb-0">설정 저장을 완료한 BookOasis 기본 경로 바로 아래 <code>.env</code> 파일만 편집합니다.</p>
+            <h4>BookOasis Docker 관리</h4>
+            <p class="doctor-muted mb-0">저장된 Docker 경로와 현재 실행 중인 <code>bookoasis</code> 컨테이너가 정확히 일치할 때만 관리 기능을 활성화합니다.</p>
           </div>
           <div class="doctor-cleanup-actions">
-            <button id="env_file_load_btn" type="button" class="btn btn-sm btn-outline-primary">파일 불러오기</button>
-            <button id="env_file_save_btn" type="button" class="btn btn-sm btn-primary" disabled>백업 후 저장</button>
+            <button id="docker_status_refresh_btn" type="button" class="btn btn-sm btn-outline-secondary">상태 새로고침</button>
           </div>
         </div>
-        <div class="alert alert-warning doctor-env-warning">
-          이 파일에는 DB 비밀번호와 API 토큰 등 민감한 값이 포함될 수 있습니다. 저장 전 기존 파일을 같은 디렉터리에 백업하며, 변경 적용을 위해 BookOasis를 사용자가 직접 재시작해야 합니다.
+        <div class="alert alert-info doctor-docker-safety">
+          <strong>안전 범위:</strong> BookOasis 서비스 하나만 제어합니다. MariaDB와 Redis는 재시작·재생성하지 않으며, Compose 적용/업데이트의 <code>up</code> 작업에는 <code>--no-deps</code>를 강제합니다.
         </div>
-        <div id="env_file_path" class="doctor-path doctor-env-path">BookOasis 기본 경로를 확인한 뒤 파일을 불러오세요.</div>
-        <textarea id="env_file_content" class="form-control doctor-env-editor" rows="24" spellcheck="false" autocomplete="off" disabled></textarea>
-        <div id="env_file_status" class="doctor-env-status doctor-muted" role="status" aria-live="polite">파일을 불러오기 전에는 저장할 수 없습니다.</div>
+        <div class="doctor-docker-summary">
+          <div><span>상태</span><strong id="docker_manage_state">확인 전</strong></div>
+          <div><span>설치 방식</span><strong id="docker_manage_mode">-</strong></div>
+          <div><span>버전</span><strong id="docker_manage_version">-</strong></div>
+          <div><span>업데이트</span><strong id="docker_manage_update">확인 전</strong></div>
+          <div><span>프로젝트</span><strong id="docker_manage_project">-</strong></div>
+          <div><span>플랫폼</span><strong id="docker_manage_platform">-</strong></div>
+          <div><span>Docker</span><strong id="docker_manage_docker_version">-</strong></div>
+          <div><span>Compose</span><strong id="docker_manage_compose_version">-</strong></div>
+        </div>
+        <div class="doctor-docker-detail"><span>Docker CLI</span><code id="docker_manage_cli">-</code></div>
+        <div class="doctor-docker-detail"><span>Git CLI</span><code id="docker_manage_git">-</code></div>
+        <div class="doctor-docker-detail"><span>Docker 경로</span><code id="docker_manage_root">-</code></div>
+        <div class="doctor-docker-detail"><span>이미지</span><code id="docker_manage_image">-</code></div>
+        <div class="doctor-docker-detail"><span>Compose</span><code id="docker_manage_compose">-</code></div>
+        <div class="doctor-docker-actions">
+          <button id="docker_restart_btn" type="button" class="btn btn-sm btn-outline-warning" disabled>BookOasis 재시작</button>
+          <button id="docker_apply_btn" type="button" class="btn btn-sm btn-outline-primary" disabled>구성 적용</button>
+          <button id="docker_update_btn" type="button" class="btn btn-sm btn-success" disabled>업데이트</button>
+        </div>
+        <div id="docker_manage_job" class="doctor-env-status doctor-muted" role="status" aria-live="polite">Docker 상태를 확인해 주세요.</div>
+        <pre id="docker_manage_log" class="doctor-docker-log" hidden></pre>
       </div>
+
     </div>
   </div>
 </form>
@@ -149,16 +307,36 @@ $(function() {
   use_collapse('adult_enabled');
   $('#general_db_path,#adult_db_path,#audiobook_db_path,#video_db_path,#bookoasis_log_dir').prop('readonly', true);
   updateDatabaseEngineMode();
+  dependencyRenderStatus(dependencyInitialStatus);
   updateCoverRootMode();
   updateBookOasisDerivedPaths();
+  loadMateReleaseStatus();
+  if (String($('#bookoasis_docker_path').val() || '').trim()) loadDockerStatus(true);
 });
 $('#adult_enabled').change(function() { use_collapse('adult_enabled'); });
 $('#cover_root_custom').change(updateCoverRootMode);
-$('#db_engine').change(updateDatabaseEngineMode);
+$('#db_engine').change(function() { updateDatabaseEngineMode(); if ($('#db_engine').val() === 'mariadb' || $('#db_engine').val() === 'auto') dependencyRefresh(true); });
+
+function loadMateReleaseStatus() {
+  bookoasisMateAjax('setting', 'release_status', {}, function(ret) {
+    var data = ret.data || {};
+    if (data.current_version) $('#mate_release_version').text('v' + data.current_version);
+    var update = document.getElementById('mate_release_update');
+    if (!update) return;
+    if (data.update_available && data.latest_version) {
+      update.textContent = '업데이트 v' + data.latest_version;
+      update.href = data.repository_url || update.href;
+      update.hidden = false;
+    } else {
+      update.hidden = true;
+    }
+  }, null, {global:false, silent:true});
+}
 
 function updateDatabaseEngineMode() {
   var engine = $('#db_engine').val();
-  $('#mariadb_database_settings').toggle(engine === 'mariadb' || engine === 'auto');
+  var showMariaDb = engine === 'mariadb' || engine === 'auto';
+  $('#mariadb_database_settings,#mariadb_dependency_settings').toggle(showMariaDb);
   $('#sqlite_database_settings').toggle(engine !== 'mariadb');
 }
 
@@ -203,6 +381,17 @@ $("body").on('click', '#select_bookoasis_root_path_btn', function(e) {
 });
 $('#bookoasis_root_path').on('input change', updateBookOasisDerivedPaths);
 $('#bookoasis_root_path').on('input change', resetEnvEditor);
+
+$("body").on('click', '#select_bookoasis_docker_path_btn', function(e) {
+  e.preventDefault();
+  var input = $('#bookoasis_docker_path');
+  globalSelectLocalFolder('BookOasis Docker 폴더 선택', input.val().trim() || $('#bookoasis_root_path').val().trim() || '/', function(result) {
+    if (typeof result !== 'string' || !result.trim()) return;
+    input.val(result.trim());
+    resetComposeEditors();
+  });
+});
+$('#bookoasis_docker_path').on('input change', function() { resetComposeEditors(); resetDockerManagement(); });
 
 $("body").on('click', '#select_cover_root_path_btn', function(e) {
   e.preventDefault();
@@ -317,6 +506,407 @@ $('#env_file_save_btn').click(function(e) {
   }, {global:false});
 });
 
+var dependencyPollTimer = null;
+var dependencyInitialStatus = {{ arg['dependency_status']|tojson }};
+
+function dependencySetText(selector, value) {
+  var node = document.querySelector(selector);
+  if (node) node.textContent = value == null ? '' : String(value);
+}
+
+function dependencyRenderPackage(key, item) {
+  var card = document.querySelector('[data-dependency="' + key + '"]');
+  if (!card || !item) return;
+  var state = card.querySelector('.doctor-dependency-state');
+  state.textContent = item.ready ? '사용 가능' : (item.installed ? '업데이트 필요' : '미설치');
+  state.className = 'doctor-dependency-state doctor-status ' + (item.ready ? 'doctor-status-healthy' : 'doctor-status-warning');
+  card.querySelector('.doctor-dependency-version').textContent = item.version || '';
+  card.querySelector('.doctor-dependency-message').textContent = item.message || '';
+  card.querySelector('.dependency-install').textContent = item.installed ? '재설치' : '설치';
+}
+
+function dependencyRenderJob(job) {
+  var container = document.getElementById('dependency_job');
+  if (!container) return;
+  if (!job) { container.hidden = true; return; }
+  container.hidden = false;
+  var percent = Math.max(0, Math.min(100, Number(job.percent || 0)));
+  dependencySetText('#dependency_job_title', '설치 작업 · ' + (job.status_label || job.status || ''));
+  dependencySetText('#dependency_job_percent', percent + '%');
+  dependencySetText('#dependency_job_message', job.message || '');
+  dependencySetText('#dependency_job_output', job.output || '출력 대기 중입니다.');
+  document.getElementById('dependency_job_bar').style.width = percent + '%';
+  var running = job.status === 'ready' || job.status === 'running';
+  document.querySelectorAll('.dependency-install, #dependency_install_needed').forEach(function(button) { button.disabled = running; });
+  if (running) dependencyStartPolling(); else dependencyStopPolling();
+}
+
+function dependencyRenderStatus(data) {
+  if (!data) return;
+  var packages = data.packages || {};
+  var pymysql = packages.pymysql || {};
+  var client = packages['mariadb-client'] || {};
+  dependencyRenderPackage('pymysql', pymysql);
+  dependencyRenderPackage('mariadb-client', client);
+  dependencyRenderJob(data.job);
+  var platform = data.platform || {};
+  var manager = platform.package_manager || '지원 안 됨';
+  var privilege = platform.is_root ? 'root' : '일반 사용자';
+  dependencySetText('#dependency_platform', 'FF Python ' + (platform.python || '-') + ' · 시스템 패키지 관리자 ' + manager + ' · 실행 권한 ' + privilege);
+  var running = data.job && (data.job.status === 'ready' || data.job.status === 'running');
+  var systemBlocked = !platform.system_install_supported || !platform.is_root;
+  var clientButton = document.querySelector('[data-key="mariadb-client"]');
+  var neededButton = document.getElementById('dependency_install_needed');
+  if (!running) {
+    if (clientButton) clientButton.disabled = systemBlocked;
+    if (neededButton) {
+      var allReady = pymysql.ready === true && client.ready === true;
+      var needsBlockedClient = client.ready !== true && systemBlocked;
+      neededButton.disabled = allReady || needsBlockedClient;
+      neededButton.textContent = allReady ? '필수 구성 완료' : '필요 패키지 설치';
+    }
+  }
+}
+
+function dependencyRefresh(silent) {
+  bookoasisMateAjax('setting', 'dependency_status', {}, function(ret) { dependencyRenderStatus(ret.data); }, null, {global:false, silent:!!silent});
+}
+
+function dependencyStartPolling() {
+  if (dependencyPollTimer) return;
+  dependencyPollTimer = window.setInterval(function() { dependencyRefresh(true); }, 2000);
+}
+
+function dependencyStopPolling() {
+  if (!dependencyPollTimer) return;
+  window.clearInterval(dependencyPollTimer);
+  dependencyPollTimer = null;
+}
+
+function dependencyInstall(key) {
+  var label = key === 'needed' ? '현재 필요한 MariaDB 구성요소' : key;
+  if (!window.confirm(label + ' 설치를 시작할까요? 실행 중인 FlaskFarm 컨테이너의 패키지가 변경됩니다.')) return;
+  bookoasisMateAjax('setting', 'install_dependency', {key:key, confirm_install:'true'}, function(ret) {
+    if (ret.data) dependencyRenderJob(ret.data);
+    dependencyStartPolling();
+  });
+}
+
+var dockerActionPollTimer = null;
+var dockerManagementReady = false;
+var dockerManagementInfo = null;
+var dockerActionRunning = false;
+
+function dockerUpdateAllowed(info) {
+  info = info || {};
+  if (!info.manageable) return false;
+  if (info.mode === 'build') return info.build_update_ready === true;
+  return info.mode === 'image' && info.update_available === true;
+}
+
+function setDockerActionButtons(running, info) {
+  dockerActionRunning = !!running;
+  if (info && typeof info === 'object') dockerManagementInfo = info;
+  var current = dockerManagementInfo || {};
+  var manageable = !!current.manageable;
+  dockerManagementReady = manageable;
+  $('#docker_restart_btn,#docker_apply_btn,#docker_update_btn').prop('disabled', running || !manageable);
+  $('#docker_update_btn').prop('disabled', running || !dockerUpdateAllowed(current));
+  $('#docker_status_refresh_btn').prop('disabled', running);
+}
+
+function resetDockerManagement() {
+  if (dockerActionPollTimer) clearInterval(dockerActionPollTimer);
+  dockerActionPollTimer = null;
+  dockerManagementInfo = null;
+  setDockerActionButtons(false, null);
+  $('#docker_manage_state').text('확인 필요');
+  $('#docker_manage_mode,#docker_manage_version,#docker_manage_project,#docker_manage_image,#docker_manage_compose,#docker_manage_root,#docker_manage_platform,#docker_manage_docker_version,#docker_manage_compose_version,#docker_manage_cli,#docker_manage_git').text('-');
+  $('#docker_manage_update').removeClass('doctor-docker-update-available doctor-docker-update-latest doctor-docker-update-error').text('확인 필요').removeAttr('title');
+  $('#docker_update_btn').removeClass('doctor-docker-update-action').text('이미지 업데이트');
+  $('#docker_manage_job').removeClass('doctor-env-status-active').text('Docker 경로를 저장한 뒤 상태를 다시 확인해 주세요.');
+  $('#docker_manage_log').prop('hidden', true).text('');
+}
+
+function renderDockerInfo(info) {
+  info = info || {};
+  dockerManagementInfo = info;
+  var modeLabel = info.mode === 'image' ? 'GHCR 이미지' : (info.mode === 'build' ? '소스 Build' : (info.mode || '-'));
+  $('#docker_manage_state').text(info.running ? '실행 중' : (info.state || '중지'));
+  $('#docker_manage_mode').text(modeLabel);
+  $('#docker_manage_version').text(info.version || '-');
+  $('#docker_manage_project').text(info.project || '-');
+  $('#docker_manage_platform').text(info.image_platform || '-');
+  $('#docker_manage_docker_version').text(info.docker_version || '-');
+  $('#docker_manage_compose_version').text(info.compose_version || '-');
+  $('#docker_manage_cli').text(info.docker_cli || '-');
+  $('#docker_manage_git').text(info.git_cli ? (info.git_cli + (info.git_version ? ' · ' + info.git_version : '')) : '-');
+  $('#docker_manage_root').text(info.docker_root || '-');
+  $('#docker_manage_image').text(info.image || '-');
+  $('#docker_manage_compose').text((info.compose_files || []).join(' + ') || info.compose_file || '-');
+
+  var update = $('#docker_manage_update');
+  var updateButton = $('#docker_update_btn');
+  update.removeClass('doctor-docker-update-available doctor-docker-update-latest doctor-docker-update-error').removeAttr('title');
+  updateButton.removeClass('doctor-docker-update-action');
+
+  if (info.mode === 'build' && info.build_update_ready === true) {
+    update.text('소스 업데이트').addClass('doctor-docker-update-available');
+    updateButton.text('소스 업데이트 + 빌드');
+  } else if (info.mode === 'build') {
+    update.text('Git 확인 실패').addClass('doctor-docker-update-error').attr('title', info.update_check_error || 'Git CLI를 확인하지 못했습니다.');
+    updateButton.text('소스 업데이트 사용 불가');
+  } else if (info.mode === 'image' && info.update_available === true) {
+    var targetVersion = info.remote_version || '새 이미지';
+    update.text('업데이트 가능 ' + targetVersion).addClass('doctor-docker-update-available');
+    updateButton.text('이미지 업데이트 ' + targetVersion).addClass('doctor-docker-update-action');
+  } else if (info.mode === 'image' && info.update_available === false) {
+    var latestVersion = info.remote_version || info.version || '';
+    update.text('최신 이미지' + (latestVersion ? ' ' + latestVersion : '')).addClass('doctor-docker-update-latest');
+    updateButton.text('최신 이미지' + (latestVersion ? ' ' + latestVersion : ''));
+  } else if (info.mode === 'image' && info.update_status === 'error') {
+    update.text('업데이트 확인 실패').addClass('doctor-docker-update-error').attr('title', info.update_check_error || '원격 이미지 상태를 확인하지 못했습니다.');
+    updateButton.text('업데이트 확인 실패');
+  } else {
+    update.text('확인 필요');
+    updateButton.text('이미지 업데이트');
+  }
+  setDockerActionButtons(dockerActionRunning, info);
+}
+
+function renderDockerJob(job) {
+  job = job || {};
+  var state = job.is_working || 'wait';
+  var elapsed = Number(job.elapsed_seconds || 0);
+  var message = job.message || 'Docker 작업 대기 중입니다.';
+  if (state === 'run') message += ' · ' + elapsed.toFixed(1) + '초';
+  if (state === 'fail' && job.error) message += ' · ' + job.error;
+  $('#docker_manage_job').toggleClass('doctor-env-status-active', state === 'run').text(message);
+  var log = String(job.log_tail || '');
+  if (state === 'run' && !log) log = message;
+  var logNode = document.getElementById('docker_manage_log');
+  if (logNode) {
+    logNode.hidden = !log;
+    logNode.textContent = log;
+    if (state === 'run' && log) logNode.scrollTop = logNode.scrollHeight;
+  }
+  setDockerActionButtons(state === 'run', dockerManagementInfo);
+}
+
+function stopDockerActionPolling() {
+  if (dockerActionPollTimer) clearInterval(dockerActionPollTimer);
+  dockerActionPollTimer = null;
+}
+
+function pollDockerActionStatus() {
+  bookoasisMateAjax('setting', 'docker_action_status', {}, function(ret) {
+    var job = ret.data || {};
+    renderDockerJob(job);
+    if (job.is_working !== 'run') {
+      stopDockerActionPolling();
+      loadDockerStatus(true);
+    }
+  }, null, {global:false, silent:true});
+}
+
+function startDockerActionPolling() {
+  stopDockerActionPolling();
+  pollDockerActionStatus();
+  dockerActionPollTimer = setInterval(pollDockerActionStatus, 1000);
+}
+
+function loadDockerStatus(silent) {
+  var root = String($('#bookoasis_docker_path').val() || '').trim();
+  if (!root) {
+    resetDockerManagement();
+    return;
+  }
+  $('#docker_manage_job').addClass('doctor-env-status-active').text('BookOasis Docker 상태와 GHCR 업데이트를 확인하고 있습니다.');
+  setDockerActionButtons(true, dockerManagementInfo);
+  bookoasisMateAjax('setting', 'docker_status', {}, function(ret) {
+    if (!ret.data || !ret.data.docker) return;
+    renderDockerInfo(ret.data.docker);
+    renderDockerJob(ret.data.job || {});
+    if ((ret.data.job || {}).is_working === 'run') startDockerActionPolling();
+  }, function(xhr) {
+    if (xhr && xhr.status >= 400) {
+      dockerManagementInfo = null;
+      setDockerActionButtons(false, null);
+      $('#docker_manage_job').removeClass('doctor-env-status-active').text('Docker 상태를 확인하지 못했습니다. Docker 경로와 플러그인 로그를 확인해 주세요.');
+    }
+  }, {global:false, silent:!!silent});
+}
+
+function startDockerAction(action) {
+  if (dockerActionRunning || !dockerManagementReady) return;
+  if (action === 'update' && !dockerUpdateAllowed(dockerManagementInfo)) {
+    notify(
+      dockerManagementInfo && dockerManagementInfo.update_status === 'error'
+        ? 'GHCR 업데이트 확인에 실패해 이미지 업데이트를 시작할 수 없습니다.'
+        : '현재 BookOasis 이미지는 최신 상태입니다.',
+      'warning'
+    );
+    return;
+  }
+  var labels = {
+    restart:'BookOasis 컨테이너만 재시작',
+    apply:'BookOasis Compose 구성만 적용',
+    update:'BookOasis만 업데이트'
+  };
+  var warnings = {
+    restart:'진행 중 BookOasis 웹 서비스가 잠시 중단됩니다. MariaDB와 Redis는 건드리지 않습니다.',
+    apply:'BookOasis 컨테이너만 필요 시 재생성합니다. --no-deps가 적용되어 MariaDB와 Redis는 건드리지 않습니다.',
+    update:'설치 방식을 자동 판별해 BookOasis만 업데이트합니다. MariaDB와 Redis는 건드리지 않습니다.'
+  };
+  if (!confirm((labels[action] || 'Docker 작업') + '을 실행하시겠습니까?\n\n' + (warnings[action] || ''))) return;
+  var confirmation = 'BOOKOASIS_' + String(action || '').toUpperCase();
+  setDockerActionButtons(true, dockerManagementInfo);
+  $('#docker_manage_job').addClass('doctor-env-status-active').text('BookOasis Docker 작업 시작을 요청하고 있습니다.');
+  var logNode = document.getElementById('docker_manage_log');
+  if (logNode) {
+    logNode.hidden = false;
+    logNode.textContent = 'BookOasis Docker 작업을 시작합니다.\n';
+    logNode.scrollTop = logNode.scrollHeight;
+  }
+  bookoasisMateAjax('setting', 'docker_action_start', {
+    docker_action:action,
+    confirm_action:confirmation
+  }, function(ret) {
+    if (!ret.data || !ret.data.started) return;
+    renderDockerJob(ret.data.status || {});
+    startDockerActionPolling();
+  }, function(xhr) {
+    if (xhr && xhr.status >= 400) setDockerActionButtons(false, dockerManagementInfo);
+  }, {global:false});
+}
+
+$('#dependency_refresh').click(function(e) { e.preventDefault(); dependencyRefresh(false); });
+$('#dependency_install_needed').click(function(e) { e.preventDefault(); dependencyInstall('needed'); });
+$('.dependency-install').click(function(e) { e.preventDefault(); dependencyInstall($(this).attr('data-key')); });
+
+$('#docker_status_refresh_btn').click(function(e) { e.preventDefault(); loadDockerStatus(false); });
+$('#docker_restart_btn').click(function(e) { e.preventDefault(); startDockerAction('restart'); });
+$('#docker_apply_btn').click(function(e) { e.preventDefault(); startDockerAction('apply'); });
+$('#docker_update_btn').click(function(e) { e.preventDefault(); startDockerAction('update'); });
+
+var composeEditorState = {
+  compose:{loadedPath:'', canSave:false, running:false},
+  override:{loadedPath:'', canSave:false, running:false}
+};
+
+function composeEditorIds(kind) {
+  var prefix = kind === 'override' ? 'compose_override' : 'compose_file';
+  return {
+    content:'#' + prefix + '_content',
+    path:'#' + prefix + '_path',
+    status:'#' + prefix + '_status',
+    load:'#' + prefix + '_load_btn',
+    save:'#' + prefix + '_save_btn'
+  };
+}
+
+function resetComposeEditor(kind) {
+  var state = composeEditorState[kind];
+  var ids = composeEditorIds(kind);
+  state.loadedPath = '';
+  state.canSave = false;
+  state.running = false;
+  $(ids.content).val('').prop('disabled', true);
+  $(ids.save).prop('disabled', true);
+  $(ids.load).prop('disabled', false);
+  $(ids.path).text('BookOasis Docker 경로를 확인한 뒤 파일을 불러오세요.');
+  $(ids.status).removeClass('doctor-env-status-active').text(
+    kind === 'override'
+      ? '파일이 없으면 불러오기 후 새 Override를 작성할 수 있습니다.'
+      : '기본 Compose 파일을 불러오기 전에는 저장할 수 없습니다.'
+  );
+}
+
+function resetComposeEditors() {
+  resetComposeEditor('compose');
+  resetComposeEditor('override');
+}
+
+function setComposeRunning(kind, running, message) {
+  var state = composeEditorState[kind];
+  var ids = composeEditorIds(kind);
+  state.running = running;
+  $(ids.load).prop('disabled', running);
+  $(ids.save).prop('disabled', running || !state.canSave);
+  $(ids.content).prop('disabled', running || !state.canSave);
+  if (running) $(ids.status).addClass('doctor-env-status-active').text(message || '처리 중입니다.');
+  else $(ids.status).removeClass('doctor-env-status-active');
+}
+
+function loadComposeEditor(kind) {
+  var root = String($('#bookoasis_docker_path').val() || '').trim();
+  if (!root) {
+    notify('BookOasis Docker 경로를 먼저 입력하고 설정을 저장해 주세요.', 'warning');
+    return;
+  }
+  var state = composeEditorState[kind];
+  var ids = composeEditorIds(kind);
+  state.loadedPath = '';
+  state.canSave = false;
+  $(ids.content).val('').prop('disabled', true);
+  setComposeRunning(kind, true, 'Compose 파일을 불러오는 중입니다.');
+  var loaded = false;
+  bookoasisMateAjax('setting', 'compose_load', {compose_kind:kind}, function(ret) {
+    if (ret.ret !== 'success' || !ret.data) return;
+    loaded = true;
+    var data = ret.data;
+    state.loadedPath = data.path || '';
+    state.canSave = !!(data.exists || data.can_create);
+    $(ids.path).text(
+      state.loadedPath
+        ? state.loadedPath + (data.exists ? ' · ' + bookoasisMateBytes(data.size || 0) : ' · 새 파일')
+        : '기본 Compose 파일을 찾지 못했습니다.'
+    );
+    $(ids.content).val(data.content || '');
+    if (!data.exists && !data.can_create) {
+      $(ids.status).text('docker-compose.yml 또는 docker-compose.yaml을 Docker 경로에 먼저 준비해 주세요.');
+    } else if (!data.exists) {
+      $(ids.status).text('새 docker-compose.override.yml 파일을 작성할 수 있습니다.');
+    } else {
+      $(ids.status).text('편집할 수 있습니다. 저장하면 기존 파일을 먼저 백업합니다.');
+    }
+  }, function() {
+    setComposeRunning(kind, false);
+    if (!loaded && !state.loadedPath) $(ids.status).text('Compose 파일을 불러오지 못했습니다. 저장된 Docker 경로와 접근 권한을 확인해 주세요.');
+  }, {global:false});
+}
+
+function saveComposeEditor(kind) {
+  var state = composeEditorState[kind];
+  var ids = composeEditorIds(kind);
+  if (state.running || !state.canSave || !state.loadedPath) return;
+  var label = kind === 'override' ? 'Compose Override' : '기본 Docker Compose';
+  if (!confirm(label + ' 파일을 백업한 뒤 현재 내용으로 저장하시겠습니까?')) return;
+  setComposeRunning(kind, true, 'Compose 파일을 백업하고 저장하는 중입니다.');
+  var saved = false;
+  bookoasisMateAjax('setting', 'compose_save', {
+    compose_kind:kind,
+    compose_content:$(ids.content).val(),
+    confirm_save:'true'
+  }, function(ret) {
+    if (ret.ret !== 'success' || !ret.data) return;
+    saved = true;
+    state.loadedPath = ret.data.path || state.loadedPath;
+    state.canSave = true;
+    var backup = ret.data.backup_path ? ' · 백업 ' + ret.data.backup_path : ' · 새 파일 생성';
+    $(ids.path).text(state.loadedPath + ' · ' + bookoasisMateBytes(ret.data.size || 0));
+    $(ids.status).text('저장 완료' + backup + ' · Docker 적용 작업은 별도로 실행해 주세요.');
+  }, function() {
+    setComposeRunning(kind, false);
+    if (!saved) $(ids.status).text('저장하지 못했습니다. 파일 권한과 플러그인 로그를 확인해 주세요.');
+  }, {global:false});
+}
+
+$('#compose_file_load_btn').click(function(e) { e.preventDefault(); loadComposeEditor('compose'); });
+$('#compose_file_save_btn').click(function(e) { e.preventDefault(); saveComposeEditor('compose'); });
+$('#compose_override_load_btn').click(function(e) { e.preventDefault(); loadComposeEditor('override'); });
+$('#compose_override_save_btn').click(function(e) { e.preventDefault(); saveComposeEditor('override'); });
+
 function showDatabaseDetails(dbType, view) {
   var data = currentSettings() + '&db_type=' + encodeURIComponent(dbType);
   bookoasisMateAjax('setting', 'database_details', data, function(ret) {
@@ -352,6 +942,7 @@ $('#setting_save_btn').click(function(e) {
   e.preventDefault();
   $.ajax({url:'/' + PACKAGE_NAME + '/ajax/setting_save', type:'POST', data:currentSettings(), dataType:'json', success:function(ret) {
     notify(ret ? '설정을 저장했습니다.' : '설정 저장에 실패했습니다.', ret ? 'success' : 'warning');
+    if (ret) loadDockerStatus(true);
   }});
 });
 

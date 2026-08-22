@@ -14,10 +14,13 @@
 - Kavita 및 BookOasis 공유 패키지 통DB 이관.
 - BookOasis 커스텀 폰트 업로드와 설치 상태 확인.
 - GitHub·비공개 Gitea 카탈로그를 포함한 BookOasis 네이티브 플러그인 설치·업데이트·삭제 관리.
+- BookOasis `.env`·Docker Compose 안전 편집과 BookOasis 단일 서비스 Docker 재시작·구성 적용·업데이트 관리.
+- GHCR 이미지 업데이트 감지, Docker 작업 실시간 로그와 Ubuntu·Synology 호스트 Docker 자동 호환.
+- 설정 화면에서 MariaDB 필수 구성요소 상태 확인 및 필요한 패키지만 선택 설치.
 
 ## DB 엔진 설정
 
-- BookOasis v1.8 계열은 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
+- BookOasis Mate v1.9.0은 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
 - MariaDB 모드는 `PyMySQL 1.1` 이상이 필요하며 호스트·포트·사용자·비밀번호·DB 접두어를 입력합니다.
 - 자동 감지는 FF의 `DB_ENGINE`, `DBMS` 환경변수와 MariaDB 설정을 확인합니다. 연결 실패 시 남아 있는 SQLite 파일로 자동 전환하지 않습니다.
 - 상태 요약, 문제 도서, 스캔 상태, 시리즈 누락, 표지 검사, 고아 표지 정리, Google Drive 연동과 읽기 전용 SQL은 두 엔진을 지원합니다.
@@ -27,6 +30,22 @@
 - SQLite와 MariaDB 통DB 패키지는 서로 교차 복원할 수 없습니다.
 
 ## Changelog
+
+- v1.9.0 (2026-08-22)
+  - BookOasis Docker 운영 기능 추가
+    - `.env`, 기본 Docker Compose와 Compose Override를 설정에서 백업 후 안전하게 편집하도록 추가.
+    - `bookoasis` 서비스만 대상으로 재시작·구성 적용·이미지 업데이트·소스 Build 업데이트를 실행하고 `--no-deps`와 대상 컨테이너 검증을 강제.
+    - GHCR Registry API로 현재 이미지와 `stable` digest·버전을 비교해 실제 업데이트가 있을 때만 이미지 업데이트를 허용.
+    - Docker CLI·Compose·Git 경로와 `linux/amd64`·`linux/arm64` 플랫폼을 자동 탐지해 Ubuntu와 Synology Container Manager 환경을 함께 지원.
+    - Docker 작업 stdout/stderr를 제한된 tail 버퍼로 실시간 표시해 pull·build·재생성 진행 상태를 작업 중 바로 확인.
+  - 설정 및 배포 UX 개선
+    - MariaDB 필수 구성요소 설치 UI를 `설정 → DB 연결`로 이동하고 이미 사용 가능한 패키지는 건드리지 않는 `필요 패키지 설치` 흐름 추가.
+    - DB 연결 영역을 최대폭으로 제한하고 일반·성인·오디오북·비디오 DB 카드를 데스크톱 4열, 중간 화면 2열, 모바일 1열로 정리.
+    - Mate 현재 버전·GitHub 업데이트 여부와 README 기반 Changelog를 설정/매뉴얼 화면에서 확인하도록 추가.
+  - 보안·안정성 강화
+    - 읽기 전용 SQL에서 `INTO OUTFILE`·`DUMPFILE`을 차단하고 민감 임시 설정 파일 권한, HTTP 응답 크기와 Docker 명령 출력 메모리 상한을 강화.
+    - `.env` 백업을 제한 권한·최근 5개 보관으로 정리하고 GitHub 탐색의 일시적 408/5xx 재시도와 진단 추적 정보를 추가.
+    - 플러그인 자동 업데이트 스케줄러의 Flask application context 오류를 수정하고 Synology의 `/volume*` 호스트 경로를 `/host` 마운트 아래로 안전하게 매핑.
 
 - v1.8.2 (2026-08-21)
   - 플러그인 관리 설정에서 경로 선택 버튼을 누르면 폼이 제출되어 다른 탭으로 이동하던 문제 수정.

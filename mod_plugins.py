@@ -10,6 +10,7 @@ from .setup import *
 
 
 class ModulePlugins(PluginModuleBase):
+    TRACE_COMMANDS = {"catalog", "discovery_refresh", "discovery_status"}
     def __init__(self, plugin):
         super().__init__(
             plugin,
@@ -36,7 +37,17 @@ class ModulePlugins(PluginModuleBase):
         self.manager = BookOasisPluginManager(P.logger)
 
     def _settings(self):
-        return P.ModelSetting.to_dict()
+        keys = (
+            "bookoasis_root_path",
+            *self.db_default.keys(),
+        )
+        settings = {"package_name": P.package_name}
+        for key in keys:
+            value = P.ModelSetting.get(key)
+            if value is None and key in self.db_default:
+                value = self.db_default[key]
+            settings[key] = value
+        return settings
 
     def _catalog_overview(self, settings, refresh_remote=False):
         catalog_items = self.manager.catalog(
@@ -175,9 +186,16 @@ class ModulePlugins(PluginModuleBase):
     def process_ajax(self, command, req):
         started = time.monotonic()
         safe_command = str(command or "").replace("\r", " ").replace("\n", " ")[:80]
+        trace_id = self.manager.normalize_trace_id(req.form.get("trace_id"))
+        if command in self.TRACE_COMMANDS and not trace_id:
+            trace_id = f"srv-{time.time_ns():x}"[:64]
         P.logger.debug(
             f"[BookOasisMate] 플러그인 관리 AJAX 시작 command={safe_command}"
         )
+        if command in self.TRACE_COMMANDS:
+            P.logger.info(
+                f"[BookOasisMate][trace={trace_id}] AJAX 진단 시작 command={safe_command}"
+            )
         try:
             settings = self._settings()
             if command == "manager_settings_save":
@@ -326,7 +344,14 @@ class ModulePlugins(PluginModuleBase):
             if command == "discovery":
                 return jsonify({"ret": "success", "data": self.manager.discovery(settings)})
             if command == "discovery_refresh":
-                return jsonify({"ret": "success", "data": self.manager.start_discovery_refresh(settings)})
+                return jsonify(
+                    {
+                        "ret": "success",
+                        "data": self.manager.start_discovery_refresh(
+                            settings, trace_id=trace_id
+                        ),
+                    }
+                )
             if command == "discovery_status":
                 return jsonify({"ret": "success", "data": self.manager.discovery_status()})
             if command == "installed_delete":
@@ -479,3 +504,8 @@ class ModulePlugins(PluginModuleBase):
             P.logger.debug(
                 f"[BookOasisMate] 플러그인 관리 AJAX 종료 command={safe_command} duration_ms={duration_ms}"
             )
+            if command in self.TRACE_COMMANDS:
+                P.logger.info(
+                    f"[BookOasisMate][trace={trace_id}] AJAX 진단 종료 "
+                    f"command={safe_command} duration_ms={duration_ms}"
+                )

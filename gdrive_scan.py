@@ -12,6 +12,16 @@ except ImportError:
     from bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
 
 
+RCLONE_JSON_MAX_BYTES = 1024 * 1024
+
+
+def _read_rclone_json(response, max_bytes=RCLONE_JSON_MAX_BYTES):
+    payload = response.read(max_bytes + 1)
+    if len(payload) > max_bytes:
+        raise ValueError(f"rclone RC 응답 크기가 허용 한도 {max_bytes}바이트를 초과했습니다.")
+    return json.loads(payload.decode("utf-8") or "{}")
+
+
 SUPPORTED_ACTIONS = {
     "create",
     "edit",
@@ -368,7 +378,7 @@ class RcloneRcClient:
             )
         try:
             with self._opener(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8") or "{}")
+                payload = _read_rclone_json(response)
             if payload.get("error"):
                 raise RuntimeError(str(payload["error"]))
             return payload

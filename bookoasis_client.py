@@ -9,6 +9,17 @@ from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 
 
+MAX_JSON_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_ERROR_RESPONSE_BYTES = 64 * 1024
+
+
+def _read_json_response(response, max_bytes=MAX_JSON_RESPONSE_BYTES):
+    payload = response.read(max_bytes + 1)
+    if len(payload) > max_bytes:
+        raise ValueError(f"BookOasis JSON 응답 크기가 허용 한도 {max_bytes}바이트를 초과했습니다.")
+    return json.loads(payload.decode("utf-8"))
+
+
 class BookOasisClient:
     """BookOasis 공개 API와 관리자 세션 API를 호출합니다."""
 
@@ -27,14 +38,14 @@ class BookOasisClient:
     @staticmethod
     def _http_error_message(error):
         try:
-            payload = json.loads(error.read().decode("utf-8"))
+            payload = _read_json_response(error, MAX_ERROR_RESPONSE_BYTES)
             return payload.get("error") or payload.get("message") or f"HTTP 오류 {error.code}"
         except (AttributeError, ValueError, OSError):
             return f"HTTP 오류 {error.code}"
 
     @staticmethod
     def _response_payload(response):
-        return json.loads(response.read().decode("utf-8"))
+        return _read_json_response(response)
 
     def _admin_error(self, message, http_status=None, retryable=False):
         data = {"success": False, "message": str(message or "BookOasis 관리자 API 요청에 실패했습니다.")}
@@ -366,7 +377,7 @@ class BookOasisClient:
         request = Request(url, headers={"Accept": "application/json"})
         try:
             with urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+                payload = self._response_payload(response)
             healthy = payload.get("status") == "healthy"
             return {
                 "success": healthy,
@@ -405,7 +416,7 @@ class BookOasisClient:
         request = Request(url, data=data, headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"})
         try:
             with urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+                payload = self._response_payload(response)
             return {
                 "success": bool(payload.get("success")),
                 "already_queued": bool(payload.get("already_queued")),
