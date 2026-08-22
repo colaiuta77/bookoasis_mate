@@ -407,7 +407,7 @@ class BookOasisDatabaseAdapter:
         prefix = str(
             self.settings.get("mariadb_database_prefix") or "media_"
         ).strip()
-        return f"{prefix}{db_type}"
+        return validate_identifier(f"{prefix}{db_type}")
 
     def target(self, db_type, label, path=""):
         db_type = normalize_db_type(db_type)

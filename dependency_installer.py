@@ -15,7 +15,7 @@ class DependencyInstallerError(RuntimeError):
 
 
 class DependencyInstaller:
-    PIP_SPEC = "PyMySQL>=1.1"
+    PIP_SPEC = "PyMySQL>=1.1,<2"
     MAX_OUTPUT = 12000
     INSTALL_TIMEOUT = 900
 
@@ -69,7 +69,8 @@ class DependencyInstaller:
         except Exception:
             version = ""
         installed = bool(version)
-        ready = installed and self._version_tuple(version) >= (1, 1)
+        version_tuple = self._version_tuple(version)
+        ready = installed and (1, 1) <= version_tuple < (2,)
         return {
             "key": "pymysql",
             "name": "PyMySQL",
@@ -77,7 +78,7 @@ class DependencyInstaller:
             "installed": installed,
             "ready": ready,
             "version": version,
-            "message": "" if ready else ("1.1 이상으로 업데이트가 필요합니다." if installed else "설치되지 않았습니다."),
+            "message": "" if ready else ("1.1 이상 2.0 미만 버전이 필요합니다." if installed else "설치되지 않았습니다."),
         }
 
     def _client_package_status(self):
@@ -152,6 +153,22 @@ class DependencyInstaller:
         if key == "all":
             commands = self.install_commands("pymysql")
             commands.extend(self.install_commands("mariadb-client"))
+            return commands
+        if key == "needed":
+            package_status = {
+                "pymysql": self._python_package_status(),
+                "mariadb-client": self._client_package_status(),
+            }
+            needed = [
+                package_key
+                for package_key, item in package_status.items()
+                if not item.get("ready")
+            ]
+            if not needed:
+                raise DependencyInstallerError("MariaDB 필수 구성요소가 이미 모두 사용 가능합니다.")
+            commands = []
+            for package_key in needed:
+                commands.extend(self.install_commands(package_key))
             return commands
         raise DependencyInstallerError("지원하지 않는 패키지 설치 요청입니다.")
 

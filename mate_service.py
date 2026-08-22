@@ -47,6 +47,7 @@ from .statistics_cache import (
 )
 from .mate_engine import BookOasisMateEngine, _as_bool, _as_int
 from .font_manager import CustomFontManager
+from .docker_manager import BookOasisDockerManager
 
 
 GAP_CACHE_SECONDS = 300
@@ -212,6 +213,10 @@ class BookOasisMateService:
         self._database_migration_stop_path = None
         self._database_migration_started_monotonic = None
         self._database_migration_status = self._empty_migration_status()
+        self._docker_manager = BookOasisDockerManager(
+            logger=self.P.logger,
+            spawn=self._spawn_background,
+        )
 
     @staticmethod
     def _background_alive(handle):
@@ -390,6 +395,7 @@ class BookOasisMateService:
         values = {
             "db_engine": model.get("db_engine") or "sqlite",
             "bookoasis_root_path": model.get("bookoasis_root_path"),
+            "bookoasis_docker_path": model.get("bookoasis_docker_path"),
             "general_db_path": model.get("general_db_path"),
             "adult_enabled": model.get_bool("adult_enabled"),
             "adult_db_path": model.get("adult_db_path"),
@@ -430,6 +436,7 @@ class BookOasisMateService:
         }
         root = infer_bookoasis_root(values)
         values["bookoasis_root_path"] = root
+        values["bookoasis_docker_path"] = str(values.get("bookoasis_docker_path") or root or "").strip()
         if root:
             derived = derive_bookoasis_paths(root)
             if values["cover_root_custom"]:
@@ -442,6 +449,7 @@ class BookOasisMateService:
         settings = {
             "db_engine": str(values.get("db_engine") or "sqlite").strip().lower(),
             "bookoasis_root_path": str(values.get("bookoasis_root_path") or "").strip(),
+            "bookoasis_docker_path": str(values.get("bookoasis_docker_path") or "").strip(),
             "general_db_path": values.get("general_db_path"),
             "adult_enabled": _as_bool(values.get("adult_enabled"), False),
             "adult_db_path": values.get("adult_db_path"),
@@ -485,12 +493,33 @@ class BookOasisMateService:
         }
         root = infer_bookoasis_root(settings)
         settings["bookoasis_root_path"] = root
+        settings["bookoasis_docker_path"] = str(settings.get("bookoasis_docker_path") or root or "").strip()
         if root:
             derived = derive_bookoasis_paths(root)
             if settings["cover_root_custom"]:
                 derived.pop("cover_root_path", None)
             settings.update(derived)
         return settings
+
+    def _docker_root(self):
+        settings = self.settings()
+        return settings.get("bookoasis_docker_path") or settings.get("bookoasis_root_path")
+
+    def docker_status(self):
+        return {
+            "docker": self._docker_manager.inspect(self._docker_root()),
+            "job": self._docker_manager.job_status(),
+        }
+
+    def start_docker_action(self, action, confirmation):
+        return self._docker_manager.start(
+            self._docker_root(),
+            action,
+            confirmation,
+        )
+
+    def docker_action_status(self):
+        return self._docker_manager.job_status()
 
     def engine(self, settings=None):
         return BookOasisMateEngine(settings or self.settings())
@@ -2527,9 +2556,11 @@ class BookOasisMateService:
         paths["config"].parent.mkdir(parents=True, exist_ok=True)
         if paths["stop"].exists():
             paths["stop"].unlink()
-        self._write_database_migration_json(paths["config"], config)
-        if sensitive_config and os.name != "nt":
-            os.chmod(paths["config"], 0o600)
+        self._write_database_migration_json(
+            paths["config"],
+            config,
+            mode=0o600 if sensitive_config else None,
+        )
         self._write_database_migration_json(paths["status"], initial_status)
         worker_script = Path(__file__).with_name("maintenance_worker.py")
         command = [
@@ -3415,17 +3446,35 @@ class BookOasisMateService:
         }
 
     @staticmethod
-    def _write_database_migration_json(path, data):
+    def _write_database_migration_json(path, data, mode=None):
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.with_name(
-            f".{target.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+            f".{target.name}.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}.tmp"
         )
-        with temporary.open("w", encoding="utf-8") as handle:
-            json.dump(data, handle, ensure_ascii=False)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(str(temporary), str(target))
+        try:
+            if mode is not None and os.name != "nt":
+                descriptor = os.open(
+                    str(temporary),
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    int(mode),
+                )
+                handle_context = os.fdopen(descriptor, "w", encoding="utf-8")
+            else:
+                handle_context = temporary.open("w", encoding="utf-8")
+            with handle_context as handle:
+                json.dump(data, handle, ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if mode is not None and os.name != "nt":
+                os.chmod(temporary, int(mode))
+            os.replace(str(temporary), str(target))
+        finally:
+            if temporary.exists():
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
 
     @staticmethod
     def _read_database_migration_json(path):
@@ -3535,9 +3584,8 @@ class BookOasisMateService:
         self._write_database_migration_json(
             paths["config"],
             worker_config,
+            mode=0o600,
         )
-        if os.name != "nt":
-            os.chmod(paths["config"], 0o600)
         self._write_database_migration_json(
             paths["status"],
             self._database_migration_status,

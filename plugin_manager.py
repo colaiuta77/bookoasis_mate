@@ -302,7 +302,15 @@ class BookOasisPluginManager:
         self._stop_event = threading.Event()
         self._prepared = {}
         self._discovery = GitHubPluginDiscovery()
-        self._discovery_job = {"status": "idle", "message": "", "error": "", "started_at": "", "finished_at": ""}
+        self._discovery_job = {
+            "status": "idle",
+            "message": "",
+            "error": "",
+            "started_at": "",
+            "finished_at": "",
+            "trace_id": "",
+            "duration_ms": 0,
+        }
         self._installed_update_job = {
             "status": "idle",
             "message": "",
@@ -313,6 +321,13 @@ class BookOasisPluginManager:
             "checked": 0,
             "failed": 0,
         }
+
+    @staticmethod
+    def normalize_trace_id(value):
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        return re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._-")[:64]
 
     @staticmethod
     def _as_int(value, default, minimum, maximum):
@@ -792,7 +807,8 @@ class BookOasisPluginManager:
         with self._lock:
             return copy.deepcopy(self._discovery_job)
 
-    def start_discovery_refresh(self, settings):
+    def start_discovery_refresh(self, settings, trace_id=""):
+        trace_id = self.normalize_trace_id(trace_id)
         with self._lock:
             if self._discovery_job.get("status") == "running":
                 return copy.deepcopy(self._discovery_job)
@@ -802,23 +818,45 @@ class BookOasisPluginManager:
                 "error": "",
                 "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "finished_at": "",
+                "trace_id": trace_id,
+                "duration_ms": 0,
             }
         snapshot = dict(settings or {})
+        if self.logger:
+            topics = self.normalized_settings(snapshot)["discovery_topics"]
+            self.logger.info(
+                f"[BookOasisMate][trace={trace_id or '-'}] discovery 시작 topics={','.join(topics)}"
+            )
         threading.Thread(
             target=self._run_discovery_refresh,
-            args=(snapshot,),
+            args=(snapshot, trace_id),
             name="bookoasis-plugin-discovery",
             daemon=True,
         ).start()
         return self.discovery_status()
 
-    def _run_discovery_refresh(self, settings):
+    def _run_discovery_refresh(self, settings, trace_id=""):
+        started = time.monotonic()
+        trace_id = self.normalize_trace_id(trace_id)
         try:
             normalized = self.normalized_settings(settings)
+            github_started = time.monotonic()
             payload = self._discovery.discover(normalized["discovery_topics"])
             items = list(payload.get("items") or [])
+            if self.logger:
+                self.logger.info(
+                    f"[BookOasisMate][trace={trace_id or '-'}] discovery GitHub 완료 "
+                    f"duration_ms={round((time.monotonic() - github_started) * 1000)} count={len(items)}"
+                )
             if any(server["enabled"] and server["token"] for server in normalized["gitea_servers"]):
-                items.extend(self._discover_gitea(settings, normalized["discovery_topics"]))
+                gitea_started = time.monotonic()
+                gitea_items = self._discover_gitea(settings, normalized["discovery_topics"])
+                items.extend(gitea_items)
+                if self.logger:
+                    self.logger.info(
+                        f"[BookOasisMate][trace={trace_id or '-'}] discovery Gitea 완료 "
+                        f"duration_ms={round((time.monotonic() - gitea_started) * 1000)} count={len(gitea_items)}"
+                    )
             payload["items"] = items
             now = time.time()
             payload.update({
@@ -826,20 +864,36 @@ class BookOasisPluginManager:
                 "fetched_at_epoch": now,
             })
             self._discovery.write_cache(self._discovery_cache_path(settings, create=True), payload)
+            duration_ms = round((time.monotonic() - started) * 1000)
             with self._lock:
                 self._discovery_job.update({
                     "status": "completed",
                     "message": f"GitHub·Gitea 플러그인 {len(items)}개를 확인했습니다.",
                     "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "trace_id": trace_id,
+                    "duration_ms": duration_ms,
                 })
+            if self.logger:
+                self.logger.info(
+                    f"[BookOasisMate][trace={trace_id or '-'}] discovery 완료 "
+                    f"duration_ms={duration_ms} count={len(items)}"
+                )
         except Exception as error:
+            duration_ms = round((time.monotonic() - started) * 1000)
             with self._lock:
                 self._discovery_job.update({
                     "status": "failed",
                     "message": "GitHub·Gitea Topic 발견 작업에 실패했습니다.",
                     "error": str(error)[:500],
                     "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "trace_id": trace_id,
+                    "duration_ms": duration_ms,
                 })
+            if self.logger:
+                self.logger.error(
+                    f"[BookOasisMate][trace={trace_id or '-'}] discovery 실패 "
+                    f"duration_ms={duration_ms} error={type(error).__name__}: {str(error)[:240]}"
+                )
 
     def _discover_gitea(self, settings, topics):
         items = []

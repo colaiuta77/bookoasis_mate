@@ -168,6 +168,7 @@
 var pluginManagerPollTimer = null;
 var pluginManagerInspectJobId = '';
 var pluginDiscoveryPollTimer = null;
+var pluginDiscoveryTraceId = '';
 var pluginInstalledUpdatePollTimer = null;
 var pluginInstalledUpdatePollFailures = 0;
 var pluginRuntimeItems = {};
@@ -180,6 +181,22 @@ var pluginManagerRepositoryIcons = {
 
 function pluginManagerText(tag, className, value) {
   return bookoasisMateText(tag, className, value);
+}
+
+function pluginManagerNewTraceId() {
+  return 'topic-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+function pluginManagerDiagnosticError(command, traceId, xhr) {
+  var status = Number((xhr || {}).status || 0);
+  var statusText = String((xhr || {}).statusText || '').trim();
+  var detail = 'Topic 요청 실패 · ' + command + ' · HTTP ' + (status || 'N/A');
+  if (statusText) detail += ' ' + statusText;
+  if (traceId) detail += ' · trace ' + traceId;
+  $('#plugin_catalog_status').removeClass('doctor-query-status-active').text(detail);
+  if (window.console && console.error) {
+    console.error('[BookOasisMate][trace=' + (traceId || '-') + '] ' + command + ' failed', xhr);
+  }
 }
 
 function pluginManagerSyncGiteaSelects() {
@@ -295,17 +312,23 @@ function pluginManagerRenderCards(targetId, items, catalogMode) {
   });
 }
 
-function pluginManagerLoadCatalog() {
+function pluginManagerLoadCatalog(traceId) {
+  traceId = traceId || '';
   $('#plugin_catalog_status').addClass('doctor-query-status-active').text('카탈로그 불러오는 중');
-  bookoasisMateAjax('plugins', 'catalog', {refresh_remote:'false'}, function(ret) {
+  bookoasisMateAjax('plugins', 'catalog', {refresh_remote:'false', trace_id:traceId}, function(ret) {
     var payload = ret.data || {};
     pluginManagerRenderCards('plugin_catalog', payload.items || [], true);
     var message = '미설치 플러그인 ' + Number((payload.items || []).length).toLocaleString() + '개';
     if (payload.topic_count) message += ' · Topic 신규 ' + Number(payload.topic_count).toLocaleString() + '개';
     if (payload.fetched_at) message += ' · Topic 캐시 ' + payload.fetched_at;
     if (payload.stale) message += ' · Topic 갱신 필요';
+    if (traceId) message += ' · trace ' + traceId;
     $('#plugin_catalog_status').removeClass('doctor-query-status-active').text(message);
-  }, function() { $('#plugin_catalog_status').removeClass('doctor-query-status-active'); }, {global:false});
+  }, function() { $('#plugin_catalog_status').removeClass('doctor-query-status-active'); }, {
+    global:false,
+    silent:true,
+    error:function(xhr) { pluginManagerDiagnosticError('catalog', traceId, xhr); }
+  });
 }
 
 function pluginManagerLoadInstalled(autoCheck) {
@@ -325,29 +348,38 @@ function pluginManagerStopDiscoveryPolling() {
 }
 
 function pluginManagerDiscoveryStatus() {
-  bookoasisMateAjax('plugins', 'discovery_status', {}, function(ret) {
+  var traceId = pluginDiscoveryTraceId || '';
+  bookoasisMateAjax('plugins', 'discovery_status', {trace_id:traceId}, function(ret) {
     var job = ret.data || {};
-    if (job.status === 'running') { $('#plugin_catalog_status').addClass('doctor-query-status-active').text(job.message || 'GitHub Topic 탐색 중'); return; }
+    if (job.trace_id) pluginDiscoveryTraceId = job.trace_id;
+    if (job.status === 'running') { $('#plugin_catalog_status').addClass('doctor-query-status-active').text((job.message || 'GitHub Topic 탐색 중') + (pluginDiscoveryTraceId ? ' · trace ' + pluginDiscoveryTraceId : '')); return; }
     pluginManagerStopDiscoveryPolling();
-    if (job.status === 'failed') { $('#plugin_catalog_status').removeClass('doctor-query-status-active').text(job.error || 'Topic 탐색에 실패했습니다.'); return; }
-    pluginManagerLoadCatalog();
+    if (job.status === 'failed') { $('#plugin_catalog_status').removeClass('doctor-query-status-active').text((job.error || 'Topic 탐색에 실패했습니다.') + (pluginDiscoveryTraceId ? ' · trace ' + pluginDiscoveryTraceId : '')); return; }
+    pluginManagerLoadCatalog(pluginDiscoveryTraceId);
   }, null, {
     global:false,
     silent:true,
-    error:function() {
+    error:function(xhr) {
       pluginManagerStopDiscoveryPolling();
-      $('#plugin_catalog_status').removeClass('doctor-query-status-active').text('Topic 탐색 상태 조회에 실패했습니다.');
+      pluginManagerDiagnosticError('discovery_status', traceId, xhr);
     }
   });
 }
 
 function pluginManagerStartDiscoveryRefresh() {
-  $('#plugin_catalog_status').addClass('doctor-query-status-active').text('GitHub Topic 탐색을 시작하는 중');
-  bookoasisMateAjax('plugins', 'discovery_refresh', {}, function(ret) {
+  pluginDiscoveryTraceId = pluginManagerNewTraceId();
+  var traceId = pluginDiscoveryTraceId;
+  $('#plugin_catalog_status').addClass('doctor-query-status-active').text('GitHub Topic 탐색을 시작하는 중 · trace ' + traceId);
+  bookoasisMateAjax('plugins', 'discovery_refresh', {trace_id:traceId}, function(ret) {
     var job = ret.data || {};
-    if (job.status === 'failed') { $('#plugin_catalog_status').removeClass('doctor-query-status-active').text(job.error || 'Topic 탐색을 시작하지 못했습니다.'); return; }
+    if (job.trace_id) pluginDiscoveryTraceId = job.trace_id;
+    if (job.status === 'failed') { $('#plugin_catalog_status').removeClass('doctor-query-status-active').text((job.error || 'Topic 탐색을 시작하지 못했습니다.') + ' · trace ' + pluginDiscoveryTraceId); return; }
     if (!pluginDiscoveryPollTimer) pluginDiscoveryPollTimer = setInterval(pluginManagerDiscoveryStatus, 1000);
     pluginManagerDiscoveryStatus();
+  }, null, {
+    global:false,
+    silent:true,
+    error:function(xhr) { pluginManagerDiagnosticError('discovery_refresh', traceId, xhr); }
   });
 }
 

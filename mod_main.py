@@ -16,6 +16,7 @@ class ModuleMain(PluginModuleBase):
         self.db_default = {
             "db_engine": "sqlite",
             "bookoasis_root_path": "",
+            "bookoasis_docker_path": "",
             "general_db_path": "/bookoasis-db/media_general.db",
             "adult_enabled": "False",
             "adult_db_path": "/bookoasis-db/media_adult.db",

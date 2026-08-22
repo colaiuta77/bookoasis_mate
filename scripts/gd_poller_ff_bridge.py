@@ -9,6 +9,14 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_URL = "http://127.0.0.1:9999/bookoasis_mate/api/gdrive_scan/event"
+MAX_RESPONSE_BYTES = 1024 * 1024
+
+
+def _read_json_response(response, max_bytes=MAX_RESPONSE_BYTES):
+    payload = response.read(max_bytes + 1)
+    if len(payload) > max_bytes:
+        raise ValueError(f"FlaskFarm 응답 크기가 허용 한도 {max_bytes}바이트를 초과했습니다.")
+    return json.loads(payload.decode("utf-8") or "{}")
 
 
 def build_parser():
@@ -57,12 +65,10 @@ def post_event(url, apikey, action, item_type, path, removed_path="", timeout=10
     )
     try:
         with urlopen(request, timeout=max(1, min(int(timeout or 10), 60))) as response:
-            body = response.read().decode("utf-8")
-            result = json.loads(body or "{}")
+            result = _read_json_response(response)
     except HTTPError as error:
         try:
-            body = error.read().decode("utf-8")
-            result = json.loads(body or "{}")
+            result = _read_json_response(error)
             message = result.get("msg") or result.get("message")
         except (ValueError, OSError):
             message = None
