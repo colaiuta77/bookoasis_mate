@@ -855,9 +855,9 @@ function refreshComposeOptions(silent) {
     var baseCount = (data.base_existing || []).length;
     var overrideCount = (data.override_existing || []).length;
     $('#compose_options_status').text('기본 Compose ' + baseCount + '개 · Override ' + overrideCount + '개 확인 · 선택 변경 후 설정 저장 필요');
-  }, function() {
+  }, null, {global:false, silent:!!silent, error:function() {
     $('#compose_options_status').text('Compose 목록을 확인하지 못했습니다. Docker 경로와 접근 권한을 확인해 주세요.');
-  }, {global:false, silent:!!silent});
+  }});
 }
 
 $('#compose_options_refresh_btn').click(function(e) { e.preventDefault(); refreshComposeOptions(false); });
