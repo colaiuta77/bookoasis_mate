@@ -504,9 +504,12 @@
   align-items:start;
   margin:0 0 16px;
 }
-.doctor-compose-setting-row > label { margin:0; padding-top:8px; font-weight:600; }
+.doctor-compose-setting-row > label { margin:0; padding-top:5px; font-weight:600; }
 .doctor-compose-setting-control { min-width:0; }
-.doctor-compose-setting-control .input-group, .doctor-compose-setting-control .form-control { width:100%; }
+.doctor-compose-setting-control .form-control { width:100%; }
+.doctor-compose-path-line { display:flex; flex-wrap:nowrap; align-items:stretch; width:100%; }
+.doctor-compose-path-line .form-control { flex:1 1 auto; min-width:0; width:1%; }
+.doctor-compose-path-actions { flex:0 0 auto; margin-left:5px; }
 @media (max-width: 768px) {
   .doctor-compose-setting-row { grid-template-columns:1fr; gap:5px; }
   .doctor-compose-setting-row > label { padding-top:0; }

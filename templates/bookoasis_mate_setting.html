@@ -1,7 +1,7 @@
 {# BookOasis 연결·DB·진단 설정을 기능별 탭으로 제공합니다. #}
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=compose-editor-1">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=compose-host-2">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 <div class="doctor-setting-toolbar">
@@ -196,9 +196,11 @@
         <div class="doctor-compose-setting-row">
           <label for="bookoasis_docker_path">BookOasis Docker 경로</label>
           <div class="doctor-compose-setting-control">
-            <div class="input-group">
-              <input id="bookoasis_docker_path" name="bookoasis_docker_path" type="text" class="form-control" value="{{ arg.get('bookoasis_docker_path') or arg.get('bookoasis_root_path', '') }}">
-              <div class="input-group-append"><button id="select_bookoasis_docker_path_btn" type="button" class="btn btn-outline-secondary">경로 선택</button></div>
+            <div class="doctor-compose-path-line">
+              <input id="bookoasis_docker_path" name="bookoasis_docker_path" type="text" class="form-control form-control-sm" value="{{ arg.get('bookoasis_docker_path') or arg.get('bookoasis_root_path', '') }}">
+              <div class="btn-group btn-group-sm doctor-compose-path-actions" role="group">
+                <button id="select_bookoasis_docker_path_btn" type="button" class="btn btn-sm btn-outline-primary">경로 선택</button>
+              </div>
             </div>
             <small class="form-text text-muted">FF 컨테이너에서 보이는 Docker Compose 파일 디렉터리입니다. 비워 두면 BookOasis 기본 경로를 사용하며 공식 docker-compose.yml/build/ghcr/mariadb/mariadb.ghcr 파일을 자동 탐지합니다.</small>
           </div>
@@ -206,7 +208,7 @@
         <div class="doctor-compose-setting-row">
           <label for="bookoasis_compose_file">기본 Compose</label>
           <div class="doctor-compose-setting-control">
-            <select id="bookoasis_compose_file" name="bookoasis_compose_file" class="form-control" data-selected="{{ compose_selected }}">
+            <select id="bookoasis_compose_file" name="bookoasis_compose_file" class="form-control form-control-sm" data-selected="{{ compose_selected }}">
               <option value="auto" {% if compose_selected == 'auto' %}selected{% endif %}>자동 감지 (실행 중 컨테이너 label 우선)</option>
               {% if compose_selected != 'auto' %}<option value="{{ compose_selected }}" selected>{{ compose_selected }}</option>{% endif %}
             </select>
@@ -216,7 +218,7 @@
         <div class="doctor-compose-setting-row">
           <label for="bookoasis_override_file">Compose Override</label>
           <div class="doctor-compose-setting-control">
-            <select id="bookoasis_override_file" name="bookoasis_override_file" class="form-control" data-selected="{{ override_selected }}">
+            <select id="bookoasis_override_file" name="bookoasis_override_file" class="form-control form-control-sm" data-selected="{{ override_selected }}">
               <option value="auto" {% if override_selected == 'auto' %}selected{% endif %}>자동 감지 (실행 중 컨테이너 label 우선)</option>
               <option value="none" {% if override_selected == 'none' %}selected{% endif %}>사용 안 함</option>
               {% if override_selected not in ('auto', 'none') %}<option value="{{ override_selected }}" selected>{{ override_selected }}</option>{% endif %}

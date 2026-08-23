@@ -30,6 +30,16 @@ DOCKER_CLI_CANDIDATES = (
     "/usr/local/bin/docker",
     "/var/packages/ContainerManager/target/usr/bin/docker",
 )
+COMPOSE_CLI_CANDIDATES = (
+    "/usr/libexec/docker/cli-plugins/docker-compose",
+    "/usr/lib/docker/cli-plugins/docker-compose",
+    "/usr/local/lib/docker/cli-plugins/docker-compose",
+    "/usr/local/libexec/docker/cli-plugins/docker-compose",
+    "/var/packages/ContainerManager/target/usr/libexec/docker/cli-plugins/docker-compose",
+    "/var/packages/ContainerManager/target/usr/lib/docker/cli-plugins/docker-compose",
+    "/usr/bin/docker-compose",
+    "/usr/local/bin/docker-compose",
+)
 GIT_CLI_CANDIDATES = ("/usr/bin/git", "/usr/local/bin/git")
 OCI_INDEX_ACCEPT = ", ".join((
     "application/vnd.oci.image.index.v1+json",
@@ -535,10 +545,26 @@ class BookOasisDockerManager:
         match = re.search(r"(?:version\s+)?(v?\d+(?:\.\d+)+(?:[-+._A-Za-z0-9]*)?)", str(text or ""), re.I)
         return match.group(1) if match else str(text or "").strip()
 
+    @staticmethod
+    def _version_major(text):
+        match = re.search(r"(?:^|[^0-9])v?(\d+)(?:\.|$)", str(text or ""), re.I)
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _probe_detail(result, limit=260):
+        stderr = str(getattr(result, "stderr", "") or "").strip()
+        stdout = str(getattr(result, "output", "") or "").strip()
+        detail = stderr or stdout
+        detail = " ".join(detail.split())
+        if len(detail) > int(limit):
+            detail = detail[-int(limit):]
+        return detail
+
     def _ensure_docker_cli(self):
         if self._docker_cli_info is not None:
             return self._docker_cli_info
         errors = []
+        working_docker = None
         for candidate in self._candidate_list(self._docker_bin_hint, DOCKER_CLI_CANDIDATES):
             version_argv = [
                 self.chroot_bin, str(self.host_mount), candidate,
@@ -546,15 +572,20 @@ class BookOasisDockerManager:
             ]
             version_result = self.runner.run(version_argv, timeout=15)
             if version_result.returncode != 0:
-                errors.append(f"{candidate}: docker version 실패")
+                detail = self._probe_detail(version_result)
+                errors.append(f"{candidate}: docker version 실패" + (f" ({detail})" if detail else ""))
                 continue
             values = str(version_result.output or "").strip().split("|", 1)
             client_version = values[0].strip() if values else ""
             server_version = values[1].strip() if len(values) > 1 else client_version
+            if working_docker is None:
+                working_docker = (candidate, client_version, server_version)
+
             compose_argv = [self.chroot_bin, str(self.host_mount), candidate, "compose", "version"]
             compose_result = self.runner.run(compose_argv, timeout=15)
             if compose_result.returncode != 0:
-                errors.append(f"{candidate}: docker compose 실패")
+                detail = self._probe_detail(compose_result)
+                errors.append(f"{candidate}: docker compose 실패" + (f" ({detail})" if detail else ""))
                 continue
             compose_text = str(compose_result.output or "").strip()
             self.docker_bin = candidate
@@ -562,12 +593,50 @@ class BookOasisDockerManager:
                 "docker_cli": candidate,
                 "docker_version": server_version or client_version,
                 "docker_client_version": client_version,
+                "compose_cli": candidate + " compose",
+                "compose_mode": "plugin",
                 "compose_version": self._version_from_text(compose_text),
             }
             return self._docker_cli_info
+
+        if working_docker is not None:
+            docker_candidate, client_version, server_version = working_docker
+            for compose_candidate in COMPOSE_CLI_CANDIDATES:
+                compose_argv = [self.chroot_bin, str(self.host_mount), compose_candidate, "version"]
+                compose_result = self.runner.run(compose_argv, timeout=15)
+                if compose_result.returncode != 0:
+                    continue
+                compose_text = str(compose_result.output or "").strip()
+                compose_version = self._version_from_text(compose_text)
+                major = self._version_major(compose_version)
+                if major is not None and major < 2:
+                    errors.append(
+                        f"{compose_candidate}: Docker Compose {compose_version or compose_text} 감지됨 (Compose v2 필요)"
+                    )
+                    continue
+                if major is None:
+                    errors.append(f"{compose_candidate}: Compose 버전을 확인하지 못했습니다.")
+                    continue
+                self.docker_bin = docker_candidate
+                self._docker_cli_info = {
+                    "docker_cli": docker_candidate,
+                    "docker_version": server_version or client_version,
+                    "docker_client_version": client_version,
+                    "compose_cli": compose_candidate,
+                    "compose_mode": "standalone",
+                    "compose_version": compose_version,
+                }
+                return self._docker_cli_info
+
+            detail = "; ".join(errors[-6:])
+            raise DockerManagerError(
+                "호스트 Docker Engine은 확인했지만 Docker Compose v2를 찾지 못했습니다."
+                + (f" {detail}" if detail else "")
+            )
+
         detail = "; ".join(errors[-3:])
         raise DockerManagerError(
-            "호스트 Docker CLI와 Docker Compose를 찾지 못했습니다."
+            "호스트 Docker CLI와 Docker Compose v2를 찾지 못했습니다."
             + (f" {detail}" if detail else "")
         )
 
@@ -595,8 +664,14 @@ class BookOasisDockerManager:
         docker_info = self._ensure_docker_cli()
         return [self.chroot_bin, str(self.host_mount), docker_info["docker_cli"], *parts]
 
+    def _compose_host_command(self):
+        docker_info = self._ensure_docker_cli()
+        if docker_info.get("compose_mode") == "standalone":
+            return [self.chroot_bin, str(self.host_mount), docker_info["compose_cli"]]
+        return [self.chroot_bin, str(self.host_mount), docker_info["docker_cli"], "compose"]
+
     def _compose_command(self, host_root, compose_files, *parts):
-        argv = self._host_command("compose")
+        argv = self._compose_host_command()
         for compose_file in compose_files:
             argv.extend(["-f", str(host_root / compose_file.name)])
         argv.extend(parts)
@@ -793,6 +868,7 @@ class BookOasisDockerManager:
             "docker_version": docker_cli_info.get("docker_version", ""),
             "docker_client_version": docker_cli_info.get("docker_client_version", ""),
             "compose_version": docker_cli_info.get("compose_version", ""),
+            "compose_cli": docker_cli_info.get("compose_cli", ""),
             "git_cli": git_cli_info.get("git_cli", ""),
             "git_version": git_cli_info.get("git_version", ""),
             "build_update_ready": build_update_ready,
@@ -814,7 +890,7 @@ class BookOasisDockerManager:
         return thread
 
     def _compose_status_command(self, status, *parts):
-        argv = self._host_command("compose")
+        argv = self._compose_host_command()
         for compose_file in status.get("compose_files") or []:
             argv.extend(["-f", str(compose_file)])
         argv.extend(parts)
