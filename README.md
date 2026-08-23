@@ -18,9 +18,20 @@
 - GHCR 이미지 업데이트 감지, Docker 작업 실시간 로그와 Ubuntu·Synology 호스트 Docker 자동 호환.
 - 설정 화면에서 MariaDB 필수 구성요소 상태 확인 및 필요한 패키지만 선택 설치.
 
+## Docker 관리 사용 조건
+
+Docker 관리 기능은 FlaskFarm 컨테이너에서 호스트 Docker CLI·Compose와 BookOasis 경로에 접근해야 합니다. FlaskFarm의 Docker Compose 설정에 호스트 루트를 `/host`로 마운트하세요.
+
+```yaml
+volumes:
+  - /:/host
+```
+
+`/host` 마운트가 없으면 호스트 Docker CLI와 Compose, BookOasis Compose 경로를 확인할 수 없어 Docker 관리 기능을 사용할 수 없습니다.
+
 ## DB 엔진 설정
 
-- BookOasis Mate v1.9.0은 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
+- BookOasis Mate v1.9.1은 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
 - MariaDB 모드는 `PyMySQL 1.1` 이상이 필요하며 호스트·포트·사용자·비밀번호·DB 접두어를 입력합니다.
 - 자동 감지는 FF의 `DB_ENGINE`, `DBMS` 환경변수와 MariaDB 설정을 확인합니다. 연결 실패 시 남아 있는 SQLite 파일로 자동 전환하지 않습니다.
 - 상태 요약, 문제 도서, 스캔 상태, 시리즈 누락, 표지 검사, 고아 표지 정리, Google Drive 연동과 읽기 전용 SQL은 두 엔진을 지원합니다.
@@ -31,6 +42,16 @@
 
 ## Changelog
 
+- v1.9.1 (2026-08-23)
+  - Docker Compose 호환성과 환경 파일 편집 개선
+    - BookOasis 공식 기본 Compose·GHCR·Build·MariaDB 변형과 Override 조합을 실행 중 컨테이너 label 우선으로 안전하게 선택하고, 저장된 기본 Compose/Override를 환경 파일 편집기에 자동 로드하도록 개선.
+    - Compose가 stderr에 `version is obsolete` 같은 경고를 출력해도 JSON·컨테이너 ID 판별이 실패하지 않도록 stdout/stderr를 분리하고, 실시간 Docker 작업 로그는 기존처럼 통합 출력하도록 유지.
+    - `Compose Override = 사용 안 함` 설정은 편집기를 비활성화하고, Compose 목록 갱신 완료 후 저장된 파일을 불러오도록 비동기 순서를 고정.
+  - Docker 호스트 호환성과 설정 UI 개선
+    - `docker compose` 플러그인을 찾지 못하는 호스트에서도 표준 경로의 Docker Compose v2 실행파일을 추가 탐지하고, Compose v1만 있는 경우 v2 필요 조건과 실제 탐지 오류를 명확히 표시.
+    - BookOasis Docker 경로의 입력창·경로 선택 버튼·Compose 선택창을 FlaskFarm의 작은 컨트롤 높이에 맞춰 정렬하고 버튼이 다음 줄로 내려가는 문제를 수정.
+    - Docker 관리 기능에 FlaskFarm 호스트 루트 `/:/host` 마운트 필수 조건과 Compose 설정 예시를 추가.
+
 - v1.9.0 (2026-08-22)
   - BookOasis Docker 운영 기능 추가
     - `.env`, 기본 Docker Compose와 Compose Override를 설정에서 백업 후 안전하게 편집하도록 추가.
@@ -38,6 +59,7 @@
     - GHCR Registry API로 현재 이미지와 `stable` digest·버전을 비교해 실제 업데이트가 있을 때만 이미지 업데이트를 허용.
     - Docker CLI·Compose·Git 경로와 `linux/amd64`·`linux/arm64` 플랫폼을 자동 탐지해 Ubuntu와 Synology Container Manager 환경을 함께 지원.
     - Docker 작업 stdout/stderr를 제한된 tail 버퍼로 실시간 표시해 pull·build·재생성 진행 상태를 작업 중 바로 확인.
+    - BookOasis 공식 `docker-compose.yml`·`build`·`ghcr`·`mariadb`·`mariadb.ghcr` 변형과 generic/MariaDB Override를 자동 탐지하고, 여러 파일이 있으면 설정에서 기본 Compose와 Override를 직접 선택하도록 지원.
   - 설정 및 배포 UX 개선
     - MariaDB 필수 구성요소 설치 UI를 `설정 → DB 연결`로 이동하고 이미 사용 가능한 패키지는 건드리지 않는 `필요 패키지 설치` 흐름 추가.
     - DB 연결 영역을 최대폭으로 제한하고 일반·성인·오디오북·비디오 DB 카드를 데스크톱 4열, 중간 화면 2열, 모바일 1열로 정리.

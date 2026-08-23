@@ -396,6 +396,8 @@ class BookOasisMateService:
             "db_engine": model.get("db_engine") or "sqlite",
             "bookoasis_root_path": model.get("bookoasis_root_path"),
             "bookoasis_docker_path": model.get("bookoasis_docker_path"),
+            "bookoasis_compose_file": model.get("bookoasis_compose_file") or "auto",
+            "bookoasis_override_file": model.get("bookoasis_override_file") or "auto",
             "general_db_path": model.get("general_db_path"),
             "adult_enabled": model.get_bool("adult_enabled"),
             "adult_db_path": model.get("adult_db_path"),
@@ -450,6 +452,8 @@ class BookOasisMateService:
             "db_engine": str(values.get("db_engine") or "sqlite").strip().lower(),
             "bookoasis_root_path": str(values.get("bookoasis_root_path") or "").strip(),
             "bookoasis_docker_path": str(values.get("bookoasis_docker_path") or "").strip(),
+            "bookoasis_compose_file": str(values.get("bookoasis_compose_file") or "auto").strip(),
+            "bookoasis_override_file": str(values.get("bookoasis_override_file") or "auto").strip(),
             "general_db_path": values.get("general_db_path"),
             "adult_enabled": _as_bool(values.get("adult_enabled"), False),
             "adult_db_path": values.get("adult_db_path"),
@@ -501,21 +505,51 @@ class BookOasisMateService:
             settings.update(derived)
         return settings
 
-    def _docker_root(self):
+    def _docker_settings(self):
         settings = self.settings()
-        return settings.get("bookoasis_docker_path") or settings.get("bookoasis_root_path")
+        return {
+            "root": settings.get("bookoasis_docker_path") or settings.get("bookoasis_root_path"),
+            "compose_file": settings.get("bookoasis_compose_file") or "auto",
+            "override_file": settings.get("bookoasis_override_file") or "auto",
+        }
+
+    def _docker_root(self):
+        return self._docker_settings()["root"]
+
+    def docker_compose_editor_selection(self, kind):
+        key = str(kind or "").strip().lower()
+        if key not in ("compose", "override"):
+            raise DockerManagerError("Compose 파일 종류가 올바르지 않습니다.")
+        docker = self._docker_settings()
+        selection = docker["override_file"] if key == "override" else docker["compose_file"]
+        if str(selection or "auto").strip().lower() == "auto":
+            selection = self._docker_manager.resolve_compose_editor_selection(
+                docker["root"],
+                key,
+                compose_file=docker["compose_file"],
+                override_file=docker["override_file"],
+            )
+        return {"root": docker["root"], "kind": key, "selected": selection or "auto"}
 
     def docker_status(self):
+        docker = self._docker_settings()
         return {
-            "docker": self._docker_manager.inspect(self._docker_root()),
+            "docker": self._docker_manager.inspect(
+                docker["root"],
+                compose_file=docker["compose_file"],
+                override_file=docker["override_file"],
+            ),
             "job": self._docker_manager.job_status(),
         }
 
     def start_docker_action(self, action, confirmation):
+        docker = self._docker_settings()
         return self._docker_manager.start(
-            self._docker_root(),
+            docker["root"],
             action,
             confirmation,
+            compose_file=docker["compose_file"],
+            override_file=docker["override_file"],
         )
 
     def docker_action_status(self):
