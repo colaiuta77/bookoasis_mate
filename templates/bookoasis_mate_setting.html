@@ -191,7 +191,34 @@
       <div class="doctor-section doctor-card">
         <h4>BookOasis 환경 파일</h4>
         <p class="doctor-muted">BookOasis의 <code>.env</code>와 Docker Compose 파일을 안전하게 편집합니다. 경로를 변경한 경우 먼저 <strong>설정 저장</strong>을 눌러 주세요.</p>
-        {{ macros.setting_input_text_and_buttons('bookoasis_docker_path', 'BookOasis Docker 경로', [['select_bookoasis_docker_path_btn', '경로 선택']], value=arg.get('bookoasis_docker_path') or arg.get('bookoasis_root_path', ''), desc=['FF 컨테이너에서 보이는 Docker Compose 파일 디렉터리입니다.', '비워 두면 BookOasis 기본 경로를 사용합니다.', 'docker-compose.yml/.yaml 및 docker-compose.override.yml/.yaml을 이 경로에서 찾습니다.']) }}
+        {{ macros.setting_input_text_and_buttons('bookoasis_docker_path', 'BookOasis Docker 경로', [['select_bookoasis_docker_path_btn', '경로 선택']], value=arg.get('bookoasis_docker_path') or arg.get('bookoasis_root_path', ''), desc=['FF 컨테이너에서 보이는 Docker Compose 파일 디렉터리입니다.', '비워 두면 BookOasis 기본 경로를 사용합니다.', '공식 docker-compose.yml/build/ghcr/mariadb/mariadb.ghcr 파일을 자동 탐지합니다.']) }}
+        {% set compose_selected = arg.get('bookoasis_compose_file') or 'auto' %}
+        {% set override_selected = arg.get('bookoasis_override_file') or 'auto' %}
+        <div class="form-group row">
+          <label class="col-sm-3 col-form-label">기본 Compose</label>
+          <div class="col-sm-9">
+            <select id="bookoasis_compose_file" name="bookoasis_compose_file" class="form-control" data-selected="{{ compose_selected }}">
+              <option value="auto" {% if compose_selected == 'auto' %}selected{% endif %}>자동 감지 (실행 중 컨테이너 label 우선)</option>
+              {% if compose_selected != 'auto' %}<option value="{{ compose_selected }}" selected>{{ compose_selected }}</option>{% endif %}
+            </select>
+            <small class="form-text text-muted"><code>docker-compose.yml</code>, <code>docker-compose.build.yml</code>, <code>docker-compose.ghcr.yml</code>, <code>docker-compose.mariadb.yml</code>, <code>docker-compose.mariadb.ghcr.yml</code> 및 호환 <code>.yaml</code>을 지원합니다. 목록에는 Docker 경로에 실제 존재하는 파일만 추가합니다.</small>
+          </div>
+        </div>
+        <div class="form-group row">
+          <label class="col-sm-3 col-form-label">Compose Override</label>
+          <div class="col-sm-9">
+            <select id="bookoasis_override_file" name="bookoasis_override_file" class="form-control" data-selected="{{ override_selected }}">
+              <option value="auto" {% if override_selected == 'auto' %}selected{% endif %}>자동 감지 (실행 중 컨테이너 label 우선)</option>
+              <option value="none" {% if override_selected == 'none' %}selected{% endif %}>사용 안 함</option>
+              {% if override_selected not in ('auto', 'none') %}<option value="{{ override_selected }}" selected>{{ override_selected }}</option>{% endif %}
+            </select>
+            <small class="form-text text-muted"><code>docker-compose.override.yml</code>과 <code>docker-compose.override.mariadb.yml</code> 및 호환 <code>.yaml</code>을 지원합니다. 공식 <code>*.example.yml</code>은 실행 대상으로 선택하지 않습니다.</small>
+          </div>
+        </div>
+        <div class="doctor-cleanup-actions mb-3">
+          <button id="compose_options_refresh_btn" type="button" class="btn btn-sm btn-outline-secondary">Compose 목록 새로고침</button>
+          <span id="compose_options_status" class="doctor-muted">파일 선택 변경 후 설정 저장을 눌러 Docker 관리에 적용하세요.</span>
+        </div>
         <div class="alert alert-warning doctor-env-warning mb-0">
           저장 전 기존 파일을 자동 백업합니다. Compose 파일에는 비밀번호·토큰이 포함될 수 있으므로 백업 파일은 0600 권한으로 보관하며 최근 5개만 유지합니다.
         </div>
@@ -227,7 +254,7 @@
             <div class="doctor-section-heading">
               <div>
                 <h4>기본 Docker Compose 편집</h4>
-                <p class="doctor-muted mb-0"><code>docker-compose.yml</code> 또는 <code>docker-compose.yaml</code> 중 존재하는 파일을 자동으로 찾습니다. 기본 Compose 파일은 Mate가 새로 생성하지 않습니다.</p>
+                <p class="doctor-muted mb-0">위 <strong>기본 Compose</strong> 선택값을 편집합니다. 자동 감지에서 여러 기본 파일이 존재하면 직접 선택해 주세요. 기본 Compose 파일은 Mate가 새로 생성하지 않습니다.</p>
               </div>
               <div class="doctor-cleanup-actions">
                 <button id="compose_file_load_btn" type="button" class="btn btn-sm btn-outline-primary">파일 불러오기</button>
@@ -245,7 +272,7 @@
             <div class="doctor-section-heading">
               <div>
                 <h4>Compose Override 편집</h4>
-                <p class="doctor-muted mb-0"><code>docker-compose.override.yml</code> 또는 <code>.yaml</code>을 자동 탐지합니다. 파일이 없으면 공식 설치 방식에 맞춰 <code>docker-compose.override.yml</code>을 새로 만들 수 있습니다.</p>
+                <p class="doctor-muted mb-0">위 <strong>Compose Override</strong> 선택값을 편집합니다. generic/MariaDB Override를 지원하며 자동 감지에서 파일이 없으면 <code>docker-compose.override.yml</code>을 새로 만들 수 있습니다.</p>
               </div>
               <div class="doctor-cleanup-actions">
                 <button id="compose_override_load_btn" type="button" class="btn btn-sm btn-outline-primary">파일 불러오기</button>
@@ -311,7 +338,10 @@ $(function() {
   updateCoverRootMode();
   updateBookOasisDerivedPaths();
   loadMateReleaseStatus();
-  if (String($('#bookoasis_docker_path').val() || '').trim()) loadDockerStatus(true);
+  if (String($('#bookoasis_docker_path').val() || '').trim()) {
+    refreshComposeOptions(true);
+    loadDockerStatus(true);
+  }
 });
 $('#adult_enabled').change(function() { use_collapse('adult_enabled'); });
 $('#cover_root_custom').change(updateCoverRootMode);
@@ -389,9 +419,15 @@ $("body").on('click', '#select_bookoasis_docker_path_btn', function(e) {
     if (typeof result !== 'string' || !result.trim()) return;
     input.val(result.trim());
     resetComposeEditors();
+    $('#compose_options_status').text('Docker 경로를 변경했습니다. 설정 저장 후 Compose 목록을 새로고침해 주세요.');
   });
 });
-$('#bookoasis_docker_path').on('input change', function() { resetComposeEditors(); resetDockerManagement(); });
+$('#bookoasis_docker_path').on('input change', function() {
+  resetComposeEditors();
+  resetDockerManagement();
+  $('#compose_options_status').text('Docker 경로를 변경했습니다. 설정 저장 후 Compose 목록을 새로고침해 주세요.');
+});
+$('#bookoasis_compose_file,#bookoasis_override_file').on('change', function() { resetComposeEditors(); resetDockerManagement(); });
 
 $("body").on('click', '#select_cover_root_path_btn', function(e) {
   e.preventDefault();
@@ -789,6 +825,43 @@ $('#docker_restart_btn').click(function(e) { e.preventDefault(); startDockerActi
 $('#docker_apply_btn').click(function(e) { e.preventDefault(); startDockerAction('apply'); });
 $('#docker_update_btn').click(function(e) { e.preventDefault(); startDockerAction('update'); });
 
+function composeSelection(kind) {
+  return String(kind === 'override' ? ($('#bookoasis_override_file').val() || 'auto') : ($('#bookoasis_compose_file').val() || 'auto'));
+}
+
+function replaceComposeOptions(selector, existing, allowNone, savedValue) {
+  var node = $(selector);
+  var current = String(node.val() || savedValue || 'auto');
+  var values = ['auto'];
+  if (allowNone) values.push('none');
+  (existing || []).forEach(function(name) { if (values.indexOf(name) < 0) values.push(name); });
+  if (current !== 'auto' && current !== 'none' && values.indexOf(current) < 0) values.push(current);
+  node.empty();
+  values.forEach(function(value) {
+    var label = value === 'auto' ? '자동 감지 (실행 중 컨테이너 label 우선)' : (value === 'none' ? '사용 안 함' : value);
+    $('<option>').val(value).text(label).appendTo(node);
+  });
+  node.val(values.indexOf(current) >= 0 ? current : 'auto');
+}
+
+function refreshComposeOptions(silent) {
+  var root = String($('#bookoasis_docker_path').val() || '').trim();
+  if (!root) return;
+  $('#compose_options_status').text('지원 Compose 파일을 확인하고 있습니다.');
+  bookoasisMateAjax('setting', 'compose_options', {}, function(ret) {
+    var data = ret.data || {};
+    replaceComposeOptions('#bookoasis_compose_file', data.base_existing || [], false, data.compose_selected || 'auto');
+    replaceComposeOptions('#bookoasis_override_file', data.override_existing || [], true, data.override_selected || 'auto');
+    var baseCount = (data.base_existing || []).length;
+    var overrideCount = (data.override_existing || []).length;
+    $('#compose_options_status').text('기본 Compose ' + baseCount + '개 · Override ' + overrideCount + '개 확인 · 선택 변경 후 설정 저장 필요');
+  }, function() {
+    $('#compose_options_status').text('Compose 목록을 확인하지 못했습니다. Docker 경로와 접근 권한을 확인해 주세요.');
+  }, {global:false, silent:!!silent});
+}
+
+$('#compose_options_refresh_btn').click(function(e) { e.preventDefault(); refreshComposeOptions(false); });
+
 var composeEditorState = {
   compose:{loadedPath:'', canSave:false, running:false},
   override:{loadedPath:'', canSave:false, running:false}
@@ -851,7 +924,7 @@ function loadComposeEditor(kind) {
   $(ids.content).val('').prop('disabled', true);
   setComposeRunning(kind, true, 'Compose 파일을 불러오는 중입니다.');
   var loaded = false;
-  bookoasisMateAjax('setting', 'compose_load', {compose_kind:kind}, function(ret) {
+  bookoasisMateAjax('setting', 'compose_load', {compose_kind:kind, compose_selected:composeSelection(kind)}, function(ret) {
     if (ret.ret !== 'success' || !ret.data) return;
     loaded = true;
     var data = ret.data;
@@ -864,9 +937,9 @@ function loadComposeEditor(kind) {
     );
     $(ids.content).val(data.content || '');
     if (!data.exists && !data.can_create) {
-      $(ids.status).text('docker-compose.yml 또는 docker-compose.yaml을 Docker 경로에 먼저 준비해 주세요.');
+      $(ids.status).text('선택한 기본 Compose 파일을 Docker 경로에서 찾지 못했습니다. 파일 선택을 확인해 주세요.');
     } else if (!data.exists) {
-      $(ids.status).text('새 docker-compose.override.yml 파일을 작성할 수 있습니다.');
+      $(ids.status).text('선택한 Override 파일을 새로 작성할 수 있습니다.');
     } else {
       $(ids.status).text('편집할 수 있습니다. 저장하면 기존 파일을 먼저 백업합니다.');
     }
@@ -886,6 +959,7 @@ function saveComposeEditor(kind) {
   var saved = false;
   bookoasisMateAjax('setting', 'compose_save', {
     compose_kind:kind,
+    compose_selected:composeSelection(kind),
     compose_content:$(ids.content).val(),
     confirm_save:'true'
   }, function(ret) {
@@ -942,7 +1016,7 @@ $('#setting_save_btn').click(function(e) {
   e.preventDefault();
   $.ajax({url:'/' + PACKAGE_NAME + '/ajax/setting_save', type:'POST', data:currentSettings(), dataType:'json', success:function(ret) {
     notify(ret ? '설정을 저장했습니다.' : '설정 저장에 실패했습니다.', ret ? 'success' : 'warning');
-    if (ret) loadDockerStatus(true);
+    if (ret) { refreshComposeOptions(true); loadDockerStatus(true); }
   }});
 });
 

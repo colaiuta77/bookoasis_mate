@@ -14,19 +14,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+try:
+    from .bookoasis_compose import BASE_COMPOSE_NAMES, OVERRIDE_COMPOSE_NAMES
+except ImportError:  # 단독 테스트/실행 호환
+    from bookoasis_compose import BASE_COMPOSE_NAMES, OVERRIDE_COMPOSE_NAMES
+
 
 SERVICE_NAME = "bookoasis"
 CONTAINER_NAME = "bookoasis"
-BASE_COMPOSE_NAMES = (
-    "docker-compose.yml",
-    "docker-compose.yaml",
-    "docker-compose.ghcr.yml",
-    "docker-compose.ghcr.yaml",
-)
-OVERRIDE_COMPOSE_NAMES = (
-    "docker-compose.override.yml",
-    "docker-compose.override.yaml",
-)
 COMMAND_OUTPUT_LIMIT = 128 * 1024
 REGISTRY_RESPONSE_LIMIT = 2 * 1024 * 1024
 REGISTRY_TOKEN_LIMIT = 64 * 1024
@@ -388,19 +383,100 @@ class BookOasisDockerManager:
                 if not candidate.is_file():
                     raise DockerManagerError(f"{name} 경로가 일반 파일이 아닙니다.")
                 found.append(candidate)
-        if label == "override" and len(found) > 1:
-            raise DockerManagerError("Compose Override .yml과 .yaml이 동시에 존재합니다. 하나만 남겨 주세요.")
         return found
 
     @staticmethod
     def _label_config_basenames(labels):
         raw = str((labels or {}).get("com.docker.compose.project.config_files") or "")
-        names = set()
+        names = []
         for item in raw.split(","):
             item = item.strip()
-            if item:
-                names.add(Path(item).name)
+            name = Path(item).name if item else ""
+            if name and name not in names:
+                names.append(name)
         return names
+
+    @staticmethod
+    def _normalize_compose_choice(value, names, label, allow_none=False):
+        choice = str(value or "auto").strip()
+        if not choice or choice.lower() == "auto":
+            return "auto"
+        if allow_none and choice.lower() == "none":
+            return "none"
+        if choice not in names:
+            raise DockerManagerError(f"지원하지 않는 {label} 파일입니다: {choice}")
+        return choice
+
+    @staticmethod
+    def _candidate_by_name(candidates, name):
+        for candidate in candidates:
+            if candidate.name == name:
+                return candidate
+        return None
+
+    def _select_compose_files(self, container_root, labels, compose_file=None, override_file=None):
+        bases = self._existing_named_files(container_root, BASE_COMPOSE_NAMES, "base")
+        if not bases:
+            raise DockerManagerError("지원하는 BookOasis Docker Compose 파일을 찾지 못했습니다.")
+        overrides = self._existing_named_files(container_root, OVERRIDE_COMPOSE_NAMES, "override")
+        label_names = self._label_config_basenames(labels)
+
+        base_choice = self._normalize_compose_choice(
+            compose_file, BASE_COMPOSE_NAMES, "기본 Compose"
+        )
+        if base_choice != "auto":
+            base_file = self._candidate_by_name(bases, base_choice)
+            if base_file is None:
+                raise DockerManagerError(f"선택한 기본 Compose 파일을 찾지 못했습니다: {base_choice}")
+        else:
+            labelled_bases = [
+                self._candidate_by_name(bases, name)
+                for name in label_names
+                if name in BASE_COMPOSE_NAMES
+            ]
+            labelled_bases = [item for item in labelled_bases if item is not None]
+            if len(labelled_bases) == 1:
+                base_file = labelled_bases[0]
+            elif len(labelled_bases) > 1:
+                raise DockerManagerError(
+                    "현재 BookOasis 컨테이너 label에 기본 Compose 파일이 여러 개 기록되어 있어 자동 판별할 수 없습니다."
+                )
+            elif len(bases) == 1:
+                base_file = bases[0]
+            else:
+                raise DockerManagerError(
+                    "Docker Compose 파일이 여러 개이고 현재 BookOasis가 사용한 파일을 판별할 수 없습니다. "
+                    "설정에서 기본 Compose 파일을 직접 선택해 주세요."
+                )
+
+        override_choice = self._normalize_compose_choice(
+            override_file, OVERRIDE_COMPOSE_NAMES, "Compose Override", allow_none=True
+        )
+        selected_overrides = []
+        if override_choice == "none":
+            selected_overrides = []
+        elif override_choice != "auto":
+            selected = self._candidate_by_name(overrides, override_choice)
+            if selected is None:
+                raise DockerManagerError(f"선택한 Compose Override 파일을 찾지 못했습니다: {override_choice}")
+            selected_overrides = [selected]
+        else:
+            for name in label_names:
+                if name not in OVERRIDE_COMPOSE_NAMES:
+                    continue
+                selected = self._candidate_by_name(overrides, name)
+                if selected is not None and selected not in selected_overrides:
+                    selected_overrides.append(selected)
+            if not selected_overrides and not label_names:
+                if len(overrides) == 1:
+                    selected_overrides = [overrides[0]]
+                elif len(overrides) > 1:
+                    raise DockerManagerError(
+                        "Compose Override 파일이 여러 개이고 현재 BookOasis가 사용한 파일을 판별할 수 없습니다. "
+                        "설정에서 Override 파일을 직접 선택하거나 사용 안 함을 선택해 주세요."
+                    )
+
+        return base_file, selected_overrides, base_choice, override_choice
 
     @staticmethod
     def _candidate_list(preferred, defaults):
@@ -476,10 +552,10 @@ class BookOasisDockerManager:
         docker_info = self._ensure_docker_cli()
         return [self.chroot_bin, str(self.host_mount), docker_info["docker_cli"], *parts]
 
-    def _compose_command(self, host_root, base_file, override_file=None, *parts):
-        argv = self._host_command("compose", "-f", str(host_root / base_file.name))
-        if override_file is not None:
-            argv.extend(["-f", str(host_root / override_file.name)])
+    def _compose_command(self, host_root, compose_files, *parts):
+        argv = self._host_command("compose")
+        for compose_file in compose_files:
+            argv.extend(["-f", str(host_root / compose_file.name)])
         argv.extend(parts)
         return argv
 
@@ -569,7 +645,7 @@ class BookOasisDockerManager:
             raise DockerManagerError("BookOasis 컨테이너 정보 형식이 올바르지 않습니다.")
         return payload
 
-    def inspect(self, docker_root):
+    def inspect(self, docker_root, compose_file=None, override_file=None):
         container_root, host_root = self._resolve_root(docker_root)
         container = self._container_inspect()
         container_id = str(container.get("Id") or "").strip()
@@ -585,24 +661,15 @@ class BookOasisDockerManager:
         if not container_id:
             raise DockerManagerError("BookOasis 컨테이너 ID를 확인하지 못했습니다.")
 
-        candidates = self._existing_named_files(container_root, BASE_COMPOSE_NAMES, "base")
-        if not candidates:
-            raise DockerManagerError("지원하는 BookOasis Docker Compose 파일을 찾지 못했습니다.")
-        label_names = self._label_config_basenames(labels)
-        labelled = [item for item in candidates if item.name in label_names]
-        if len(labelled) == 1:
-            base_file = labelled[0]
-        elif len(candidates) == 1:
-            base_file = candidates[0]
-        else:
-            raise DockerManagerError(
-                "Docker Compose 파일이 여러 개이고 현재 BookOasis가 사용한 파일을 판별할 수 없습니다."
-            )
-
-        overrides = self._existing_named_files(container_root, OVERRIDE_COMPOSE_NAMES, "override")
-        override_file = overrides[0] if overrides else None
+        base_file, override_files, base_choice, override_choice = self._select_compose_files(
+            container_root,
+            labels,
+            compose_file=compose_file,
+            override_file=override_file,
+        )
+        compose_files = [base_file, *override_files]
         config_output = self._run(
-            self._compose_command(host_root, base_file, override_file, "config", "--format", "json"),
+            self._compose_command(host_root, compose_files, "config", "--format", "json"),
             timeout=20,
             label="BookOasis Compose 구성 확인",
         )
@@ -616,7 +683,7 @@ class BookOasisDockerManager:
             raise DockerManagerError("선택한 Compose 구성에 bookoasis 서비스가 없습니다.")
 
         compose_id = self._run(
-            self._compose_command(host_root, base_file, override_file, "ps", "-q", SERVICE_NAME),
+            self._compose_command(host_root, compose_files, "ps", "-q", SERVICE_NAME),
             timeout=15,
             label="BookOasis Compose 컨테이너 확인",
         ).strip()
@@ -688,11 +755,10 @@ class BookOasisDockerManager:
             "build_update_ready": build_update_ready,
             "docker_root": str(host_root),
             "compose_file": str(host_root / base_file.name),
-            "override_file": str(host_root / override_file.name) if override_file else "",
-            "compose_files": [
-                str(host_root / base_file.name),
-                *([str(host_root / override_file.name)] if override_file else []),
-            ],
+            "override_file": str(host_root / override_files[0].name) if override_files else "",
+            "compose_files": [str(host_root / item.name) for item in compose_files],
+            "compose_selection": base_choice,
+            "override_selection": override_choice,
         }
         data.update(update_info)
         return data
@@ -836,7 +902,11 @@ class BookOasisDockerManager:
             else:
                 raise DockerManagerError("지원하지 않는 BookOasis Docker 작업입니다.")
 
-            after = self.inspect(docker_root)
+            after = self.inspect(
+                docker_root,
+                compose_file=before.get("compose_selection"),
+                override_file=before.get("override_selection"),
+            )
             with self._lock:
                 self._job.update(
                     {
@@ -868,7 +938,7 @@ class BookOasisDockerManager:
             with self._lock:
                 self._job_handle = None
 
-    def start(self, docker_root, action, confirmation):
+    def start(self, docker_root, action, confirmation, compose_file=None, override_file=None):
         action = str(action or "").strip().lower()
         if action not in {"restart", "apply", "update"}:
             raise DockerManagerError("지원하지 않는 BookOasis Docker 작업입니다.")
@@ -879,7 +949,12 @@ class BookOasisDockerManager:
         with self._lock:
             if self._job.get("is_working") == "run":
                 raise DockerManagerError("다른 BookOasis Docker 작업이 이미 실행 중입니다.")
-            before = self.inspect(docker_root)
+            if compose_file is None and override_file is None:
+                before = self.inspect(docker_root)
+            else:
+                before = self.inspect(
+                    docker_root, compose_file=compose_file, override_file=override_file
+                )
             if not before.get("manageable"):
                 raise DockerManagerError("현재 BookOasis Docker 대상을 안전하게 관리할 수 없습니다.")
             if action == "update" and before.get("mode") == "build" and before.get("build_update_ready") is not True:

@@ -38,6 +38,7 @@
     - GHCR Registry API로 현재 이미지와 `stable` digest·버전을 비교해 실제 업데이트가 있을 때만 이미지 업데이트를 허용.
     - Docker CLI·Compose·Git 경로와 `linux/amd64`·`linux/arm64` 플랫폼을 자동 탐지해 Ubuntu와 Synology Container Manager 환경을 함께 지원.
     - Docker 작업 stdout/stderr를 제한된 tail 버퍼로 실시간 표시해 pull·build·재생성 진행 상태를 작업 중 바로 확인.
+    - BookOasis 공식 `docker-compose.yml`·`build`·`ghcr`·`mariadb`·`mariadb.ghcr` 변형과 generic/MariaDB Override를 자동 탐지하고, 여러 파일이 있으면 설정에서 기본 Compose와 Override를 직접 선택하도록 지원.
   - 설정 및 배포 UX 개선
     - MariaDB 필수 구성요소 설치 UI를 `설정 → DB 연결`로 이동하고 이미 사용 가능한 패키지는 건드리지 않는 `필요 패키지 설치` 흐름 추가.
     - DB 연결 영역을 최대폭으로 제한하고 일반·성인·오디오북·비디오 DB 카드를 데스크톱 4열, 중간 화면 2열, 모바일 1열로 정리.

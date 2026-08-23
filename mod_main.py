@@ -17,6 +17,8 @@ class ModuleMain(PluginModuleBase):
             "db_engine": "sqlite",
             "bookoasis_root_path": "",
             "bookoasis_docker_path": "",
+            "bookoasis_compose_file": "auto",
+            "bookoasis_override_file": "auto",
             "general_db_path": "/bookoasis-db/media_general.db",
             "adult_enabled": "False",
             "adult_db_path": "/bookoasis-db/media_adult.db",

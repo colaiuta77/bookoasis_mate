@@ -8,9 +8,27 @@ from pathlib import Path
 
 COMPOSE_MAX_BYTES = 1024 * 1024
 COMPOSE_BACKUP_KEEP = 5
+BASE_COMPOSE_NAMES = (
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "docker-compose.build.yml",
+    "docker-compose.build.yaml",
+    "docker-compose.ghcr.yml",
+    "docker-compose.ghcr.yaml",
+    "docker-compose.mariadb.yml",
+    "docker-compose.mariadb.yaml",
+    "docker-compose.mariadb.ghcr.yml",
+    "docker-compose.mariadb.ghcr.yaml",
+)
+OVERRIDE_COMPOSE_NAMES = (
+    "docker-compose.override.yml",
+    "docker-compose.override.yaml",
+    "docker-compose.override.mariadb.yml",
+    "docker-compose.override.mariadb.yaml",
+)
 COMPOSE_NAMES = {
-    "compose": ("docker-compose.yml", "docker-compose.yaml"),
-    "override": ("docker-compose.override.yml", "docker-compose.override.yaml"),
+    "compose": BASE_COMPOSE_NAMES,
+    "override": OVERRIDE_COMPOSE_NAMES,
 }
 
 
@@ -18,17 +36,27 @@ class ComposeFileError(ValueError):
     pass
 
 
-def _resolve_root(root_value):
+def _resolve_root(root_value, host_mount="/host"):
     raw_root = str(root_value or "").strip()
     if not raw_root:
         raise ComposeFileError("BookOasis Docker 경로를 먼저 설정해 주세요.")
     root = Path(raw_root).expanduser()
     if not root.is_absolute():
         raise ComposeFileError("BookOasis Docker 경로는 절대 경로여야 합니다.")
+
+    resolved_root = None
     try:
         resolved_root = root.resolve(strict=True)
-    except OSError as error:
-        raise ComposeFileError("BookOasis Docker 경로를 찾을 수 없습니다.") from error
+    except OSError:
+        mount = Path(host_mount)
+        try:
+            if mount.is_dir():
+                candidate = mount / root.relative_to(Path("/"))
+                resolved_root = candidate.resolve(strict=True)
+        except (OSError, ValueError):
+            resolved_root = None
+    if resolved_root is None:
+        raise ComposeFileError("BookOasis Docker 경로를 찾을 수 없습니다.")
     if not resolved_root.is_dir():
         raise ComposeFileError("BookOasis Docker 경로가 디렉터리가 아닙니다.")
     if resolved_root.parent == resolved_root:
@@ -44,8 +72,19 @@ def _kind_names(kind):
     return key, names
 
 
-def _select_path(root, kind):
+def _normalize_selection(kind, selected):
     key, names = _kind_names(kind)
+    value = str(selected or "auto").strip()
+    if not value or value.lower() == "auto":
+        return key, names, "auto"
+    if key == "override" and value.lower() == "none":
+        return key, names, "none"
+    if value not in names:
+        raise ComposeFileError(f"지원하지 않는 Compose 파일입니다: {value}")
+    return key, names, value
+
+
+def _scan_existing(root, names):
     found = []
     for name in names:
         candidate = root / name
@@ -55,15 +94,40 @@ def _select_path(root, kind):
             if not candidate.is_file():
                 raise ComposeFileError(f"{name} 경로가 일반 파일이 아닙니다.")
             found.append(candidate)
+    return found
+
+
+def list_compose_files(root_value):
+    root = _resolve_root(root_value)
+    base_existing = [item.name for item in _scan_existing(root, BASE_COMPOSE_NAMES)]
+    override_existing = [item.name for item in _scan_existing(root, OVERRIDE_COMPOSE_NAMES)]
+    return {
+        "root": str(root),
+        "base_candidates": list(BASE_COMPOSE_NAMES),
+        "override_candidates": list(OVERRIDE_COMPOSE_NAMES),
+        "base_existing": base_existing,
+        "override_existing": override_existing,
+    }
+
+
+def _select_path(root, kind, selected=None):
+    key, names, selection = _normalize_selection(kind, selected)
+    found = _scan_existing(root, names)
+    if selection == "none":
+        return None, False, selection
+    if selection != "auto":
+        target = root / selection
+        exists = target in found
+        return target, exists, selection
     if len(found) > 1:
         raise ComposeFileError(
-            f"{names[0]}과 {names[1]}이 모두 존재합니다. 하나만 남긴 뒤 다시 시도해 주세요."
+            "Compose 파일이 여러 개 있습니다. 설정에서 사용할 파일을 직접 선택해 주세요."
         )
     if found:
-        return found[0], True
+        return found[0], True, found[0].name
     if key == "override":
-        return root / names[0], False
-    return None, False
+        return root / names[0], False, names[0]
+    return None, False, "auto"
 
 
 def _secure_backup_copy(source, destination):
@@ -115,10 +179,10 @@ def _prune_backups(root, target_name, keep=COMPOSE_BACKUP_KEEP):
             pass
 
 
-def read_compose_file(root_value, kind, max_bytes=COMPOSE_MAX_BYTES):
+def read_compose_file(root_value, kind, max_bytes=COMPOSE_MAX_BYTES, selected=None):
     root = _resolve_root(root_value)
     key, names = _kind_names(kind)
-    target, exists = _select_path(root, key)
+    target, exists, selection = _select_path(root, key, selected=selected)
     if not exists:
         return {
             "kind": key,
@@ -128,7 +192,8 @@ def read_compose_file(root_value, kind, max_bytes=COMPOSE_MAX_BYTES):
             "size": 0,
             "modified_at": "",
             "candidates": list(names),
-            "can_create": key == "override",
+            "selected": selection,
+            "can_create": key == "override" and target is not None,
         }
 
     file_size = target.stat().st_size
@@ -146,17 +211,20 @@ def read_compose_file(root_value, kind, max_bytes=COMPOSE_MAX_BYTES):
         "size": file_size,
         "modified_at": datetime.fromtimestamp(target.stat().st_mtime).isoformat(timespec="seconds"),
         "candidates": list(names),
+        "selected": selection,
         "can_create": key == "override",
     }
 
 
-def save_compose_file(root_value, kind, content, max_bytes=COMPOSE_MAX_BYTES):
+def save_compose_file(root_value, kind, content, max_bytes=COMPOSE_MAX_BYTES, selected=None):
     root = _resolve_root(root_value)
     key, unused_names = _kind_names(kind)
-    target, exists = _select_path(root, key)
-    if target is None or (key == "compose" and not exists):
+    target, exists, selection = _select_path(root, key, selected=selected)
+    if target is None:
+        raise ComposeFileError("Compose Override를 사용 안 함으로 선택한 상태에서는 파일을 저장할 수 없습니다.")
+    if key == "compose" and not exists:
         raise ComposeFileError(
-            "기본 Compose 파일을 찾을 수 없습니다. docker-compose.yml 또는 docker-compose.yaml을 먼저 준비해 주세요."
+            "선택한 기본 Compose 파일을 찾을 수 없습니다. Docker 경로와 파일 선택을 확인해 주세요."
         )
     if not isinstance(content, str):
         raise ComposeFileError("저장할 Compose 내용이 올바르지 않습니다.")
@@ -216,4 +284,5 @@ def save_compose_file(root_value, kind, content, max_bytes=COMPOSE_MAX_BYTES):
         "size": len(encoded),
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "created": not exists,
+        "selected": selection,
     }

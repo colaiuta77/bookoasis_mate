@@ -5,7 +5,7 @@ import traceback
 from flask import jsonify, render_template
 
 from .bookoasis_env import EnvFileError, read_env_file, save_env_file
-from .bookoasis_compose import ComposeFileError, read_compose_file, save_compose_file
+from .bookoasis_compose import ComposeFileError, list_compose_files, read_compose_file, save_compose_file
 from .docker_manager import DockerManagerError
 from .dependency_installer import DependencyInstaller, DependencyInstallerError
 from .release_info import REPOSITORY_URL, read_local_version, release_status
@@ -31,6 +31,8 @@ class ModuleSetting(PluginModuleBase):
         for key in (
             "bookoasis_root_path",
             "bookoasis_docker_path",
+            "bookoasis_compose_file",
+            "bookoasis_override_file",
             "general_db_path",
             "adult_db_path",
             "audiobook_db_path",
@@ -113,10 +115,21 @@ class ModuleSetting(PluginModuleBase):
                     "msg": "",
                     "data": self.service.docker_action_status(),
                 })
+            if command == "compose_options":
+                current = self.service.settings()
+                docker_root = current.get("bookoasis_docker_path") or current.get("bookoasis_root_path")
+                data = list_compose_files(docker_root)
+                data["compose_selected"] = str(current.get("bookoasis_compose_file") or "auto")
+                data["override_selected"] = str(current.get("bookoasis_override_file") or "auto")
+                return jsonify({"ret": "success", "msg": "", "data": data})
             if command == "compose_load":
                 current = self.service.settings()
                 docker_root = current.get("bookoasis_docker_path") or current.get("bookoasis_root_path")
-                data = read_compose_file(docker_root, req.form.get("compose_kind"))
+                data = read_compose_file(
+                    docker_root,
+                    req.form.get("compose_kind"),
+                    selected=req.form.get("compose_selected"),
+                )
                 return jsonify({
                     "ret": "success",
                     "msg": (
@@ -139,6 +152,7 @@ class ModuleSetting(PluginModuleBase):
                     docker_root,
                     req.form.get("compose_kind"),
                     req.form.get("compose_content", ""),
+                    selected=req.form.get("compose_selected"),
                 )
                 return jsonify({
                     "ret": "success",
