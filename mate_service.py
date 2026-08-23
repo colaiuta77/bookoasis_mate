@@ -516,6 +516,21 @@ class BookOasisMateService:
     def _docker_root(self):
         return self._docker_settings()["root"]
 
+    def docker_compose_editor_selection(self, kind):
+        key = str(kind or "").strip().lower()
+        if key not in ("compose", "override"):
+            raise DockerManagerError("Compose 파일 종류가 올바르지 않습니다.")
+        docker = self._docker_settings()
+        selection = docker["override_file"] if key == "override" else docker["compose_file"]
+        if str(selection or "auto").strip().lower() == "auto":
+            selection = self._docker_manager.resolve_compose_editor_selection(
+                docker["root"],
+                key,
+                compose_file=docker["compose_file"],
+                override_file=docker["override_file"],
+            )
+        return {"root": docker["root"], "kind": key, "selected": selection or "auto"}
+
     def docker_status(self):
         docker = self._docker_settings()
         return {

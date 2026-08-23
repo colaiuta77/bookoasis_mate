@@ -51,6 +51,7 @@ class DockerManagerError(ValueError):
 class CommandResult:
     returncode: int
     output: str
+    stderr: str = ""
 
 
 class GhcrRegistryClient:
@@ -214,13 +215,19 @@ class GhcrRegistryClient:
 
 
 class SubprocessRunner:
+    @staticmethod
+    def _read_tail(fileobj, limit=COMMAND_OUTPUT_LIMIT):
+        size = fileobj.tell()
+        fileobj.seek(max(0, size - int(limit)))
+        return fileobj.read(int(limit)).decode("utf-8", "replace")
+
     def run(self, argv, timeout=30):
-        with tempfile.TemporaryFile(mode="w+b") as output_file:
+        with tempfile.TemporaryFile(mode="w+b") as output_file, tempfile.TemporaryFile(mode="w+b") as error_file:
             try:
                 completed = subprocess.run(
                     list(argv),
                     stdout=output_file,
-                    stderr=subprocess.STDOUT,
+                    stderr=error_file,
                     timeout=max(1, int(timeout)),
                     check=False,
                 )
@@ -228,10 +235,9 @@ class SubprocessRunner:
                 raise DockerManagerError(
                     f"Docker 명령 제한시간을 초과했습니다. ({timeout}초)"
                 ) from error
-            size = output_file.tell()
-            output_file.seek(max(0, size - COMMAND_OUTPUT_LIMIT))
-            output = output_file.read(COMMAND_OUTPUT_LIMIT).decode("utf-8", "replace")
-        return CommandResult(completed.returncode, output)
+            output = self._read_tail(output_file)
+            stderr = self._read_tail(error_file)
+        return CommandResult(completed.returncode, output, stderr)
 
     def run_stream(self, argv, timeout=30, on_output=None):
         process = subprocess.Popen(
@@ -329,7 +335,9 @@ class BookOasisDockerManager:
     def _run(self, argv, timeout=30, label="Docker 명령"):
         result = self.runner.run(list(argv), timeout=timeout)
         if result.returncode != 0:
-            detail = str(result.output or "").strip()
+            stdout_detail = str(result.output or "").strip()
+            stderr_detail = str(getattr(result, "stderr", "") or "").strip()
+            detail = "\n".join(item for item in (stdout_detail, stderr_detail) if item)
             if len(detail) > 1500:
                 detail = detail[-1500:]
             raise DockerManagerError(
@@ -477,6 +485,41 @@ class BookOasisDockerManager:
                     )
 
         return base_file, selected_overrides, base_choice, override_choice
+
+    def resolve_compose_editor_selection(self, docker_root, kind, compose_file=None, override_file=None):
+        key = str(kind or "").strip().lower()
+        if key not in ("compose", "override"):
+            raise DockerManagerError("Compose 파일 종류가 올바르지 않습니다.")
+        container_root, unused_host_root = self._resolve_root(docker_root)
+        container = self._container_inspect()
+        name = str(container.get("Name") or "").lstrip("/")
+        config = container.get("Config") if isinstance(container.get("Config"), dict) else {}
+        labels = config.get("Labels") if isinstance(config.get("Labels"), dict) else {}
+        service_label = str(labels.get("com.docker.compose.service") or "").strip()
+        project_label = str(labels.get("com.docker.compose.project") or "").strip()
+        if name != CONTAINER_NAME or service_label != SERVICE_NAME or not project_label:
+            raise DockerManagerError(
+                "실행 중인 bookoasis 컨테이너가 검증된 Docker Compose bookoasis 서비스가 아닙니다."
+            )
+
+        base_file, override_files, unused_base_choice, override_choice = self._select_compose_files(
+            container_root,
+            labels,
+            compose_file=compose_file,
+            override_file=override_file,
+        )
+        if key == "compose":
+            return base_file.name
+        if str(override_file or "auto").strip().lower() == "none":
+            return "none"
+        if len(override_files) > 1:
+            raise DockerManagerError(
+                "현재 BookOasis 컨테이너가 Compose Override 파일을 여러 개 사용하고 있어 편집 대상을 하나로 판별할 수 없습니다. "
+                "설정에서 편집할 Override 파일을 직접 선택해 주세요."
+            )
+        if override_files:
+            return override_files[0].name
+        return override_choice
 
     @staticmethod
     def _candidate_list(preferred, defaults):

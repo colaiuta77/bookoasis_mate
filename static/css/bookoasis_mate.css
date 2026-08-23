@@ -495,6 +495,23 @@
   .doctor-changelog-release-head { align-items: flex-start; flex-direction: column; gap: 2px; }
 }
 
+/* 환경 파일 Compose 설정 정렬 */
+.doctor-compose-settings-card { margin-bottom:1rem; }
+.doctor-compose-setting-row {
+  display:grid;
+  grid-template-columns:minmax(170px, 24%) minmax(0, 1fr);
+  gap:8px 18px;
+  align-items:start;
+  margin:0 0 16px;
+}
+.doctor-compose-setting-row > label { margin:0; padding-top:8px; font-weight:600; }
+.doctor-compose-setting-control { min-width:0; }
+.doctor-compose-setting-control .input-group, .doctor-compose-setting-control .form-control { width:100%; }
+@media (max-width: 768px) {
+  .doctor-compose-setting-row { grid-template-columns:1fr; gap:5px; }
+  .doctor-compose-setting-row > label { padding-top:0; }
+}
+
 /* 환경 파일 하위 편집기 */
 .doctor-file-editor-tabs { margin: 0 0 1rem; }
 .doctor-file-editor-content { min-height: 240px; }

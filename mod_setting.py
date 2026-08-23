@@ -123,12 +123,11 @@ class ModuleSetting(PluginModuleBase):
                 data["override_selected"] = str(current.get("bookoasis_override_file") or "auto")
                 return jsonify({"ret": "success", "msg": "", "data": data})
             if command == "compose_load":
-                current = self.service.settings()
-                docker_root = current.get("bookoasis_docker_path") or current.get("bookoasis_root_path")
+                selection = self.service.docker_compose_editor_selection(req.form.get("compose_kind"))
                 data = read_compose_file(
-                    docker_root,
-                    req.form.get("compose_kind"),
-                    selected=req.form.get("compose_selected"),
+                    selection["root"],
+                    selection["kind"],
+                    selected=selection["selected"],
                 )
                 return jsonify({
                     "ret": "success",
@@ -146,13 +145,12 @@ class ModuleSetting(PluginModuleBase):
             if command == "compose_save":
                 if req.form.get("confirm_save") != "true":
                     return jsonify({"ret": "warning", "msg": "저장 확인이 필요합니다."}), 400
-                current = self.service.settings()
-                docker_root = current.get("bookoasis_docker_path") or current.get("bookoasis_root_path")
+                selection = self.service.docker_compose_editor_selection(req.form.get("compose_kind"))
                 data = save_compose_file(
-                    docker_root,
-                    req.form.get("compose_kind"),
+                    selection["root"],
+                    selection["kind"],
                     req.form.get("compose_content", ""),
-                    selected=req.form.get("compose_selected"),
+                    selected=selection["selected"],
                 )
                 return jsonify({
                     "ret": "success",
