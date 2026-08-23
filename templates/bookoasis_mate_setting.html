@@ -309,6 +309,11 @@
             <button id="docker_status_refresh_btn" type="button" class="btn btn-sm btn-outline-secondary">상태 새로고침</button>
           </div>
         </div>
+        <div id="docker_host_mount_requirement" class="alert alert-warning doctor-docker-safety">
+          <strong>필수 조건:</strong> Docker 관리 기능은 FlaskFarm 컨테이너에서 호스트 Docker와 BookOasis 경로에 접근해야 하므로 호스트 루트를 <code>/host</code>로 마운트해야 합니다. FlaskFarm Compose에 아래 볼륨을 추가하세요.
+          <pre class="mb-0 mt-2"><code>volumes:
+  - /:/host</code></pre>
+        </div>
         <div class="alert alert-info doctor-docker-safety">
           <strong>안전 범위:</strong> BookOasis 서비스 하나만 제어합니다. MariaDB와 Redis는 재시작·재생성하지 않으며, Compose 적용/업데이트의 <code>up</code> 작업에는 <code>--no-deps</code>를 강제합니다.
         </div>
