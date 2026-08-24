@@ -408,6 +408,9 @@ class BookOasisMateService:
             "mariadb_user": model.get("mariadb_user"),
             "mariadb_password": model.get("mariadb_password"),
             "mariadb_database_prefix": model.get("mariadb_database_prefix") or "media_",
+            "mariadb_read_pool_size": _as_int(
+                model.get("mariadb_read_pool_size"), 15, 1, 64
+            ),
             "mariadb_connect_timeout": _as_int(
                 model.get("mariadb_connect_timeout"), 10, 1, 60
             ),
@@ -464,6 +467,9 @@ class BookOasisMateService:
             "mariadb_user": values.get("mariadb_user"),
             "mariadb_password": values.get("mariadb_password"),
             "mariadb_database_prefix": values.get("mariadb_database_prefix") or "media_",
+            "mariadb_read_pool_size": _as_int(
+                values.get("mariadb_read_pool_size"), 15, 1, 64
+            ),
             "mariadb_connect_timeout": _as_int(
                 values.get("mariadb_connect_timeout"), 10, 1, 60
             ),
@@ -2390,6 +2396,7 @@ class BookOasisMateService:
             "mariadb_user",
             "mariadb_password",
             "mariadb_database_prefix",
+            "mariadb_read_pool_size",
             "mariadb_connect_timeout",
             "mariadb_read_timeout",
             "mariadb_write_timeout",
@@ -2756,6 +2763,7 @@ class BookOasisMateService:
                     "mariadb_user",
                     "mariadb_password",
                     "mariadb_database_prefix",
+                    "mariadb_read_pool_size",
                     "mariadb_connect_timeout",
                     "mariadb_read_timeout",
                     "mariadb_write_timeout",
@@ -2939,6 +2947,7 @@ class BookOasisMateService:
                 "mariadb_user": settings.get("mariadb_user"),
                 "mariadb_password": settings.get("mariadb_password"),
                 "mariadb_database_prefix": settings.get("mariadb_database_prefix"),
+                "mariadb_read_pool_size": settings.get("mariadb_read_pool_size"),
                 "mariadb_connect_timeout": settings.get("mariadb_connect_timeout"),
                 "mariadb_read_timeout": settings.get("mariadb_read_timeout"),
                 "mariadb_write_timeout": settings.get("mariadb_write_timeout"),
@@ -3207,6 +3216,7 @@ class BookOasisMateService:
             "mariadb_user": settings.get("mariadb_user"),
             "mariadb_password": settings.get("mariadb_password"),
             "mariadb_database_prefix": settings.get("mariadb_database_prefix"),
+            "mariadb_read_pool_size": settings.get("mariadb_read_pool_size"),
             "mariadb_connect_timeout": settings.get("mariadb_connect_timeout"),
             "mariadb_read_timeout": settings.get("mariadb_read_timeout"),
             "mariadb_write_timeout": settings.get("mariadb_write_timeout"),
@@ -3609,6 +3619,7 @@ class BookOasisMateService:
             "mariadb_user": settings.get("mariadb_user"),
             "mariadb_password": settings.get("mariadb_password"),
             "mariadb_database_prefix": settings.get("mariadb_database_prefix"),
+            "mariadb_read_pool_size": settings.get("mariadb_read_pool_size"),
             "mariadb_connect_timeout": settings.get("mariadb_connect_timeout"),
             "mariadb_read_timeout": settings.get("mariadb_read_timeout"),
             "mariadb_write_timeout": settings.get("mariadb_write_timeout"),

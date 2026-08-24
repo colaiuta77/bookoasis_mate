@@ -29,6 +29,7 @@ class ModuleMain(PluginModuleBase):
             "mariadb_user": "",
             "mariadb_password": "",
             "mariadb_database_prefix": "media_",
+            "mariadb_read_pool_size": "15",
             "mariadb_connect_timeout": "10",
             "mariadb_read_timeout": "30",
             "mariadb_write_timeout": "30",

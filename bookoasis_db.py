@@ -12,7 +12,7 @@ from pathlib import Path
 
 VALID_DB_TYPES = {"general", "adult", "audiobook", "video"}
 VALID_ENGINES = {"auto", "sqlite", "mariadb"}
-MARIADB_READ_POOL_SIZE = 4
+MARIADB_READ_POOL_SIZE = 15
 MARIADB_POOL_IDLE_SECONDS = 300
 SCHEMA_CACHE_SECONDS = 300
 
@@ -475,6 +475,12 @@ class BookOasisDatabaseAdapter:
         write_timeout = bounded_int(
             self.settings.get("mariadb_write_timeout"), 30, 1, 600
         )
+        read_pool_size = bounded_int(
+            self.settings.get("mariadb_read_pool_size"),
+            MARIADB_READ_POOL_SIZE,
+            1,
+            64,
+        )
 
         def create_connection():
             return module.connect(
@@ -501,13 +507,14 @@ class BookOasisDatabaseAdapter:
 
             pool_key = (
                 id(module), host, port, user, password, target.database,
-                connect_timeout, read_timeout, write_timeout,
+                connect_timeout, read_timeout, write_timeout, read_pool_size,
             )
             with self._shared_lock:
                 pool = self._read_pools.get(pool_key)
                 if pool is None:
                     pool = _MariaDBReadPool(
                         create_connection,
+                        max_size=read_pool_size,
                         wait_timeout=connect_timeout,
                     )
                     self._read_pools[pool_key] = pool
