@@ -6,6 +6,13 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+try:
+    import gevent
+    from gevent import monkey as gevent_monkey
+except ImportError:
+    gevent = None
+    gevent_monkey = None
+
 REPOSITORY_URL = "https://github.com/colaiuta77/bookoasis_mate"
 RAW_BASE_URL = "https://raw.githubusercontent.com/colaiuta77/bookoasis_mate/main"
 REMOTE_INFO_URL = f"{RAW_BASE_URL}/info.yaml"
@@ -20,6 +27,9 @@ CACHE_SECONDS = 600
 
 _CACHE = {}
 _CACHE_LOCK = threading.Lock()
+_RETRYABLE_ERRORS = (URLError, TimeoutError)
+if gevent is not None:
+    _RETRYABLE_ERRORS += (gevent.Timeout,)
 
 
 def _version_tuple(value):
@@ -61,17 +71,30 @@ def _read_limited(url, limit):
             "User-Agent": "BookOasis-Mate-Release-Info/1",
         },
     )
+
+    def fetch():
+        with urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+            return response.read(limit + 1)
+
     for attempt in range(REQUEST_ATTEMPTS):
         try:
-            with urlopen(request, timeout=REQUEST_TIMEOUT) as response:
-                payload = response.read(limit + 1)
+            if (
+                gevent is not None
+                and gevent_monkey is not None
+                and gevent_monkey.is_module_patched("threading")
+            ):
+                payload = gevent.get_hub().threadpool.spawn(fetch).get(
+                    timeout=REQUEST_TIMEOUT + 2
+                )
+            else:
+                payload = fetch()
             if len(payload) > limit:
                 raise ValueError("GitHub 응답이 허용 크기를 초과했습니다.")
             return payload.decode("utf-8-sig")
         except HTTPError as error:
             if error.code not in RETRYABLE_HTTP_STATUS or attempt + 1 >= REQUEST_ATTEMPTS:
                 raise
-        except (URLError, TimeoutError):
+        except _RETRYABLE_ERRORS:
             if attempt + 1 >= REQUEST_ATTEMPTS:
                 raise
         time.sleep(RETRY_BASE_DELAY * (2**attempt))

@@ -4,6 +4,13 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+try:
+    import gevent
+    from gevent import monkey as gevent_monkey
+except ImportError:
+    gevent = None
+    gevent_monkey = None
+
 
 class _InflightWidget:
     def __init__(self):
@@ -78,6 +85,17 @@ def run_widget_tasks(tasks, max_workers=3):
     task_items = list((tasks or {}).items())
     if not task_items:
         return {}
+    if (
+        gevent is not None
+        and gevent_monkey is not None
+        and gevent_monkey.is_module_patched("threading")
+    ):
+        greenlets = {name: gevent.spawn(task) for name, task in task_items}
+        gevent.joinall(list(greenlets.values()))
+        for greenlet in greenlets.values():
+            if greenlet.exception is not None:
+                raise greenlet.exception
+        return {name: greenlets[name].value for name, unused_task in task_items}
     worker_count = max(1, min(int(max_workers or 1), len(task_items)))
     with ThreadPoolExecutor(
         max_workers=worker_count,
