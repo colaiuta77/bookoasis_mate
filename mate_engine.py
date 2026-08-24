@@ -11,6 +11,13 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 try:
+    import gevent
+    from gevent import monkey as gevent_monkey
+except ImportError:
+    gevent = None
+    gevent_monkey = None
+
+try:
     from .bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
     from .cover_inspector import normalize_cover_path
     from .series_gap import find_series_gaps
@@ -20,6 +27,29 @@ except ImportError:
     from cover_inspector import normalize_cover_path
     from series_gap import find_series_gaps
     from statistics_cache import DEFAULT_SUMMARY_TARGET_CACHE
+
+
+def _run_concurrent(items, task, max_workers=3, thread_name_prefix="bookoasis"):
+    items = list(items or [])
+    if not items:
+        return []
+    if (
+        gevent is not None
+        and gevent_monkey is not None
+        and gevent_monkey.is_module_patched("threading")
+    ):
+        greenlets = [gevent.spawn(task, item) for item in items]
+        gevent.joinall(greenlets)
+        for greenlet in greenlets:
+            if greenlet.exception is not None:
+                raise greenlet.exception
+        return [greenlet.value for greenlet in greenlets]
+    with ThreadPoolExecutor(
+        max_workers=max(1, min(int(max_workers or 1), len(items))),
+        thread_name_prefix=thread_name_prefix,
+    ) as executor:
+        futures = [executor.submit(task, item) for item in items]
+        return [future.result() for future in futures]
 
 
 ISSUE_LABELS = {
@@ -703,22 +733,16 @@ class BookOasisMateEngine:
 
     def source_fingerprint(self):
         targets = self.targets()
-        worker_count = max(1, min(3, len(targets)))
-        with ThreadPoolExecutor(
-            max_workers=worker_count,
+        fingerprints = _run_concurrent(
+            targets,
+            self._target_source_fingerprint,
+            max_workers=3,
             thread_name_prefix="bookoasis-summary-source",
-        ) as executor:
-            futures = {
-                target.db_type: executor.submit(
-                    self._target_source_fingerprint,
-                    target,
-                )
-                for target in targets
-            }
-            target_fingerprints = {
-                target.db_type: futures[target.db_type].result()
-                for target in targets
-            }
+        )
+        target_fingerprints = {
+            target.db_type: fingerprint
+            for target, fingerprint in zip(targets, fingerprints)
+        }
         encoded = json.dumps(
             target_fingerprints,
             ensure_ascii=False,
@@ -749,19 +773,12 @@ class BookOasisMateEngine:
                 lambda: self.inspect_target(target),
             )
 
-        worker_count = max(1, min(3, len(targets)))
-        with ThreadPoolExecutor(
-            max_workers=worker_count,
+        databases = _run_concurrent(
+            targets,
+            inspect,
+            max_workers=3,
             thread_name_prefix="bookoasis-summary",
-        ) as executor:
-            futures = {
-                target.db_type: executor.submit(inspect, target)
-                for target in targets
-            }
-            databases = [
-                futures[target.db_type].result()
-                for target in targets
-            ]
+        )
         totals = {
             key: 0
             for key in [
