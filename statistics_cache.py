@@ -19,10 +19,17 @@ class _InflightWidget:
 
 
 class StatisticsWidgetCache:
-    def __init__(self, ttl_seconds=300, max_entries=64, clock=None):
+    def __init__(
+        self,
+        ttl_seconds=300,
+        max_entries=64,
+        clock=None,
+        wait_timeout_seconds=300,
+    ):
         self.ttl_seconds = max(1, int(ttl_seconds or 300))
         self.max_entries = max(1, int(max_entries or 64))
         self.clock = clock or time.monotonic
+        self.wait_timeout_seconds = max(0.01, float(wait_timeout_seconds or 300))
         self._lock = threading.RLock()
         self._values = {}
         self._inflight = {}
@@ -53,7 +60,8 @@ class StatisticsWidgetCache:
                 leader = False
 
         if not leader:
-            inflight.event.wait()
+            if not inflight.event.wait(timeout=self.wait_timeout_seconds):
+                raise TimeoutError("통계 위젯 계산 대기 제한 시간을 초과했습니다.")
             if inflight.error is not None:
                 raise inflight.error
             with self._lock:
