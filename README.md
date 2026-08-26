@@ -31,7 +31,7 @@ volumes:
 
 ## DB 엔진 설정
 
-- BookOasis Mate v1.9.3은 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
+- BookOasis Mate v1.9.4는 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
 - MariaDB 모드는 `PyMySQL 1.1` 이상이 필요하며 호스트·포트·사용자·비밀번호·DB 접두어를 입력합니다.
 - 자동 감지는 FF의 `DB_ENGINE`, `DBMS` 환경변수와 MariaDB 설정을 확인합니다. 연결 실패 시 남아 있는 SQLite 파일로 자동 전환하지 않습니다.
 - 상태 요약, 문제 도서, 스캔 상태, 시리즈 누락, 표지 검사, 고아 표지 정리, Google Drive 연동과 읽기 전용 SQL은 두 엔진을 지원합니다.
@@ -41,6 +41,10 @@ volumes:
 - SQLite와 MariaDB 통DB 패키지는 서로 교차 복원할 수 없습니다.
 
 ## Changelog
+
+- v1.9.4 (2026-08-26)
+  - 상태 요약과 라이브러리 통계를 FlaskFarm 웹 프로세스 밖의 전용 작업 프로세스로 분리.
+  - 프로세스 간 중복 실행 잠금, 작업 내부 DB 연결 생성, watchdog과 통계 대기 제한으로 무한 대기 방지.
 
 - v1.9.3 (2026-08-24)
   - MariaDB의 DB별 읽기 연결 풀 크기를 설정에서 1~64 범위로 조절하도록 추가.
