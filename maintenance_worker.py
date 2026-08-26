@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -14,12 +15,14 @@ try:
     from .bookoasis_db import BookOasisDatabaseAdapter
     from .category_migration import CategoryMigrationEngine, MigrationStopped
     from .cover_inspector import cleanup_orphan_files, inspect_cover_file
+    from .library_statistics import LibraryStatisticsCancelled, LibraryStatisticsEngine
     from .mate_engine import BookOasisMateEngine
 except ImportError:
     from bookoasis_client import BookOasisClient
     from bookoasis_db import BookOasisDatabaseAdapter
     from category_migration import CategoryMigrationEngine, MigrationStopped
     from cover_inspector import cleanup_orphan_files, inspect_cover_file
+    from library_statistics import LibraryStatisticsCancelled, LibraryStatisticsEngine
     from mate_engine import BookOasisMateEngine
 
 
@@ -42,6 +45,61 @@ def _write_json(path, data):
     os.replace(str(temporary), str(target))
 
 
+class JobAlreadyRunning(RuntimeError):
+    pass
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (TypeError, ValueError, ProcessLookupError):
+        return False
+    except (PermissionError, OSError):
+        return True
+
+
+class WorkerLock:
+    def __init__(self, path, stale_seconds=7200):
+        self.path = Path(path)
+        self.owner_path = self.path / "owner.json"
+        self.stale_seconds = max(60, int(stale_seconds or 7200))
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.path.mkdir()
+        except FileExistsError:
+            owner = _read_json(self.owner_path, {}) or {}
+            age = max(0, time.time() - float(owner.get("started_epoch") or 0))
+            if _pid_alive(owner.get("pid")) or age < min(30, self.stale_seconds):
+                raise JobAlreadyRunning("같은 집계 작업이 이미 실행 중입니다.")
+            try:
+                self.owner_path.unlink()
+            except FileNotFoundError:
+                pass
+            try:
+                self.path.rmdir()
+            except OSError as error:
+                raise JobAlreadyRunning("같은 집계 작업 잠금을 확인할 수 없습니다.") from error
+            self.path.mkdir()
+        _write_json(
+            self.owner_path,
+            {"pid": os.getpid(), "started_epoch": time.time()},
+        )
+        return self
+
+    def __exit__(self, unused_type, unused_value, unused_traceback):
+        try:
+            self.owner_path.unlink()
+        except FileNotFoundError:
+            pass
+        try:
+            self.path.rmdir()
+        except OSError:
+            pass
+
+
 class StatusWriter:
     def __init__(self, status_path, job_type):
         self.status_path = Path(status_path)
@@ -49,6 +107,7 @@ class StatusWriter:
         self.started = time.monotonic()
         self.last_save_at = 0.0
         self.last_stage = ""
+        self._lock = threading.RLock()
         self.status = _read_json(self.status_path, {}) or {}
         self.status.update(
             {
@@ -75,12 +134,44 @@ class StatusWriter:
             del logs[:-300]
 
     def _save(self, force=False):
-        now = time.monotonic()
-        if not force and now - self.last_save_at < 0.5:
-            return
-        self.status["elapsed_seconds"] = round(now - self.started, 1)
-        _write_json(self.status_path, self.status)
-        self.last_save_at = now
+        with self._lock:
+            now = time.monotonic()
+            if not force and now - self.last_save_at < 0.5:
+                return
+            self.status["elapsed_seconds"] = round(now - self.started, 1)
+            _write_json(self.status_path, self.status)
+            self.last_save_at = now
+
+    def analysis_progress(self, stage, current, total, message):
+        current = int(current or 0)
+        total = max(1, int(total or 100))
+        self.status.update(
+            {
+                "stage": str(stage or "analyze"),
+                "current": current,
+                "total": total,
+                "progress_percent": min(100, round(current * 100 / total)),
+                "message": str(message or "집계 중입니다."),
+            }
+        )
+        self._save(force=current in {0, total})
+
+    def complete_analysis(self, result, source, message):
+        self.status.update(
+            {
+                "is_working": "done",
+                "stage": "complete",
+                "current": 100,
+                "total": 100,
+                "progress_percent": 100,
+                "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "message": message,
+                "result": result,
+                "source": source,
+                "error": "",
+            }
+        )
+        self._save(force=True)
 
     def category_progress(self, progress):
         stage = str(progress.get("stage") or "")
@@ -611,6 +702,32 @@ def _run_cover_inspection(config, writer, stop_file):
     writer.complete_cover_inspection(result, stopped=stopped)
 
 
+def _run_summary_report(config, writer):
+    engine = BookOasisMateEngine(dict(config.get("settings") or {}))
+    source = engine.source_fingerprint()
+    result = engine.build_report(
+        source=source,
+        target_cache=None,
+        force=bool(config.get("force")),
+    )
+    writer.complete_analysis(result, source, "상태 요약 갱신을 완료했습니다.")
+
+
+def _run_library_statistics(config, writer, stop_file):
+    engine = LibraryStatisticsEngine(dict(config.get("settings") or {}))
+    db_type = str(config.get("db_type") or "general")
+    library_id = str(config.get("library_id") or "").strip() or None
+    source = engine.source_fingerprint(db_type=db_type, library_id=library_id)
+    result = engine.analyze(
+        db_type=db_type,
+        library_id=library_id,
+        on_progress=writer.analysis_progress,
+        should_stop=stop_file.exists,
+        source=source,
+    )
+    writer.complete_analysis(result, source, "라이브러리 통계 분석을 완료했습니다.")
+
+
 def run_worker(config_path, status_path, stop_path):
     config = _read_json(config_path)
     if not isinstance(config, dict):
@@ -626,24 +743,56 @@ def run_worker(config_path, status_path, stop_path):
         except OSError:
             pass
     job_type = str(config.get("job_type") or "").strip()
-    if job_type not in {"orphan_cleanup", "category_migration", "batch_book_rescan", "cover_inspection"}:
+    if job_type not in {
+        "orphan_cleanup",
+        "category_migration",
+        "batch_book_rescan",
+        "cover_inspection",
+        "summary_report",
+        "library_statistics",
+    }:
         raise ValueError("지원하지 않는 유지보수 작업입니다.")
-    writer = StatusWriter(status_path, job_type)
     stop_file = Path(stop_path)
+    lock_path = config.get("lock_path") or f"{status_path}.lock"
+    watchdog_seconds = max(0, int(config.get("watchdog_seconds") or 0))
+    writer = None
+    watchdog = None
     try:
-        if job_type == "orphan_cleanup":
-            _run_orphan_cleanup(config, writer, stop_file)
-        elif job_type == "category_migration":
-            _run_category_migration(config, writer, stop_file)
-        elif job_type == "batch_book_rescan":
-            _run_batch_book_rescan(config, writer, stop_file)
-        elif job_type == "cover_inspection":
-            _run_cover_inspection(config, writer, stop_file)
-        else:
-            raise ValueError(f"지원하지 않는 유지보수 작업입니다. {job_type}")
+        with WorkerLock(lock_path, stale_seconds=max(120, watchdog_seconds * 2)):
+            writer = StatusWriter(status_path, job_type)
+            if watchdog_seconds:
+                def abort_timed_out_worker():
+                    writer.failed(
+                        "작업 대기 제한 시간을 초과했습니다.",
+                        f"watchdog timeout: {watchdog_seconds}s",
+                    )
+                    os._exit(124)
+
+                watchdog = threading.Timer(watchdog_seconds, abort_timed_out_worker)
+                watchdog.daemon = True
+                watchdog.start()
+            if job_type == "orphan_cleanup":
+                _run_orphan_cleanup(config, writer, stop_file)
+            elif job_type == "category_migration":
+                _run_category_migration(config, writer, stop_file)
+            elif job_type == "batch_book_rescan":
+                _run_batch_book_rescan(config, writer, stop_file)
+            elif job_type == "cover_inspection":
+                _run_cover_inspection(config, writer, stop_file)
+            elif job_type == "summary_report":
+                _run_summary_report(config, writer)
+            elif job_type == "library_statistics":
+                _run_library_statistics(config, writer, stop_file)
         return 0
+    except JobAlreadyRunning:
+        return 3
+    except LibraryStatisticsCancelled as error:
+        if writer is not None:
+            writer.stopped(str(error))
+        return 2
     except MigrationStopped as error:
-        writer.stopped("사용자 요청으로 카테고리 이관을 중지했습니다.")
+        if writer is not None:
+            writer.stopped("사용자 요청으로 카테고리 이관을 중지했습니다.")
         return 2
     except Exception as error:
         messages = {
@@ -651,11 +800,17 @@ def run_worker(config_path, status_path, stop_path):
             "category_migration": "카테고리 이관에 실패했습니다.",
             "batch_book_rescan": "검색 결과 일괄 재스캔에 실패했습니다.",
             "cover_inspection": "표지 정밀 검사에 실패했습니다.",
+            "summary_report": "상태 요약 갱신에 실패했습니다.",
+            "library_statistics": "라이브러리 통계 분석에 실패했습니다.",
         }
         message = messages[job_type]
-        writer.failed(message, error)
+        if writer is not None:
+            writer.failed(message, error)
         traceback.print_exc()
         return 1
+    finally:
+        if watchdog is not None:
+            watchdog.cancel()
 
 
 def main(argv=None):

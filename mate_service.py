@@ -37,11 +37,9 @@ from .category_migration import (
 )
 from .kavita_migration import KavitaMigrationEngine, parse_name_list
 from .library_statistics import (
-    LibraryStatisticsCancelled,
     LibraryStatisticsEngine,
 )
 from .statistics_cache import (
-    DEFAULT_SUMMARY_TARGET_CACHE,
     DEFAULT_STATISTICS_WIDGET_CACHE,
     build_cached_statistics_status,
 )
@@ -58,6 +56,10 @@ ISSUE_COUNT_CACHE_SECONDS = 300
 ISSUE_COUNT_STALE_SECONDS = 3600
 LIBRARY_STATISTICS_SNAPSHOT_SECONDS = 21600
 SUMMARY_SNAPSHOT_SECONDS = 604800
+SUMMARY_WATCHDOG_SECONDS = 1800
+LIBRARY_STATISTICS_WATCHDOG_SECONDS = 3600
+EXTERNAL_JOB_POLL_SECONDS = 0.2
+WORKER_START_GRACE_SECONDS = 30
 
 
 def _is_mariadb_statement_timeout(error):
@@ -162,9 +164,9 @@ class BookOasisMateService:
     def __init__(self, plugin):
         self.P = plugin
         self._lock = threading.RLock()
-        self._report_build_lock = threading.Lock()
-        self._report_thread = None
-        self._report_started_monotonic = None
+        self._report_process = None
+        self._report_status_path = None
+        self._report_adopted_finished_at = ""
         self._report_status = self._empty_report_status()
         self._cached_report = None
         self._cached_at = 0.0
@@ -194,9 +196,10 @@ class BookOasisMateService:
         self._cover_inspection_status_path = None
         self._cover_inspection_stop_path = None
         self._cover_inspection_status = self._empty_cover_inspection_status()
-        self._library_statistics_thread = None
-        self._library_statistics_stop = threading.Event()
-        self._library_statistics_started_monotonic = None
+        self._library_statistics_process = None
+        self._library_statistics_status_path = None
+        self._library_statistics_stop_path = None
+        self._library_statistics_adopted_finished_at = ""
         self._library_statistics_status = self._empty_library_statistics_status()
         self._library_statistics_snapshot_checked = False
         self._library_statistics_validation_thread = None
@@ -601,7 +604,6 @@ class BookOasisMateService:
         )
 
     def invalidate(self):
-        DEFAULT_SUMMARY_TARGET_CACHE.clear()
         DEFAULT_STATISTICS_WIDGET_CACHE.clear()
         with self._lock:
             self._cached_report = None
@@ -651,17 +653,45 @@ class BookOasisMateService:
 
     def library_statistics_status(self):
         self._restore_library_statistics_snapshot()
+        paths = self._library_statistics_paths()
+        if paths is not None:
+            external = self._external_job_status(
+                self._library_statistics_status_path or paths["status"],
+                "library_statistics",
+                self._library_statistics_process,
+                "라이브러리 통계 분석 프로세스가 종료되었습니다.",
+                watchdog_seconds=LIBRARY_STATISTICS_WATCHDOG_SECONDS,
+            )
+            if external:
+                self._adopt_library_statistics_status(external)
         with self._lock:
-            status = copy.deepcopy(self._library_statistics_status)
-            if (
-                status.get("is_working") == "run"
-                and self._library_statistics_started_monotonic is not None
-            ):
-                status["elapsed_seconds"] = round(
-                    time.monotonic() - self._library_statistics_started_monotonic,
-                    1,
-                )
-            return status
+            return copy.deepcopy(self._library_statistics_status)
+
+    def _adopt_library_statistics_status(self, status):
+        adopted = copy.deepcopy(status)
+        result = adopted.get("result")
+        if isinstance(result, dict):
+            adopted["library_name"] = str(
+                result.get("library_name") or adopted.get("library_name") or "전체 보관함"
+            )
+        finished_at = str(adopted.get("finished_at") or "")
+        if (
+            adopted.get("is_working") == "done"
+            and isinstance(result, dict)
+            and finished_at
+            and finished_at != self._library_statistics_adopted_finished_at
+        ):
+            snapshot_model = getattr(self.P, "library_statistics_model", None)
+            if snapshot_model is not None and snapshot_model.available():
+                try:
+                    snapshot_model.store(result, adopted.get("source") or {})
+                except Exception as error:
+                    self.P.logger.warning(
+                        f"BookOasis Mate 통계 스냅샷 저장 실패: {error}"
+                    )
+            self._library_statistics_adopted_finished_at = finished_at
+        with self._lock:
+            self._library_statistics_status = adopted
 
     def _restore_library_statistics_snapshot(self):
         with self._lock:
@@ -766,152 +796,76 @@ class BookOasisMateService:
             with self._lock:
                 self._library_statistics_validation_thread = None
 
-    def _library_statistics_progress(self, stage, current, total, message):
-        with self._lock:
-            status = self._library_statistics_status
-            if status.get("is_working") != "run":
-                return
-            status["stage"] = str(stage or "")
-            status["current"] = int(current or 0)
-            status["total"] = max(1, int(total or 100))
-            status["progress_percent"] = max(
-                0,
-                min(100, round(status["current"] / status["total"] * 100)),
-            )
-            status["message"] = str(message or "")
-
-    def _run_library_statistics(self, settings, db_type, library_id):
-        try:
-            engine = LibraryStatisticsEngine(settings)
-            source = engine.source_fingerprint(
-                db_type=db_type,
-                library_id=library_id,
-            )
-            result = engine.analyze(
-                db_type=db_type,
-                library_id=library_id,
-                on_progress=self._library_statistics_progress,
-                should_stop=self._library_statistics_stop.is_set,
-                source=source,
-            )
-            snapshot_model = getattr(self.P, "library_statistics_model", None)
-            if snapshot_model is not None and snapshot_model.available():
-                snapshot_model.store(result, source)
-            with self._lock:
-                status = self._library_statistics_status
-                status.update(
-                    {
-                        "is_working": "done",
-                        "stage": "complete",
-                        "current": 100,
-                        "total": 100,
-                        "progress_percent": 100,
-                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-                        "elapsed_seconds": round(
-                            time.monotonic() - self._library_statistics_started_monotonic,
-                            1,
-                        ),
-                        "message": "라이브러리 통계 분석을 완료했습니다.",
-                        "result": result,
-                        "error": "",
-                        "cached": False,
-                    }
-                )
-            self._debug(
-                "라이브러리 통계 분석 완료",
-                db_type=db_type,
-                library_id=library_id or "all",
-                total_items=result.get("summary", {}).get("total_items", 0),
-                duration_ms=result.get("duration_ms", 0),
-            )
-        except LibraryStatisticsCancelled as error:
-            with self._lock:
-                self._library_statistics_status.update(
-                    {
-                        "is_working": "stopped",
-                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-                        "elapsed_seconds": round(
-                            time.monotonic() - self._library_statistics_started_monotonic,
-                            1,
-                        ),
-                        "message": str(error),
-                        "stopped": True,
-                    }
-                )
-            self._debug(
-                "라이브러리 통계 분석 중지",
-                db_type=db_type,
-                library_id=library_id or "all",
-            )
-        except Exception as error:
-            self.P.logger.error(f"BookOasis Mate 라이브러리 통계 오류: {error}")
-            with self._lock:
-                self._library_statistics_status.update(
-                    {
-                        "is_working": "fail",
-                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-                        "elapsed_seconds": round(
-                            time.monotonic() - self._library_statistics_started_monotonic,
-                            1,
-                        ),
-                        "message": "라이브러리 통계 분석에 실패했습니다.",
-                        "error": str(error),
-                    }
-                )
-        finally:
-            with self._lock:
-                self._library_statistics_thread = None
-
     def start_library_statistics(self, db_type="general", library_id=None):
         db_type = str(db_type or "general").strip().lower()
         selected_library_id = str(library_id or "").strip()
-        with self._lock:
-            if self._library_statistics_status.get("is_working") == "run":
-                return {
-                    "started": False,
-                    "message": "라이브러리 통계 분석이 이미 실행 중입니다.",
-                    "status": copy.deepcopy(self._library_statistics_status),
-                }
-        catalog = self.library_statistics_catalog(db_type)
-        library_name = "전체 보관함"
-        if selected_library_id:
-            library = next(
-                (
-                    item
-                    for item in catalog.get("libraries", [])
-                    if str(item.get("id")) == selected_library_id
-                ),
-                None,
-            )
-            if library is None:
-                raise ValueError("선택한 보관함을 찾을 수 없습니다.")
-            library_name = str(library.get("name") or f"보관함 {selected_library_id}")
+        current = self.library_statistics_status()
+        if current.get("is_working") == "run":
+            return {
+                "started": False,
+                "message": "라이브러리 통계 분석이 이미 실행 중입니다.",
+                "status": current,
+            }
+        settings = self.settings()
+        paths = self._library_statistics_paths(settings)
+        if paths is None:
+            raise ValueError("라이브러리 통계 작업 경로를 확인할 수 없습니다.")
         initial = self._empty_library_statistics_status()
         initial.update(
             {
                 "is_working": "run",
                 "db_type": db_type,
                 "library_id": selected_library_id,
-                "library_name": library_name,
+                "library_name": (
+                    f"보관함 {selected_library_id}"
+                    if selected_library_id
+                    else "전체 보관함"
+                ),
                 "stage": "prepare",
                 "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "started_epoch": time.time(),
+                "worker_pid": 0,
                 "message": "라이브러리 통계 분석을 준비하고 있습니다.",
             }
         )
-        self._library_statistics_stop.clear()
+        config = {
+            "job_type": "library_statistics",
+            "settings": settings,
+            "db_type": db_type,
+            "library_id": selected_library_id,
+            "watchdog_seconds": LIBRARY_STATISTICS_WATCHDOG_SECONDS,
+            "lock_path": str(paths["lock"]),
+            "delete_config_after_read": True,
+        }
+        process = self._launch_singleton_maintenance_worker(
+            paths,
+            config,
+            initial,
+            sensitive_config=True,
+        )
+        if process is None:
+            current = self._external_job_status(
+                paths["status"],
+                "library_statistics",
+                None,
+                "라이브러리 통계 분석 프로세스가 종료되었습니다.",
+                watchdog_seconds=LIBRARY_STATISTICS_WATCHDOG_SECONDS,
+            ) or current
+            self._adopt_library_statistics_status(current)
+            return {
+                "started": False,
+                "message": "라이브러리 통계 분석이 이미 실행 중입니다.",
+                "status": copy.deepcopy(current),
+            }
         with self._lock:
             self._library_statistics_status = initial
             self._library_statistics_snapshot_checked = True
             self._library_statistics_validation_token += 1
-            self._library_statistics_started_monotonic = time.monotonic()
-            thread = self._spawn_background(
-                self._run_library_statistics,
-                (self.settings(), db_type, selected_library_id or None),
-                name="bookoasis-mate-library-statistics",
-            )
-            self._library_statistics_thread = thread
+            self._library_statistics_process = process
+            self._library_statistics_status_path = paths["status"]
+            self._library_statistics_stop_path = paths["stop"]
         self._debug(
-            "라이브러리 통계 백그라운드 분석 시작",
+            "라이브러리 통계 외부 분석 시작",
             db_type=db_type,
             library_id=selected_library_id or "all",
         )
@@ -929,9 +883,20 @@ class BookOasisMateService:
                 "message": "실행 중인 라이브러리 통계 분석이 없습니다.",
                 "status": current,
             }
-        self._library_statistics_stop.set()
+        paths = self._library_statistics_paths()
+        stop_path = self._library_statistics_stop_path or (
+            paths["stop"] if paths is not None else None
+        )
+        if stop_path is not None:
+            Path(stop_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(stop_path).touch()
         with self._lock:
             self._library_statistics_status["message"] = "현재 데이터 묶음 처리 후 중지합니다."
+            if self._library_statistics_status_path is not None:
+                self._write_database_migration_json(
+                    self._library_statistics_status_path,
+                    self._library_statistics_status,
+                )
         self._debug("라이브러리 통계 분석 중지 요청")
         return {
             "requested": True,
@@ -940,7 +905,6 @@ class BookOasisMateService:
         }
 
     def report(self, force=False):
-        started = time.monotonic()
         settings = self.settings()
         fingerprint = tuple(sorted((key, str(value)) for key, value in settings.items()))
         ttl = settings["cache_seconds"]
@@ -949,21 +913,46 @@ class BookOasisMateService:
             if not force and fresh and fingerprint == self._settings_fingerprint:
                 self._debug("상태 요약 캐시 사용", age_seconds=round(time.monotonic() - self._cached_at, 1))
                 return self._cached_report
+        started = self.start_report_refresh(force=force)
+        status = started["status"]
+        deadline = time.monotonic() + SUMMARY_WATCHDOG_SECONDS + WORKER_START_GRACE_SECONDS
+        while status.get("is_working") == "run" and time.monotonic() < deadline:
+            time.sleep(EXTERNAL_JOB_POLL_SECONDS)
+            status = self.report_refresh_status()
+        if status.get("is_working") == "done" and isinstance(status.get("result"), dict):
+            return status["result"]
+        if status.get("is_working") == "run":
+            raise TimeoutError("상태 요약 대기 제한 시간을 초과했습니다.")
+        raise RuntimeError(status.get("error") or status.get("message") or "상태 요약 생성에 실패했습니다.")
 
-        with self._report_build_lock:
-            with self._lock:
-                fresh = self._cached_report is not None and time.monotonic() - self._cached_at <= ttl
-                if not force and fresh and fingerprint == self._settings_fingerprint:
-                    self._debug("상태 요약 캐시 사용", age_seconds=round(time.monotonic() - self._cached_at, 1))
-                    return self._cached_report
-            self._debug("상태 요약 생성 시작", force=str(bool(force)).lower())
-            engine = self.engine(settings)
-            source = engine.source_fingerprint()
-            report = engine.build_report(
-                source=source,
-                target_cache=DEFAULT_SUMMARY_TARGET_CACHE,
-                force=bool(force),
+    def report_refresh_status(self):
+        self._restore_summary_snapshot()
+        paths = self._summary_report_paths()
+        if paths is not None:
+            external = self._external_job_status(
+                self._report_status_path or paths["status"],
+                "summary_report",
+                self._report_process,
+                "상태 요약 프로세스가 종료되었습니다.",
+                watchdog_seconds=SUMMARY_WATCHDOG_SECONDS,
             )
+            if external:
+                self._adopt_summary_report_status(external)
+        with self._lock:
+            return copy.deepcopy(self._report_status)
+
+    def _adopt_summary_report_status(self, status):
+        adopted = copy.deepcopy(status)
+        report = adopted.get("result")
+        finished_at = str(adopted.get("finished_at") or "")
+        if (
+            adopted.get("is_working") == "done"
+            and isinstance(report, dict)
+            and finished_at
+            and finished_at != self._report_adopted_finished_at
+        ):
+            settings = self.settings()
+            source = adopted.get("source") or {}
             snapshot_model = getattr(self.P, "summary_snapshot_model", None)
             if snapshot_model is not None and snapshot_model.available():
                 try:
@@ -979,29 +968,19 @@ class BookOasisMateService:
             with self._lock:
                 self._cached_report = report
                 self._cached_at = time.monotonic()
-                self._settings_fingerprint = fingerprint
+                self._settings_fingerprint = tuple(
+                    sorted((key, str(value)) for key, value in settings.items())
+                )
+            self._report_adopted_finished_at = finished_at
             self._debug(
                 "상태 요약 생성 완료",
                 status=report.get("status"),
                 total_books=report.get("totals", {}).get("total_books", 0),
                 problem_books=report.get("totals", {}).get("problem_books", 0),
-                duration_ms=self._duration_ms(started),
+                elapsed_seconds=adopted.get("elapsed_seconds", 0),
             )
-            return report
-
-    def report_refresh_status(self):
-        self._restore_summary_snapshot()
         with self._lock:
-            status = copy.deepcopy(self._report_status)
-            if (
-                status.get("is_working") == "run"
-                and self._report_started_monotonic is not None
-            ):
-                status["elapsed_seconds"] = round(
-                    time.monotonic() - self._report_started_monotonic,
-                    1,
-                )
-            return status
+            self._report_status = adopted
 
     @staticmethod
     def _summary_settings_fingerprint(settings):
@@ -1132,54 +1111,15 @@ class BookOasisMateService:
             with self._lock:
                 self._summary_validation_thread = None
 
-    def _run_report_refresh(self, force):
-        try:
-            report = self.report(force=force)
-            with self._lock:
-                self._report_status.update(
-                    {
-                        "is_working": "done",
-                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-                        "elapsed_seconds": round(
-                            time.monotonic() - self._report_started_monotonic,
-                            1,
-                        ),
-                        "message": "상태 요약 갱신을 완료했습니다.",
-                        "result": report,
-                        "error": "",
-                        "cached": False,
-                    }
-                )
-        except Exception as error:
-            self.P.logger.error(f"BookOasis Mate 상태 요약 갱신 오류: {error}")
-            with self._lock:
-                self._report_status.update(
-                    {
-                        "is_working": "fail",
-                        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-                        "elapsed_seconds": round(
-                            time.monotonic() - self._report_started_monotonic,
-                            1,
-                        ),
-                        "message": "상태 요약 갱신에 실패했습니다.",
-                        "error": str(error),
-                    }
-                )
-        finally:
-            with self._lock:
-                self._report_thread = None
-
     def start_report_refresh(self, force=False):
         self._restore_summary_snapshot()
         settings = self.settings()
         fingerprint = tuple(sorted((key, str(value)) for key, value in settings.items()))
         ttl = settings["cache_seconds"]
+        current = self.report_refresh_status()
+        if current.get("is_working") == "run":
+            return {"started": False, "status": current}
         with self._lock:
-            if self._report_status.get("is_working") == "run":
-                return {
-                    "started": False,
-                    "status": self.report_refresh_status(),
-                }
             cached_report = copy.deepcopy(self._cached_report)
             fresh = (
                 cached_report is not None
@@ -1199,26 +1139,51 @@ class BookOasisMateService:
                 })
                 self._report_status = status
                 return {"started": False, "status": copy.deepcopy(status)}
-
-            status = self._empty_report_status()
-            status.update(
-                {
-                    "is_working": "run",
-                    "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-                    "message": "BookOasis DB 상태를 백그라운드에서 집계하고 있습니다.",
-                    "result": cached_report,
-                    "cached": cached_report is not None,
-                }
-            )
+        paths = self._summary_report_paths(settings)
+        if paths is None:
+            raise ValueError("상태 요약 작업 경로를 확인할 수 없습니다.")
+        status = self._empty_report_status()
+        status.update(
+            {
+                "is_working": "run",
+                "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "started_epoch": time.time(),
+                "worker_pid": 0,
+                "message": "BookOasis DB 상태를 백그라운드에서 집계하고 있습니다.",
+                "result": cached_report,
+                "cached": cached_report is not None,
+            }
+        )
+        config = {
+            "job_type": "summary_report",
+            "settings": settings,
+            "force": bool(force),
+            "watchdog_seconds": SUMMARY_WATCHDOG_SECONDS,
+            "lock_path": str(paths["lock"]),
+            "delete_config_after_read": True,
+        }
+        process = self._launch_singleton_maintenance_worker(
+            paths,
+            config,
+            status,
+            sensitive_config=True,
+        )
+        if process is None:
+            current = self._external_job_status(
+                paths["status"],
+                "summary_report",
+                None,
+                "상태 요약 프로세스가 종료되었습니다.",
+                watchdog_seconds=SUMMARY_WATCHDOG_SECONDS,
+            ) or current
+            self._adopt_summary_report_status(current)
+            return {"started": False, "status": copy.deepcopy(current)}
+        with self._lock:
             self._report_status = status
-            self._report_started_monotonic = time.monotonic()
-            thread = self._spawn_background(
-                self._run_report_refresh,
-                (bool(force),),
-                name="bookoasis-mate-summary-report",
-            )
-            self._report_thread = thread
-            return {"started": True, "status": copy.deepcopy(status)}
+            self._report_process = process
+            self._report_status_path = paths["status"]
+        self._debug("상태 요약 외부 집계 시작", force=str(bool(force)).lower())
+        return {"started": True, "status": copy.deepcopy(status)}
 
     def run_and_record(self, trigger="manual"):
         started = time.monotonic()
@@ -2516,6 +2481,8 @@ class BookOasisMateService:
             "status": root / f"{prefix}_status.json",
             "stop": root / f"{prefix}_stop",
             "log": root / f"{prefix}_worker.log",
+            "lock": root / f"{prefix}_lock",
+            "launch_lock": root / f"{prefix}_launch.lock",
         }
 
     def _maintenance_state_root(self, settings=None):
@@ -2543,6 +2510,14 @@ class BookOasisMateService:
                 return Path(value).expanduser().resolve() / ".bookoasis_mate_jobs"
         return None
 
+    def _summary_report_paths(self, settings=None):
+        root = self._maintenance_state_root(settings)
+        return self._maintenance_worker_paths(root, "summary_report") if root else None
+
+    def _library_statistics_paths(self, settings=None):
+        root = self._maintenance_state_root(settings)
+        return self._maintenance_worker_paths(root, "library_statistics") if root else None
+
     @staticmethod
     def _worker_pid_alive(pid):
         if os.name == "nt":
@@ -2563,16 +2538,41 @@ class BookOasisMateService:
         except OSError:
             return None
 
-    def _external_job_status(self, status_path, job_type, process, failure_message):
+    def _external_job_status(
+        self,
+        status_path,
+        job_type,
+        process,
+        failure_message,
+        watchdog_seconds=None,
+    ):
         status = self._read_database_migration_json(status_path)
         if not status or status.get("job_type") != job_type:
             return None
         started_epoch = float(status.get("started_epoch") or 0)
+        elapsed_seconds = max(0, time.time() - started_epoch) if started_epoch else 0
         if status.get("is_working") == "run" and started_epoch:
-            status["elapsed_seconds"] = round(
-                max(0, time.time() - started_epoch),
-                1,
+            status["elapsed_seconds"] = round(elapsed_seconds, 1)
+        if (
+            status.get("is_working") == "run"
+            and watchdog_seconds
+            and elapsed_seconds > int(watchdog_seconds) + WORKER_START_GRACE_SECONDS
+        ):
+            if process is not None and process.poll() is None:
+                try:
+                    process.terminate()
+                except OSError:
+                    pass
+            status.update(
+                {
+                    "is_working": "error",
+                    "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                    "message": "작업 대기 제한 시간을 초과해 중지했습니다.",
+                    "error": f"watchdog timeout: {int(watchdog_seconds)}s",
+                }
             )
+            self._write_database_migration_json(status_path, status)
+            return status
         exited = (
             process is not None and process.poll() is not None
         )
@@ -2592,6 +2592,54 @@ class BookOasisMateService:
             )
             self._write_database_migration_json(status_path, status)
         return status
+
+    def _launch_singleton_maintenance_worker(
+        self,
+        paths,
+        config,
+        initial_status,
+        sensitive_config=False,
+    ):
+        launch_lock = paths["launch_lock"]
+        launch_lock.parent.mkdir(parents=True, exist_ok=True)
+        acquired = False
+        for _ in range(2):
+            try:
+                launch_lock.mkdir()
+                acquired = True
+                break
+            except FileExistsError:
+                try:
+                    age = max(0, time.time() - launch_lock.stat().st_mtime)
+                except OSError:
+                    return None
+                if age < WORKER_START_GRACE_SECONDS:
+                    return None
+                try:
+                    launch_lock.rmdir()
+                except OSError:
+                    return None
+        if not acquired:
+            return None
+        try:
+            existing = self._read_database_migration_json(paths["status"])
+            if isinstance(existing, dict) and existing.get("is_working") == "run":
+                started_epoch = float(existing.get("started_epoch") or 0)
+                age = max(0, time.time() - started_epoch) if started_epoch else 0
+                alive = self._worker_pid_alive(existing.get("worker_pid"))
+                if alive is not False or age < WORKER_START_GRACE_SECONDS:
+                    return None
+            return self._launch_maintenance_worker(
+                paths,
+                config,
+                initial_status,
+                sensitive_config=sensitive_config,
+            )
+        finally:
+            try:
+                launch_lock.rmdir()
+            except OSError:
+                pass
 
     def _launch_maintenance_worker(self, paths, config, initial_status, sensitive_config=False):
         paths["config"].parent.mkdir(parents=True, exist_ok=True)
