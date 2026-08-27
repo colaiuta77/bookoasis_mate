@@ -309,6 +309,17 @@
 .doctor-guide-grid > div { padding:12px 14px; border:1px solid #dee2e6; border-radius:7px; }
 .doctor-guide-grid strong, .doctor-guide-grid span { display:block; }
 .doctor-guide-grid span { margin-top:4px; color:#6c757d; font-size:.84rem; }
+.doctor-manual-summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
+.doctor-manual-summary-grid > div { padding:12px 14px; border:1px solid #dee2e6; border-radius:7px; }
+.doctor-manual-summary-grid strong, .doctor-manual-summary-grid span { display:block; }
+.doctor-manual-summary-grid span { margin-top:4px; color:#6c757d; font-size:.84rem; }
+.doctor-manual-table-wrap { margin:12px 0; overflow-x:auto; border:1px solid #dee2e6; border-radius:7px; }
+.doctor-manual-table { width:100%; min-width:620px; margin:0; border-collapse:collapse; }
+.doctor-manual-table th, .doctor-manual-table td { padding:10px 12px; border-bottom:1px solid #dee2e6; text-align:left; vertical-align:top; }
+.doctor-manual-table th { background:rgba(127,127,127,.07); font-size:.82rem; }
+.doctor-manual-table tbody tr:last-child td { border-bottom:0; }
+.doctor-manual-note { margin:12px 0; padding:11px 13px; border-left:4px solid #6c757d; border-radius:5px; background:rgba(127,127,127,.06); }
+.doctor-manual-note-info { border-left-color:#0d6efd; background:rgba(13,110,253,.07); }
 .doctor-dependency-actions { display:flex; flex-wrap:wrap; gap:7px; }
 .doctor-dependency-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .doctor-dependency-card { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px 16px; align-items:start; padding:15px; border:1px solid #dee2e6; border-radius:8px; background:rgba(127,127,127,.03); }
@@ -366,7 +377,9 @@
   .doctor-sql-results { border-color:#495057; }
   .doctor-font-upload, .doctor-font-list, .doctor-font-row { border-color:#495057; }
   .doctor-font-dropzone { border-color:#6c757d; color:#ced4da; }
-  .doctor-db-action-card, .doctor-db-modal-identity, .doctor-guide-grid > div, .doctor-dependency-card, .doctor-dependency-job { border-color:#495057; }
+  .doctor-db-action-card, .doctor-db-modal-identity, .doctor-guide-grid > div, .doctor-manual-summary-grid > div, .doctor-manual-table-wrap, .doctor-manual-table th, .doctor-manual-table td, .doctor-dependency-card, .doctor-dependency-job { border-color:#495057; }
+  .doctor-manual-table th { background:rgba(255,255,255,.06); }
+  .doctor-manual-note-info { background:rgba(13,110,253,.15); }
   .doctor-statistics-kpi { border-color:#495057; }
   .doctor-statistics-kpi strong { color:#f8f9fa; }
 }

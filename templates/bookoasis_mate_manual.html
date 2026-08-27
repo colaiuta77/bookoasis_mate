@@ -17,6 +17,23 @@
 <div class="tab-content doctor-manual-tab-content">
 <div class="tab-pane fade show active" id="manual-guide-pane" role="tabpanel" aria-labelledby="manual-guide-tab">
 <div class="doctor-section doctor-card">
+  <h4>지원 범위 한눈에 보기</h4>
+  <div class="doctor-manual-table-wrap">
+    <table class="doctor-manual-table">
+      <thead><tr><th>기능</th><th>일반</th><th>성인</th><th>오디오북</th><th>비디오</th></tr></thead>
+      <tbody>
+        <tr><td>상태 요약·라이브러리 통계</td><td>지원</td><td>지원</td><td>지원</td><td>지원</td></tr>
+        <tr><td>스캔 상태·DB 정보·읽기 전용 SQL</td><td>지원</td><td>지원</td><td>지원</td><td>지원</td></tr>
+        <tr><td>문제 도서·시리즈·표지 진단</td><td>지원</td><td>지원</td><td>도서 전용</td><td>도서 전용</td></tr>
+        <tr><td>카테고리 이관·통DB 패키지</td><td>지원</td><td>지원</td><td>지원</td><td>지원</td></tr>
+        <tr><td>Google Drive 변경 연동</td><td>지원</td><td>지원</td><td>지원</td><td>지원</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="doctor-muted mb-0">오디오북과 비디오는 전용 스키마를 사용합니다. 일반·성인 도서용 진단을 억지로 적용하지 않고 전용 집계와 스캔 기능만 제공합니다.</p>
+</div>
+
+<div class="doctor-section doctor-card">
   <h4>1. 공통 연결 조건</h4>
   <ul>
     <li>FF에서 BookOasis URL에 접근할 수 있어야 하며 관리자 API 기능에는 BookOasis 관리자 계정이 필요합니다.</li>
@@ -100,21 +117,26 @@ RUN apt-get update \
   <h4>8. 네이티브 플러그인 관리</h4>
   <ul>
     <li><strong>카탈로그</strong>는 Mate에서 확인한 저장소와 사용자가 등록한 저장소를 관리하며, 실제 설치 전에 ZIP 구조와 Python 패키지를 검사합니다.</li>
-    <li><strong>실행 상태</strong>는 최신 BookOasis 관리 API에서 설치 발견 여부, 활성화 여부와 실제 로드 성공·오류를 구분해 표시합니다.</li>
+    <li><strong>설치 플러그인</strong>은 설치 정보와 최신 BookOasis 관리 API 결과를 결합해 활성화 여부와 실제 로드 성공·오류를 구분해 표시합니다.</li>
     <li>플러그인이 <code>config_schema</code>를 제공하면 Mate에서 설정할 수 있습니다. 비밀번호·토큰 값은 브라우저에 반환하지 않으며 비워 두면 기존 값을 유지합니다.</li>
     <li>네이티브 업데이트 계약을 지원하는 플러그인은 BookOasis 업데이트 API를 사용합니다. GitHub 직접 설치·업데이트와는 별도 기능입니다.</li>
-    <li><strong>Topic 탐색</strong>은 GitHub의 <code>bookoasis-plugin</code> Topic 후보를 백그라운드에서 수집하고 캐시합니다. 후보는 자동 설치하지 않으며 VERSION과 플러그인 ID 확인 후 기존 패키지 검사로 넘깁니다.</li>
+    <li>GitHub의 <code>bookoasis-plugin</code> Topic과 등록한 비공개 Gitea의 <code>bookoasis-plugin</code>·<code>security-bookoasis-plugin</code> Topic 후보를 백그라운드에서 수집하고 캐시합니다. 후보는 자동 설치하지 않으며 플러그인 ID 확인 후 기존 패키지 검사로 넘깁니다.</li>
   </ul>
 </div>
 
 <div class="doctor-section doctor-card">
   <h4>9. 기능별 안내 위치</h4>
-  <div class="doctor-guide-grid">
+  <div class="doctor-manual-summary-grid">
+    <div class="doctor-manual-summary-card"><strong>설정</strong><span>BookOasis·DB 연결, 진단 정책, 환경 파일과 Docker 관리.</span></div>
     <div><strong>라이브러리 진단</strong><span>판정 기준, 스캔 상태, 표지·고아 파일 동작 방식.</span></div>
     <div><strong>카테고리 이관</strong><span>내보내기, 신규 가져오기, 기존 카테고리 병합.</span></div>
     <div><strong>통DB 이관</strong><span>Kavita 이관과 BookOasis 전체 패키지 내보내기·가져오기.</span></div>
     <div><strong>Google Drive 연동</strong><span>gd-poller 래퍼, 경로 매핑, VFS 갱신과 스캔 큐.</span></div>
+    <div><strong>SQL 도구</strong><span>네 엔진 DB의 읽기 전용 진단 프리셋과 제한된 SELECT 실행.</span></div>
+    <div><strong>플러그인 관리</strong><span>카탈로그, 설치 플러그인, GitHub·Gitea·ZIP 설치와 작업 이력.</span></div>
     <div><strong>커스텀 폰트</strong><span>공유 마운트 경로, 파일 업로드와 BookOasis 재시작 조건.</span></div>
+    <div><strong>Docker·환경 파일</strong><span>환경·Compose 편집, BookOasis 재시작과 이미지 업데이트 안전 범위.</span></div>
+    <div><strong>로그·검사 이력</strong><span>BookOasis 주요 로그, 과거 ZIP 로그와 진단 기록 확인.</span></div>
   </div>
 </div>
 </div>
