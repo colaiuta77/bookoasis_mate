@@ -1,6 +1,7 @@
 # FF rclone 인증을 재사용해 Google Drive Changes API 변경을 Mate 이벤트로 변환합니다.
 import json
 import posixpath
+import shlex
 import subprocess
 import time
 from urllib.error import HTTPError, URLError
@@ -44,7 +45,7 @@ def resolve_ff_rclone_settings(plugin_manager):
     return binary, config
 
 
-def list_google_drive_remotes(rclone_path, config_path, timeout=30, runner=None):
+def _rclone_config_dump(rclone_path, config_path, timeout=30, runner=None):
     runner = runner or subprocess.run
     command = [rclone_path, "--config", config_path, "config", "dump"]
     result = runner(
@@ -54,12 +55,61 @@ def list_google_drive_remotes(rclone_path, config_path, timeout=30, runner=None)
         timeout=max(5, min(int(timeout or 30), 300)),
         check=True,
     )
-    payload = json.loads(result.stdout or "{}")
+    return json.loads(result.stdout or "{}")
+
+
+def list_google_drive_remotes(rclone_path, config_path, timeout=30, runner=None):
+    payload = _rclone_config_dump(rclone_path, config_path, timeout, runner)
     return sorted(
         str(name)
         for name, config in payload.items()
         if isinstance(config, dict) and str(config.get("type") or "").lower() == "drive"
     )
+
+
+def list_google_drive_sources(rclone_path, config_path, timeout=30, runner=None):
+    payload = _rclone_config_dump(rclone_path, config_path, timeout, runner)
+    drives = {
+        str(name)
+        for name, config in payload.items()
+        if isinstance(config, dict) and str(config.get("type") or "").lower() == "drive"
+    }
+    sources = [
+        {"name": name, "type": "drive", "upstreams": [name]}
+        for name in sorted(drives)
+    ]
+    for name, config in sorted(payload.items()):
+        if not isinstance(config, dict) or str(config.get("type") or "").lower() != "union":
+            continue
+        upstreams = []
+        for token in shlex.split(str(config.get("upstreams") or "")):
+            parts = token.rsplit(":", 1)
+            if len(parts) == 2 and parts[1].lower() in {"ro", "nc", "writeback", "rw"}:
+                token = parts[0]
+            remote = token.split(":", 1)[0].strip()
+            if remote in drives and remote not in upstreams:
+                upstreams.append(remote)
+        if upstreams:
+            sources.append({"name": str(name), "type": "union", "upstreams": upstreams})
+    return sources
+
+
+def resolve_google_drive_source(sources, remote, source_remote=None):
+    remote = str(remote or "").strip().rstrip(":")
+    source_remote = str(source_remote or remote).strip().rstrip(":")
+    source = next((item for item in sources if item.get("name") == remote), None)
+    if source is None:
+        raise ValueError(f"rclone 리모트 {remote or '-'}를 설정 파일에서 찾을 수 없습니다.")
+    upstreams = source.get("upstreams") or []
+    if source_remote not in upstreams:
+        raise ValueError(f"{remote}에서 감시할 Google Drive upstream을 선택해 주세요.")
+    return source_remote
+
+
+def google_drive_state_remote(remote, source_remote=None):
+    remote = str(remote or "").strip().rstrip(":")
+    source_remote = str(source_remote or remote).strip().rstrip(":")
+    return remote if remote == source_remote else f"{remote}->{source_remote}"
 
 
 def parse_builtin_roots(value, legacy=None, limit=10):
@@ -81,6 +131,7 @@ def parse_builtin_roots(value, legacy=None, limit=10):
             raise ValueError(f"자체 변경 감지 {index}번 설정 형식이 올바르지 않습니다.")
         item = {
             "remote": str(row.get("remote") or "").strip().rstrip(":"),
+            "source_remote": str(row.get("source_remote") or row.get("remote") or "").strip().rstrip(":"),
             "root_id": str(row.get("root_id") or "").strip(),
             "remote_path": str(row.get("remote_path") or "").strip().rstrip("/"),
             "local_root": str(row.get("local_root") or "").strip().replace("\\", "/").rstrip("/"),
@@ -130,21 +181,23 @@ def build_change_event(previous, current):
 class GoogleDriveChangesClient:
     def __init__(
         self, rclone_path, config_path, remote, root_id, remote_path, local_root,
-        timeout=30, api_timeout=None, runner=None, opener=None,
+        timeout=30, api_timeout=None, runner=None, opener=None, source_remote=None,
     ):
         self.rclone_path = rclone_path
         self.config_path = config_path
         self.remote = str(remote or "").strip().rstrip(":")
+        self.source_remote = str(source_remote or self.remote).strip().rstrip(":")
+        self.state_remote = google_drive_state_remote(self.remote, self.source_remote)
         self.root_id = str(root_id or "").strip()
         self.remote_path = str(remote_path or "").strip().strip("/")
         self.local_root = str(local_root or "").strip().rstrip("/")
-        self.item_scope = f"{self.remote}:{self.root_id}"
+        self.item_scope = f"{self.state_remote}:{self.root_id}"
         self.timeout = max(5, min(int(timeout or 30), 300))
         self.api_timeout = max(5, min(int(api_timeout or self.timeout), 300))
         self.runner = runner or subprocess.run
         self.opener = opener or urlopen
         self._credentials = None
-        if not self.remote or not self.root_id or not self.local_root:
+        if not self.remote or not self.source_remote or not self.root_id or not self.local_root:
             raise ValueError("자체 변경 감지의 rclone 리모트, 감시 폴더 ID와 로컬 루트를 입력해 주세요.")
 
     def _run_json(self, *args):
@@ -155,9 +208,9 @@ class GoogleDriveChangesClient:
     def _access(self):
         if self._credentials is not None:
             return self._credentials
-        self._run_json("about", f"{self.remote}:", "--json")
+        self._run_json("about", f"{self.source_remote}:", "--json")
         config = self._run_json("config", "dump")
-        remote = config.get(self.remote) or {}
+        remote = config.get(self.source_remote) or {}
         if str(remote.get("type") or "").lower() != "drive":
             raise RuntimeError("선택한 rclone 리모트는 Google Drive 형식이 아닙니다.")
         try:
@@ -286,6 +339,7 @@ class GoogleDriveChangesClient:
 class GoogleDriveChangesWatcher:
     def __init__(self, client, state_model, item_model, event_model, extensions, buffer_seconds=60):
         self.client = client
+        self.state_remote = getattr(client, "state_remote", client.remote)
         self.state_model = state_model
         self.item_model = item_model
         self.event_model = event_model
@@ -293,12 +347,12 @@ class GoogleDriveChangesWatcher:
         self.buffer_seconds = buffer_seconds
 
     def reset(self):
-        self.state_model.reset(self.client.remote, self.client.root_id)
+        self.state_model.reset(self.state_remote, self.client.root_id)
         self.item_model.clear_remote(self.client.item_scope)
 
     def poll_once(self):
         try:
-            state = self.state_model.get(self.client.remote, self.client.root_id) or {}
+            state = self.state_model.get(self.state_remote, self.client.root_id) or {}
             if state.get("status") == "blocked":
                 return 0
             page_token = str(state.get("page_token") or "")
@@ -307,7 +361,7 @@ class GoogleDriveChangesWatcher:
                 if not page_token:
                     raise RuntimeError("Google Drive 시작 페이지 토큰을 받지 못했습니다.")
                 self.state_model.save_cursor(
-                    self.client.remote, self.client.root_id, page_token, status="ready"
+                    self.state_remote, self.client.root_id, page_token, status="ready"
                 )
                 return 0
             accepted = 0
@@ -346,19 +400,19 @@ class GoogleDriveChangesWatcher:
                 elif current and current.get("path"):
                     self.item_model.upsert(self.client.item_scope, current)
             self.state_model.save_cursor(
-                self.client.remote, self.client.root_id, final_token, status="ready"
+                self.state_remote, self.client.root_id, final_token, status="ready"
             )
             return accepted
         except Exception as error:
             if getattr(error, "permanent", False):
-                current = self.state_model.get(self.client.remote, self.client.root_id) or {}
+                current = self.state_model.get(self.state_remote, self.client.root_id) or {}
                 self.state_model.save_cursor(
-                    self.client.remote,
+                    self.state_remote,
                     self.client.root_id,
                     current.get("page_token", ""),
                     status="blocked",
                     error=str(error),
                 )
             else:
-                self.state_model.set_error(self.client.remote, self.client.root_id, str(error))
+                self.state_model.set_error(self.state_remote, self.client.root_id, str(error))
             raise

@@ -11,8 +11,10 @@ from .discord_notifier import DiscordWebhookError, DiscordWebhookNotifier
 from .gdrive_changes import (
     GoogleDriveChangesClient,
     GoogleDriveChangesWatcher,
-    list_google_drive_remotes,
+    google_drive_state_remote,
+    list_google_drive_sources,
     parse_builtin_roots,
+    resolve_google_drive_source,
     resolve_ff_rclone_settings,
 )
 from .gdrive_scan import (
@@ -92,6 +94,7 @@ class ModuleGDriveScan(PluginModuleBase):
         state = state or {}
         return {
             "remote": str(root.get("remote") or ""),
+            "source_remote": str(root.get("source_remote") or root.get("remote") or ""),
             "root_id": str(root.get("root_id") or ""),
             "remote_path": str(root.get("remote_path") or ""),
             "local_root": str(root.get("local_root") or ""),
@@ -199,7 +202,10 @@ class ModuleGDriveScan(PluginModuleBase):
             arg["gdrive_scan_builtin_states"] = [
                 self._builtin_state_view(
                     root,
-                    self.state_model.get(root["remote"], root["root_id"])
+                    self.state_model.get(
+                        google_drive_state_remote(root["remote"], root.get("source_remote")),
+                        root["root_id"],
+                    )
                     if self.state_model is not None
                     else None,
                 )
@@ -221,8 +227,8 @@ class ModuleGDriveScan(PluginModuleBase):
                 "path": rclone_path,
                 "config": rclone_config_path,
             }
-            arg["gdrive_scan_drive_remotes"] = (
-                list_google_drive_remotes(
+            arg["gdrive_scan_drive_sources"] = (
+                list_google_drive_sources(
                     rclone_path,
                     rclone_config_path,
                     timeout=current_settings["gdrive_scan_rc_timeout"],
@@ -232,7 +238,7 @@ class ModuleGDriveScan(PluginModuleBase):
             )
         except Exception as error:
             arg["gdrive_scan_ff_rclone"] = {"available": False, "error": str(error)}
-            arg["gdrive_scan_drive_remotes"] = []
+            arg["gdrive_scan_drive_sources"] = []
         arg["page"] = page
         return render_template(
             f"{P.package_name}_{self.name}_{page}.html",
@@ -433,13 +439,15 @@ class ModuleGDriveScan(PluginModuleBase):
                 clients = self._builtin_clients(self._settings())
                 checked = []
                 for client in clients:
+                    state_remote = getattr(client, "state_remote", client.remote)
+                    source_remote = getattr(client, "source_remote", client.remote)
                     root = client.validate_root()
                     token = client.start_page_token()
                     saved = None
                     if self.state_model is not None:
-                        current = self.state_model.get(client.remote, client.root_id) or {}
+                        current = self.state_model.get(state_remote, client.root_id) or {}
                         saved = self.state_model.save_cursor(
-                            client.remote,
+                            state_remote,
                             client.root_id,
                             current.get("page_token") or token,
                             status="ready",
@@ -449,6 +457,7 @@ class ModuleGDriveScan(PluginModuleBase):
                         **self._builtin_state_view(
                             {
                                 "remote": client.remote,
+                                "source_remote": source_remote,
                                 "root_id": client.root_id,
                                 "remote_path": client.remote_path,
                                 "local_root": client.local_root,
@@ -477,6 +486,7 @@ class ModuleGDriveScan(PluginModuleBase):
                     self._builtin_state_view(
                         {
                             "remote": client.remote,
+                            "source_remote": getattr(client, "source_remote", client.remote),
                             "root_id": client.root_id,
                             "remote_path": client.remote_path,
                             "local_root": client.local_root,
@@ -663,6 +673,11 @@ class ModuleGDriveScan(PluginModuleBase):
         roots = settings.get("gdrive_scan_builtin_roots") or []
         if not roots:
             raise ValueError("Mate 자체 변경 감지 경로를 하나 이상 추가해 주세요.")
+        sources = list_google_drive_sources(
+            rclone_path,
+            rclone_config_path,
+            timeout=settings["gdrive_scan_rc_timeout"],
+        )
         return [
             GoogleDriveChangesClient(
                 rclone_path,
@@ -673,6 +688,9 @@ class ModuleGDriveScan(PluginModuleBase):
                 root["local_root"],
                 timeout=settings["gdrive_scan_rc_timeout"],
                 api_timeout=settings["gdrive_scan_changes_timeout"],
+                source_remote=resolve_google_drive_source(
+                    sources, root["remote"], root.get("source_remote")
+                ),
             )
             for root in roots
         ]
