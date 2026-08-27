@@ -9,7 +9,7 @@
 - 스캔 상태 및 주요 로그 실시간 확인.
 - 시리즈 누락, 표지 문제와 고아 표지파일 검사.
 - 안전한 읽기 전용 SQL 진단 도구와 운영 프리셋.
-- gd-poller CommandDispatcher·WebhookDispatcher 또는 FF rclone을 재사용하는 Mate 자체 변경 감지 기반 BookOasis 개별 경로 스캔.
+- gd-poller CommandDispatcher·WebhookDispatcher 또는 FF rclone의 직접 Drive·Union upstream을 재사용하는 Mate 자체 변경 감지 기반 BookOasis 개별 경로 스캔.
 - BookOasis 일반·성인·오디오북·비디오 카테고리 내보내기·가져오기.
 - Kavita 및 BookOasis 공유 패키지 통DB 이관.
 - BookOasis 커스텀 폰트 업로드와 설치 상태 확인.
@@ -31,7 +31,7 @@ volumes:
 
 ## DB 엔진 설정
 
-- BookOasis Mate v1.9.6은 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
+- BookOasis Mate v1.9.7은 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
 - MariaDB 모드는 `PyMySQL 1.1` 이상이 필요하며 호스트·포트·사용자·비밀번호·DB 접두어를 입력합니다.
 - 자동 감지는 FF의 `DB_ENGINE`, `DBMS` 환경변수와 MariaDB 설정을 확인합니다. 연결 실패 시 남아 있는 SQLite 파일로 자동 전환하지 않습니다.
 - 상태 요약, 문제 도서, 스캔 상태, 시리즈 누락, 표지 검사, 고아 표지 정리, Google Drive 연동과 읽기 전용 SQL은 두 엔진을 지원합니다.
@@ -41,6 +41,11 @@ volumes:
 - SQLite와 MariaDB 통DB 패키지는 서로 교차 복원할 수 없습니다.
 
 ## Changelog
+
+- v1.9.7 (2026-08-27)
+  - Mate 자체 변경 감지에서 rclone Union 리모트의 직접 Google Drive upstream을 선택해 감시하도록 지원.
+  - Union과 실제 Drive 조합별로 체크포인트와 파일 상태를 분리하고 기존 직접 Drive 설정과의 호환성을 유지.
+  - 중첩 Union·crypt·로컬 upstream을 자동 선택하지 않도록 지원 범위와 설정 안내를 명확히 표시.
 
 - v1.9.6 (2026-08-27)
   - 전체 매뉴얼에 일반·성인·오디오북·비디오 DB별 지원 범위와 실제 메뉴 위치를 반영.

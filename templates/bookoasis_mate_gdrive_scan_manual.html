@@ -80,7 +80,7 @@
   <ul>
     <li><strong>CommandDispatcher</strong>는 기존 래퍼 스크립트를 유지해야 하거나 오래된 gd-poller와 호환해야 할 때 사용합니다.</li>
     <li><strong>WebhookDispatcher</strong>는 gd-poller가 JSON을 직접 보내므로 래퍼 파일과 명령행 API 키 노출을 없앨 수 있어 새 설치에 권장합니다.</li>
-    <li><strong>Mate 자체 감지</strong>는 gd-poller 없이 FF rclone 플러그인의 실행 파일과 rclone.conf를 재사용합니다. Google Drive 직접 리모트만 지원하며 crypt·union 리모트는 지원하지 않습니다.</li>
+    <li><strong>Mate 자체 감지</strong>는 gd-poller 없이 FF rclone 플러그인의 실행 파일과 rclone.conf를 재사용합니다. Google Drive 직접 리모트와, 1단계 Union 안에서 사용자가 선택한 직접 Drive upstream을 지원합니다.</li>
   </ul>
   <p>세 방식은 동시에 사용하지 않습니다. 연동 설정의 변경 감지 방식에서 하나만 선택합니다.</p>
 </div>
@@ -108,12 +108,17 @@
   <h4>5. Mate 자체 감지 설정</h4>
   <ol>
     <li>FF rclone 플러그인에서 Google Drive 리모트 인증과 rclone.conf 저장을 완료합니다.</li>
-    <li>Mate가 FF rclone 설정에서 확인한 Google Drive 직접 리모트를 선택하고, 감시 폴더 ID·리모트 상대 경로·BookOasis DB 기준 로컬 루트를 한 묶음으로 등록합니다.</li>
+    <li>Mate가 FF rclone 설정에서 확인한 Google Drive 또는 Union 리모트를 선택하고, 감시 폴더 ID·리모트 상대 경로·BookOasis DB 기준 로컬 루트를 한 묶음으로 등록합니다.</li>
+    <li>Union을 선택하면 <strong>실제 감시 Drive upstream</strong>에서 변경을 읽을 직접 Google Drive 리모트를 고릅니다. Union 자체에는 Google Changes API 인증이 없으므로 선택한 upstream의 OAuth와 체크포인트를 사용합니다.</li>
     <li>서로 겹치지 않는 감시 경로를 최대 10개까지 등록할 수 있습니다. <code>rclone 감시 경로</code>에는 <code>GDRIVE/READING</code>처럼 리모트 기준 상대 경로를 입력하고 <code>/mnt/...</code> 경로를 넣지 않습니다.</li>
     <li>저장된 설정 연결 테스트로 모든 감시 경로의 FF rclone과 Google Drive Changes API 연결을 확인합니다.</li>
     <li><strong>rclone 명령 제한 시간</strong>은 리모트·설정 확인에, <strong>Google Drive Changes API 제한 시간</strong>은 변경 내역 HTTP 조회에만 적용합니다. API 401은 rclone 토큰을 다시 읽어 한 번, 읽기 제한 시간은 1초 뒤 한 번 재시도합니다.</li>
     <li>첫 실행은 전체 재귀 목록 조회를 실행하지 않고 현재 시점의 시작 토큰만 저장합니다. 따라서 대규모 드라이브도 초기 <code>lsjson --recursive</code> 지연 없이 이후 변경부터 감지합니다.</li>
   </ol>
+  <div class="alert alert-info">
+    <strong>Union 지원 범위.</strong>
+    <code>union_gds</code>가 <code>gds2:/:ro</code>를 포함한다면 리모트는 <code>union_gds</code>, 실제 감시 Drive는 <code>gds2</code>로 선택합니다. BookOasis 경로 루트는 Union 마운트 경로를 그대로 사용합니다. 중첩 Union·crypt·로컬 upstream은 자동 해석하지 않습니다.
+  </div>
   <p>첫 체크포인트 이전에 이미 이동·삭제된 항목은 원래 경로 정보가 없어 이벤트로 복원하지 못할 수 있습니다. 체크포인트 초기화는 rclone 경로나 감시 폴더가 바뀐 경우에만 사용하며, 초기화 시 과거 전체를 다시 읽지 않고 새로운 현재 시점부터 감지합니다. 액세스 토큰은 Mate DB와 로그에 저장하지 않습니다.</p>
 </div>
 

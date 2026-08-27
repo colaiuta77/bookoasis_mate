@@ -37,7 +37,7 @@
   </div>
   <div id="gdrive_scan_builtin_mode" class="doctor-section doctor-card">
     <h4>Mate 자체 변경 감지</h4>
-    <p class="doctor-muted">FF rclone 플러그인의 실행 파일과 rclone.conf를 재사용합니다. Google Drive Changes API 체크포인트와 파일 경로 상태는 Mate DB에 저장합니다.</p>
+    <p class="doctor-muted">FF rclone 플러그인의 실행 파일과 rclone.conf를 재사용합니다. 직접 Drive 또는 Union 안의 실제 Drive upstream을 감시하며 Google Drive Changes API 체크포인트와 파일 경로 상태는 Mate DB에 저장합니다.</p>
     <div class="alert alert-info gdrive-scan-rclone-status">
       <strong>FF rclone 연결 정보</strong>
       <span>실행 파일 <code>{{ arg.get('gdrive_scan_ff_rclone', {}).get('path', '사용 불가') }}</code></span>
@@ -131,7 +131,7 @@
 </div>
 
 <script>
-var gdriveScanDriveRemotes = {{ arg.get('gdrive_scan_drive_remotes', [])|tojson }};
+var gdriveScanDriveSources = {{ arg.get('gdrive_scan_drive_sources', [])|tojson }};
 var gdriveScanBuiltinRoots = {{ arg.get('gdrive_scan_builtin_root_rows', [])|tojson }};
 var gdriveScanBuiltinStates = {{ arg.get('gdrive_scan_builtin_states', [])|tojson }};
 
@@ -147,6 +147,7 @@ function gdriveScanRenderStates(rows) {
     heading.appendChild(bookoasisMateText('span', row.status === 'error' ? 'text-danger' : 'text-success', row.status === 'error' ? '오류' : (row.checkpoint_ready ? '연결됨' : '초기화됨')));
     card.appendChild(heading);
     card.appendChild(bookoasisMateText('div', 'doctor-path', row.local_root || row.remote_path || '-'));
+    if (row.source_remote && row.source_remote !== row.remote) card.appendChild(bookoasisMateText('small', 'doctor-muted', '실제 감시 Drive · ' + row.source_remote));
     card.appendChild(bookoasisMateText('small', 'doctor-muted', 'Changes API 체크포인트 · ' + (row.checkpoint_ready ? '저장됨' : '없음')));
     card.appendChild(bookoasisMateText('small', 'doctor-muted', '마지막 확인 · ' + (row.last_poll_at || '미실행')));
     if (row.error) card.appendChild(bookoasisMateText('small', 'text-danger', row.error));
@@ -176,11 +177,11 @@ function gdriveScanRootInput(name, value, placeholder) {
 function gdriveScanRootRemote(value) {
   var select = document.createElement('select');
   select.dataset.field = 'remote';
-  var names = gdriveScanDriveRemotes.slice();
+  var names = gdriveScanDriveSources.map(function(item) { return item.name; });
   if (value && names.indexOf(value) < 0) names.push(value);
   var empty = document.createElement('option');
   empty.value = '';
-  empty.textContent = names.length ? '리모트 선택' : 'Drive 리모트 없음';
+  empty.textContent = names.length ? '리모트 선택' : 'Drive·Union 리모트 없음';
   select.appendChild(empty);
   names.forEach(function(name) {
     var option = document.createElement('option');
@@ -192,18 +193,58 @@ function gdriveScanRootRemote(value) {
   return select;
 }
 
+function gdriveScanSource(remote) {
+  return gdriveScanDriveSources.find(function(item) { return item.name === remote; }) || null;
+}
+
+function gdriveScanUpdateUpstream(select, wrap, remote, value) {
+  bookoasisMateClear(select);
+  var source = gdriveScanSource(remote);
+  var upstreams = source ? (source.upstreams || []) : [];
+  if (value && upstreams.indexOf(value) < 0) upstreams.push(value);
+  if (upstreams.length > 1) {
+    var emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = 'Drive upstream 선택';
+    select.appendChild(emptyOption);
+  }
+  upstreams.forEach(function(name) {
+    var option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    select.appendChild(option);
+  });
+  select.value = value && upstreams.indexOf(value) >= 0 ? value : (upstreams.length === 1 ? upstreams[0] : '');
+  wrap.style.display = source && source.type === 'union' ? 'block' : 'none';
+}
+
 function gdriveScanAddRoot(row) {
   if (document.querySelectorAll('.gdrive-scan-builtin-root').length >= 10) {
     notify('감시 경로는 최대 10개까지 등록할 수 있습니다.', 'warning');
     return;
   }
   row = row || {};
-  if (!row.remote && gdriveScanDriveRemotes.length === 1) row.remote = gdriveScanDriveRemotes[0];
+  if (!row.remote && gdriveScanDriveSources.length === 1) row.remote = gdriveScanDriveSources[0].name;
   var card = document.createElement('div');
   card.className = 'doctor-card gdrive-scan-builtin-root';
   var grid = document.createElement('div');
   grid.className = 'gdrive-scan-root-grid';
-  grid.appendChild(gdriveScanRootField('rclone 리모트', gdriveScanRootRemote(row.remote || ''), 'FF rclone.conf에서 확인된 Google Drive 리모트입니다.'));
+  var remoteSelect = gdriveScanRootRemote(row.remote || '');
+  var remoteField = gdriveScanRootField('rclone 리모트', remoteSelect, 'FF rclone.conf에서 확인된 Drive 또는 Union 리모트입니다.');
+  var upstreamWrap = document.createElement('div');
+  upstreamWrap.className = 'gdrive-scan-union-upstream';
+  upstreamWrap.appendChild(bookoasisMateText('small', 'doctor-muted', '실제 감시 Drive upstream'));
+  var upstreamSelect = document.createElement('select');
+  upstreamSelect.dataset.field = 'source_remote';
+  upstreamSelect.className = 'form-control';
+  upstreamWrap.appendChild(upstreamSelect);
+  upstreamWrap.appendChild(bookoasisMateText('small', 'gdrive-scan-root-field-help', 'Union 자체가 아니라 선택한 직접 Drive의 변경 내역만 읽습니다.'));
+  remoteField.appendChild(upstreamWrap);
+  gdriveScanUpdateUpstream(upstreamSelect, upstreamWrap, row.remote || '', row.source_remote || row.remote || '');
+  remoteSelect.addEventListener('change', function() {
+    gdriveScanUpdateUpstream(upstreamSelect, upstreamWrap, remoteSelect.value, '');
+  });
+  grid.appendChild(remoteField);
   grid.appendChild(gdriveScanRootField('감시 폴더 ID', gdriveScanRootInput('root_id', row.root_id, 'Google Drive 폴더 ID'), 'Google Drive 폴더 URL의 ID입니다.'));
   grid.appendChild(gdriveScanRootField('rclone 감시 경로', gdriveScanRootInput('remote_path', row.remote_path, 'GDRIVE/READING'), '리모트 내부의 상대 경로입니다. 예: GDRIVE/READING'));
   grid.appendChild(gdriveScanRootField('BookOasis 경로 루트', gdriveScanRootInput('local_root', row.local_root, '/mnt/gds2/GDRIVE/READING'), 'BookOasis가 사용하는 절대 경로입니다. 예: /mnt/gds2/GDRIVE/READING'));
@@ -228,8 +269,8 @@ function gdriveScanSerializeRoots() {
       row[input.dataset.field] = String(input.value || '').trim();
     });
     if (!row.remote && !row.root_id && !row.remote_path && !row.local_root) return;
-    if (!row.remote || !row.root_id || !row.local_root) {
-      throw new Error('각 감시 경로의 리모트, 폴더 ID와 BookOasis 경로 루트를 모두 입력해 주세요.');
+    if (!row.remote || !row.source_remote || !row.root_id || !row.local_root) {
+      throw new Error('각 감시 경로의 리모트, 실제 감시 Drive, 폴더 ID와 BookOasis 경로 루트를 모두 입력해 주세요.');
     }
     if (row.remote_path.charAt(0) === '/') {
       throw new Error('rclone 감시 경로는 /mnt 경로가 아닌 리모트 기준 상대 경로로 입력해 주세요.');
