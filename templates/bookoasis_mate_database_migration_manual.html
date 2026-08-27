@@ -6,6 +6,17 @@
 <div class="doctor-section doctor-card">
   <h3>통DB 이관 매뉴얼</h3>
   <p>Kavita 도서·메타데이터·표지와 진행률을 BookOasis에 새로 생성하거나 기존 항목에 적용하고, BookOasis 전체 DB와 표지를 공유 패키지로 내보내고 가져옵니다.</p>
+  <h4>지원 범위</h4>
+  <div class="doctor-manual-table-wrap">
+    <table class="doctor-manual-table">
+      <thead><tr><th>작업</th><th>대상</th><th>DB 엔진 조건</th><th>적용 방식</th></tr></thead>
+      <tbody>
+        <tr><td>Kavita → BookOasis</td><td>일반·성인</td><td>SQLite·MariaDB</td><td>신규 생성 또는 기존 항목 갱신</td></tr>
+        <tr><td>BookOasis 패키지 내보내기</td><td>일반·성인·오디오북·비디오</td><td>현재 엔진</td><td>전체 DB·표지 백업</td></tr>
+        <tr><td>BookOasis 패키지 가져오기</td><td>일반·성인·오디오북·비디오</td><td>같은 DB 엔진</td><td>전체 교체</td></tr>
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <div class="doctor-section doctor-card">
@@ -45,6 +56,7 @@
   <ul>
     <li>첫 실행은 반드시 Dry Run으로 수행하고 결과의 일치·미일치 수와 오류를 확인합니다.</li>
     <li>실제 적용 전 현재 일반·성인·오디오북·비디오 DB와 표지 디렉터리를 별도로 백업합니다. 플러그인 백업과 별개로 외부 백업도 유지하는 것을 권장합니다.</li>
+    <li>실행 전 자동 백업은 현재 설치에 존재하는 대상 DB만 백업합니다. 신규 설치처럼 대상 DB가 아직 없으면 해당 DB 백업은 건너뜁니다.</li>
     <li>실제 이관 중에는 BookOasis, 스캐너와 메타데이터 변경 작업을 중지해야 합니다.</li>
     <li>BookOasis 패키지 가져오기는 패키지에 포함된 일반·성인·오디오북·비디오 DB와 전체 표지를 교체하며 기존 데이터와 병합하지 않습니다.</li>
     <li>공유 DB의 사용자 계정과 독서 진행률도 함께 바뀌므로 출처와 BookOasis 스키마 버전을 신뢰할 수 있는 패키지만 사용합니다.</li>
