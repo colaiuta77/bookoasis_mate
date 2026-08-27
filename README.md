@@ -31,7 +31,7 @@ volumes:
 
 ## DB 엔진 설정
 
-- BookOasis Mate v1.9.5는 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
+- BookOasis Mate v1.9.6은 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
 - MariaDB 모드는 `PyMySQL 1.1` 이상이 필요하며 호스트·포트·사용자·비밀번호·DB 접두어를 입력합니다.
 - 자동 감지는 FF의 `DB_ENGINE`, `DBMS` 환경변수와 MariaDB 설정을 확인합니다. 연결 실패 시 남아 있는 SQLite 파일로 자동 전환하지 않습니다.
 - 상태 요약, 문제 도서, 스캔 상태, 시리즈 누락, 표지 검사, 고아 표지 정리, Google Drive 연동과 읽기 전용 SQL은 두 엔진을 지원합니다.
@@ -41,6 +41,11 @@ volumes:
 - SQLite와 MariaDB 통DB 패키지는 서로 교차 복원할 수 없습니다.
 
 ## Changelog
+
+- v1.9.6 (2026-08-27)
+  - 전체 매뉴얼에 일반·성인·오디오북·비디오 DB별 지원 범위와 실제 메뉴 위치를 반영.
+  - 라이브러리 진단, 카테고리 이관과 통DB 이관의 엔진 조건·백업·가상 그룹·교체 범위를 명확히 정리.
+  - 지원표와 기능 요약 카드의 공통 스타일 및 다크 모드 표시를 개선.
 
 - v1.9.5 (2026-08-27)
   - Google Drive 변경 감지를 기존 CommandDispatcher, WebhookDispatcher, FF rclone 기반 Mate 자체 감지 중에서 선택하도록 확장.
