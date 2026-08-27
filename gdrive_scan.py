@@ -130,6 +130,50 @@ def find_repeated_leading_prefix(path):
     return ""
 
 
+def infer_path_prefix_replacement(original_path, corrected_path):
+    """샘플 경로의 공통 후행 구간을 기준으로 잘못된 접두사와 교체값을 찾습니다."""
+    original = normalize_event_path(original_path)
+    corrected = normalize_event_path(corrected_path)
+    original_parts = [part for part in original.split("/") if part]
+    corrected_parts = [part for part in corrected.split("/") if part]
+    shared_head = 0
+    while (
+        shared_head < len(original_parts)
+        and shared_head < len(corrected_parts)
+        and original_parts[shared_head] == corrected_parts[shared_head]
+    ):
+        shared_head += 1
+    common = 0
+    while (
+        common < len(original_parts) - shared_head
+        and common < len(corrected_parts) - shared_head
+        and original_parts[-1 - common] == corrected_parts[-1 - common]
+    ):
+        common += 1
+    if common == 0:
+        raise ValueError("원본과 수정 경로에서 공통 파일·하위 경로를 찾을 수 없습니다.")
+    source_parts = original_parts[:-common]
+    replacement_parts = corrected_parts[:-common]
+    if not source_parts or not replacement_parts:
+        raise ValueError("일괄 치환할 경로 접두사를 확인할 수 없습니다.")
+    source = "/" + "/".join(source_parts)
+    replacement = "/" + "/".join(replacement_parts)
+    if source == replacement:
+        raise ValueError("원본과 수정 경로의 접두사가 같습니다.")
+    return source, replacement
+
+
+def replace_path_prefix(path, source_prefix, replacement_prefix):
+    normalized = normalize_event_path(path)
+    source = normalize_event_path(source_prefix).rstrip("/") or "/"
+    replacement = normalize_event_path(replacement_prefix).rstrip("/") or "/"
+    if normalized == source:
+        return replacement
+    if normalized.startswith(f"{source}/"):
+        return normalize_event_path(f"{replacement}{normalized[len(source):]}")
+    return normalized
+
+
 def parse_vfs_rules(value):
     rules = []
     for line in str(value or "").replace("\r", "").splitlines():
@@ -225,6 +269,23 @@ def validate_event(action, item_type, path, removed_path="", extensions=None):
     }
 
 
+def webhook_payload_to_event_fields(payload):
+    """gd-poller WebhookDispatcher JSON을 기존 이벤트 계약으로 변환합니다."""
+    payload = payload or {}
+    item_type = str(payload.get("item_type") or payload.get("type") or "").strip().lower()
+    if not item_type:
+        is_folder = payload.get("is_folder", False)
+        if isinstance(is_folder, str):
+            is_folder = is_folder.strip().lower() in {"1", "true", "yes", "on"}
+        item_type = "directory" if is_folder else "file"
+    return {
+        "action": payload.get("action"),
+        "item_type": item_type,
+        "path": payload.get("path"),
+        "removed_path": payload.get("removed_path") or payload.get("previous_path") or "",
+    }
+
+
 def event_vfs_operations(event):
     action = event["action"]
     item_type = event["item_type"]
@@ -295,6 +356,61 @@ def find_library(path, libraries):
         if normalized == root or normalized.startswith(f"{root.rstrip('/')}/"):
             return library
     return None
+
+
+def suggest_path_mapping(path, libraries):
+    """수신 경로와 보관함 루트가 하나로 대응할 때만 접두사 매핑을 제안합니다."""
+    received = normalize_event_path(path)
+    direct = find_library(received, libraries)
+    if direct is not None:
+        return {
+            "mapping": "",
+            "mapped_path": received,
+            "library": direct,
+            "warning": "",
+        }
+
+    event_parts = [part for part in received.split("/") if part]
+    candidates = {}
+    for library in libraries:
+        root = normalize_event_path(library["root"])
+        root_parts = [part for part in root.split("/") if part]
+        for source_size in range(1, len(event_parts)):
+            suffix = event_parts[source_size:]
+            if len(suffix) < 2:
+                continue
+            for target_size in range(1, len(root_parts) + 1):
+                mapped_parts = root_parts[:target_size] + suffix
+                mapped = "/" + "/".join(mapped_parts)
+                if mapped != root and not mapped.startswith(f"{root.rstrip('/')}/"):
+                    continue
+                source = "/" + "/".join(event_parts[:source_size])
+                target = "/" + "/".join(root_parts[:target_size])
+                key = (library.get("db_type"), library.get("id"), library["root"])
+                candidate = {
+                    "mapping": f"{source} => {target}",
+                    "mapped_path": mapped,
+                    "library": library,
+                    "warning": "",
+                    "_rank": (source_size, target_size),
+                }
+                if key not in candidates or candidate["_rank"] < candidates[key]["_rank"]:
+                    candidates[key] = candidate
+
+    if len(candidates) == 1:
+        result = next(iter(candidates.values()))
+        result.pop("_rank", None)
+        return result
+    if len(candidates) > 1:
+        warning = "여러 경로 매핑 후보가 있어 자동으로 선택하지 않았습니다."
+    else:
+        warning = "보관함 경로와 확실히 대응하는 매핑을 찾지 못했습니다."
+    return {
+        "mapping": "",
+        "mapped_path": received,
+        "library": None,
+        "warning": warning,
+    }
 
 
 def event_scan_targets(event, libraries):

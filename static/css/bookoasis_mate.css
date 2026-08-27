@@ -8,6 +8,48 @@
 .doctor-code-window pre { overflow-x:auto; margin:0; padding:14px 16px; border:0; border-radius:0; background:transparent; color:#e6edf3; font-family:Consolas,Monaco,"Courier New",monospace; font-size:.82rem; line-height:1.55; tab-size:2; }
 .doctor-code-window code { padding:0; background:transparent; color:inherit; font:inherit; white-space:pre; }
 .doctor-card h5 { margin:0 0 8px; font-size:.95rem; color:#6c757d; }
+.gdrive-mode-flows { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:14px 0 10px; }
+.gdrive-mode-flow { display:flex; min-width:0; flex-direction:column; gap:7px; padding:13px 14px; border:1px solid #dee2e6; border-radius:8px; background:rgba(127,127,127,.035); }
+.gdrive-mode-flow span { overflow-wrap:anywhere; font-size:.84rem; }
+.gdrive-mode-flow small { color:#6c757d; line-height:1.4; }
+.gdrive-mode-common-flow { padding:10px 12px; border-radius:7px; background:rgba(111,66,193,.09); color:#55406f; font-size:.85rem; font-weight:600; text-align:center; }
+.gdrive-scan-root-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin:18px 0 10px; }
+.gdrive-scan-root-heading h5 { margin:0 0 4px; color:inherit; font-size:1rem; }
+.gdrive-scan-root-actions { flex:0 0 auto; }
+.gdrive-scan-builtin-root { margin-bottom:10px; padding:14px; }
+.gdrive-scan-root-grid { display:grid; grid-template-columns:minmax(125px,.7fr) minmax(170px,1fr) minmax(180px,1fr) minmax(235px,1.35fr) auto; gap:10px; align-items:start; }
+.gdrive-scan-root-field { display:block; min-width:0; margin:0; }
+.gdrive-scan-root-field > span { display:block; min-height:20px; font-weight:600; }
+.gdrive-scan-root-field .form-control { width:100%; margin-top:4px; }
+.gdrive-scan-root-field-help { display:block; margin-top:5px; color:#7a858f; font-size:.72rem; font-weight:400; line-height:1.35; }
+.gdrive-scan-root-delete { padding-top:24px; }
+.gdrive-scan-root-help { margin:2px 0 14px; }
+.gdrive-scan-rclone-status { display:flex; flex-direction:column; gap:5px; }
+.gdrive-scan-rclone-status code { overflow-wrap:anywhere; color:#d63384; }
+.gdrive-scan-poll-setting { width:100%; max-width:260px; margin:18px 0; text-align:left; }
+.gdrive-scan-poll-setting label, .gdrive-scan-poll-setting small { display:block; }
+.gdrive-scan-poll-setting .form-control { width:170px; margin:7px 0 0; }
+.gdrive-scan-checkpoint-help { margin:14px 0 12px; }
+.gdrive-scan-builtin-actions { justify-content:flex-end; margin:0; padding-top:12px; border-top:1px solid #e5e7eb; }
+.gdrive-scan-builtin-actions .doctor-query-status { margin-right:auto; order:-1; }
+.gdrive-scan-state-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px; margin-top:12px; }
+.gdrive-scan-state-card { display:flex; min-width:0; flex-direction:column; gap:5px; }
+.gdrive-scan-state-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.gdrive-scan-state-card small { display:block; }
+@media (max-width: 900px) {
+  .gdrive-mode-flows { grid-template-columns:1fr; }
+  .gdrive-scan-root-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .gdrive-scan-root-delete { grid-column:1/-1; padding-top:0; text-align:right; }
+}
+@media (max-width: 640px) {
+  .gdrive-scan-root-heading { align-items:stretch; flex-direction:column; }
+  .gdrive-scan-root-actions .btn { width:100%; }
+  .gdrive-scan-root-grid { grid-template-columns:1fr; }
+  .gdrive-scan-root-delete { grid-column:auto; }
+  .gdrive-scan-builtin-actions { align-items:stretch; flex-direction:column; }
+  .gdrive-scan-builtin-actions .btn { width:100%; }
+  .gdrive-scan-builtin-actions .doctor-query-status { margin:0; order:0; }
+}
 .doctor-value { font-size:1.55rem; font-weight:700; line-height:1.2; }
 .doctor-sub { margin-top:7px; font-size:.85rem; color:#6c757d; }
 .doctor-summary-dashboard { margin-bottom:18px; }

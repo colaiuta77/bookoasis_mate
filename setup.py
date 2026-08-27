@@ -79,10 +79,18 @@ except Exception as error:
     P.logger.error(traceback.format_exc())
 
 P.gdrive_scan_model = None
+P.gdrive_scan_state_model = None
+P.gdrive_item_state_model = None
 try:
-    from .model_gdrive_scan import ModelGDriveScanEvent
+    from .model_gdrive_scan import (
+        ModelGDriveItemState,
+        ModelGDriveScanEvent,
+        ModelGDriveScanState,
+    )
 
     P.gdrive_scan_model = ModelGDriveScanEvent
+    P.gdrive_scan_state_model = ModelGDriveScanState
+    P.gdrive_item_state_model = ModelGDriveItemState
 except Exception as error:
     P.logger.error(f"BookOasis Mate 변경 이벤트 모델을 초기화하지 못했습니다: {error}")
     P.logger.error(traceback.format_exc())
