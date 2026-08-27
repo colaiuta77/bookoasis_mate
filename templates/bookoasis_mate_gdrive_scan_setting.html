@@ -5,23 +5,90 @@
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 {{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['gdrive_scan_wake_btn', '작업자 깨우기']]) }}
+<ul class="nav nav-tabs doctor-setting-tabs" role="tablist">
+  <li class="nav-item"><a class="nav-link active" id="gdrive-scan-basic-tab" href="#">기본 설정</a></li>
+  <li class="nav-item"><a class="nav-link" id="gdrive-scan-integration-tab" href="#">연동 설정</a></li>
+</ul>
 <form id="setting">
+  <div id="gdrive_scan_basic_intro">
   <div class="doctor-section doctor-card">
     <h3>Google Drive 변경 감지 연동</h3>
     <p class="doctor-muted">gd-poller 이벤트를 먼저 FlaskFarm DB에 저장하고 버퍼 시간이 지난 뒤 BookOasis 개별 경로 스캔을 실행합니다. 삭제·이동의 이전 경로만 rclone VFS에서 제거하며 현재 경로 갱신은 BookOasis가 담당합니다.</p>
   </div>
 
   {{ macros.setting_checkbox('gdrive_scan_enabled', '연동 사용', value=arg['gdrive_scan_enabled'], desc=['꺼져 있으면 외부 이벤트 API가 503으로 응답합니다.']) }}
+  {{ macros.setting_select(
+    'gdrive_scan_input_mode',
+    '변경 감지 방식',
+    [
+      ['command', 'gd-poller CommandDispatcher'],
+      ['webhook', 'gd-poller WebhookDispatcher'],
+      ['builtin', 'Mate 자체 감지 · FF rclone']
+    ],
+    col='6',
+    desc=['한 가지 방식만 선택합니다. 기존 설치는 CommandDispatcher가 기본값입니다.'],
+    value=arg.get('gdrive_scan_input_mode', 'command')
+  ) }}
+  </div>
+  <div id="gdrive_scan_integration_mode">
+  <div id="gdrive_scan_external_mode" class="doctor-section doctor-card">
+    <h4>gd-poller 연동</h4>
+    <p class="doctor-muted">CommandDispatcher는 기존 래퍼를 실행하고 WebhookDispatcher는 아래 이벤트 API로 JSON을 직접 전송합니다. 두 방식 모두 동일한 Mate 대기열과 스캔 로직을 사용합니다.</p>
+  </div>
+  <div id="gdrive_scan_builtin_mode" class="doctor-section doctor-card">
+    <h4>Mate 자체 변경 감지</h4>
+    <p class="doctor-muted">FF rclone 플러그인의 실행 파일과 rclone.conf를 재사용합니다. Google Drive Changes API 체크포인트와 파일 경로 상태는 Mate DB에 저장합니다.</p>
+    <div class="alert alert-info gdrive-scan-rclone-status">
+      <strong>FF rclone 연결 정보</strong>
+      <span>실행 파일 <code>{{ arg.get('gdrive_scan_ff_rclone', {}).get('path', '사용 불가') }}</code></span>
+      <span>설정 파일 <code>{{ arg.get('gdrive_scan_ff_rclone', {}).get('config', arg.get('gdrive_scan_ff_rclone', {}).get('error', '')) }}</code></span>
+    </div>
+    <div class="alert alert-warning">
+      <strong>rclone.conf 권한 범위.</strong>
+      파일과 변경 내역을 읽으려면 <code>drive.readonly</code>가 필요합니다. <code>drive.activity.readonly</code>는 Drive Activity API용이며 Mate 자체 감지에는 필수가 아닙니다.
+    </div>
+    <div class="gdrive-scan-poll-setting">
+      <label for="gdrive_scan_builtin_poll_seconds"><strong>변경 확인 주기(초)</strong></label>
+      <input type="number" class="form-control" id="gdrive_scan_builtin_poll_seconds" name="gdrive_scan_builtin_poll_seconds" min="15" max="3600" value="{{ arg.get('gdrive_scan_builtin_poll_seconds', '60') }}">
+      <small class="form-text text-muted">15~3600초 사이에서 Google Drive 변경 내역을 확인합니다.</small>
+    </div>
+    <input type="hidden" id="gdrive_scan_builtin_roots" name="gdrive_scan_builtin_roots" value="[]">
+    <div class="gdrive-scan-root-heading">
+      <div>
+        <h5>감시 경로</h5>
+        <span class="doctor-muted">서로 겹치지 않는 Google Drive 경로를 최대 10개까지 등록할 수 있습니다.</span>
+      </div>
+      <div class="gdrive-scan-root-actions">
+        <button type="button" class="btn btn-outline-primary" id="gdrive_scan_builtin_add">감시 경로 추가</button>
+      </div>
+    </div>
+    <div id="gdrive_scan_builtin_root_rows"></div>
+    <p class="doctor-muted gdrive-scan-root-help">리모트와 폴더 ID는 Google Drive 위치를 식별하고, 두 경로는 rclone 위치를 BookOasis 보관함 경로로 연결합니다.</p>
+    <div class="alert alert-warning gdrive-scan-checkpoint-help">
+      <strong>체크포인트란.</strong> 마지막으로 확인한 위치를 뜻합니다. 초기화하면 저장된 Changes API 토큰과 파일 경로 캐시를 지우고 현재 시점부터 새 기준을 잡으므로 이전 변경은 다시 수집하지 않습니다.
+    </div>
+    <div class="doctor-toolbar gdrive-scan-builtin-actions">
+      <button type="button" class="btn btn-outline-primary" id="gdrive_scan_builtin_test">저장된 설정 연결 테스트</button>
+      <button type="button" class="btn btn-outline-danger" id="gdrive_scan_builtin_reset">체크포인트 초기화</button>
+      <span id="gdrive_scan_builtin_status" class="doctor-query-status"></span>
+    </div>
+    <div id="gdrive_scan_builtin_state_rows" class="gdrive-scan-state-grid"></div>
+  </div>
+  </div>
+  <div id="gdrive_scan_basic_settings">
   {{ macros.setting_input_int('gdrive_scan_buffer_seconds', '이벤트 버퍼 시간(초)', value=arg['gdrive_scan_buffer_seconds'], desc=['기본 60초이며 같은 시간 구간의 동일 보관함 스캔 요청을 한 번으로 합칩니다.', '0이면 즉시 처리합니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_worker_interval', '작업자 확인 주기(초)', value=arg['gdrive_scan_worker_interval'], desc=['대기 이벤트를 확인하는 주기입니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_max_attempts', '최대 처리 횟수', value=arg['gdrive_scan_max_attempts'], desc=['실패 시 지수형 대기 후 재시도하며 마지막 실패는 변경 이벤트 메뉴에서 다시 실행할 수 있습니다.']) }}
-  {{ macros.setting_input_text('gdrive_scan_extensions', '대상 파일 확장자', value=arg['gdrive_scan_extensions'], desc=['쉼표로 구분합니다.', 'BookOasis 도서와 메타데이터 보조 파일 확장자를 기본값으로 제공합니다.']) }}
-  {{ macros.setting_input_int('gdrive_scan_rc_timeout', 'rclone RC 제한 시간(초)', value=arg['gdrive_scan_rc_timeout'], desc=['1~300초']) }}
+  {{ macros.setting_input_text('gdrive_scan_extensions', '대상 파일 확장자', value=arg['gdrive_scan_extensions'], desc=['쉼표로 구분합니다.', '도서·오디오북·비디오북·자막과 메타데이터 보조 파일 확장자를 기본값으로 제공합니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_rc_timeout', 'rclone 명령 제한 시간(초)', value=arg['gdrive_scan_rc_timeout'], desc=['리모트 목록·연결 정보 확인 같은 rclone 명령에만 적용합니다. 1~300초, 기본값 30']) }}
+  {{ macros.setting_input_int('gdrive_scan_changes_timeout', 'Google Drive Changes API 제한 시간(초)', value=arg.get('gdrive_scan_changes_timeout', '60'), desc=['변경 내역 HTTP 조회에만 적용합니다. 1~300초, 기본값 60', '401은 rclone 토큰을 다시 읽어 1회, 읽기 제한 시간은 1초 뒤 1회 재시도합니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_path_timeout', '개별 경로 스캔 제한 시간(초)', value=arg.get('gdrive_scan_path_timeout', '120'), desc=['동기식 경로 스캔에만 적용합니다. 10~600초, 기본값 120']) }}
   {{ macros.setting_input_int('gdrive_scan_history_limit', '목록 페이지 크기 상한', value=arg['gdrive_scan_history_limit'], desc=['화면에서 한 페이지에 요청할 수 있는 최대 이벤트 수입니다. 10~1000건']) }}
   {{ macros.setting_input_int('gdrive_scan_retention_days', 'DB 삭제 기간(일)', value=arg.get('gdrive_scan_retention_days', '30'), desc=['완료와 최종 실패 이벤트만 지정 기간이 지나면 삭제합니다.', '대기·재시도·처리 중 이벤트는 삭제하지 않습니다.']) }}
   {{ macros.setting_checkbox('gdrive_scan_auto_cleanup', 'DB 자동 삭제', value=arg.get('gdrive_scan_auto_cleanup', 'True'), desc=['On이면 작업자가 보존기간이 지난 종료 이벤트를 주기적으로 삭제합니다.']) }}
+  </div>
 
+  <div id="gdrive_scan_external_settings">
   <div class="form-group row">
     <label class="col-sm-3 control-label">gd-poller → BookOasis 경로 매핑</label>
     <div class="col-sm-9">
@@ -35,6 +102,7 @@
     <p class="doctor-muted">gd-poller가 래퍼에 전달할 경로를 입력하면 현재 입력된 Mate 매핑과 VFS 규칙으로 변환 결과를 검사합니다. 설정을 저장하기 전에도 사용할 수 있습니다.</p>
     <div class="doctor-toolbar">
       <input type="text" class="form-control" id="gdrive_scan_preview_path" style="flex:1 1 560px" placeholder="예: /mnt/gds2/GDRIVE/READING/만화/샘플.cbz">
+      <button type="button" class="btn btn-outline-secondary" id="gdrive_scan_path_suggest_btn">매핑 자동 제안</button>
       <button type="button" class="btn btn-outline-primary" id="gdrive_scan_preview_btn">경로 검사</button>
       <span class="doctor-query-status" id="gdrive_scan_preview_status"></span>
     </div>
@@ -48,9 +116,10 @@
       <small class="form-text text-muted">한 줄에 <code>로컬경로|리모트경로|RC주소#VFS이름|사용자|비밀번호</code>를 입력합니다. 인증이 없으면 마지막 두 필드를 생략합니다.</small>
     </div>
   </div>
+  </div>
 </form>
 
-<div class="doctor-section doctor-card">
+<div id="gdrive_scan_basic_discord" class="doctor-section doctor-card">
   <h4>Discord 변경 요약 알림</h4>
   <p class="doctor-muted">Mate 작업자가 버퍼 단위 처리를 마친 뒤 변경 수량·처리 결과·대상 보관함·실제 스캔 방식을 한 번만 요약해 전송합니다. 전송 실패는 Google Drive 스캔 결과에 영향을 주지 않습니다.</p>
   <div class="doctor-toolbar">
@@ -61,15 +130,158 @@
   <small id="gdrive_scan_discord_status" class="form-text text-muted">{{ '웹훅이 설정되어 있습니다. 새 값을 입력하지 않으면 기존 값은 표시되지 않습니다.' if arg.get('gdrive_scan_discord_webhook_configured') else '웹훅 URL이 비어 있으면 Discord 알림을 사용하지 않습니다.' }}</small>
 </div>
 
-<div class="doctor-section doctor-card">
-  <h4>이벤트 API</h4>
-  <p><code>/bookoasis_mate/api/gdrive_scan/event</code></p>
-  <p class="doctor-muted">FlaskFarm 전역 API 키가 필요합니다. 개별 경로 스캔은 상단 설정 메뉴의 BookOasis 관리자 계정을 사용하며, 보관함 루트 폴백은 스캔 웹훅 토큰을 사용합니다.</p>
-</div>
-
 <script>
+var gdriveScanDriveRemotes = {{ arg.get('gdrive_scan_drive_remotes', [])|tojson }};
+var gdriveScanBuiltinRoots = {{ arg.get('gdrive_scan_builtin_root_rows', [])|tojson }};
+var gdriveScanBuiltinStates = {{ arg.get('gdrive_scan_builtin_states', [])|tojson }};
+
+function gdriveScanRenderStates(rows) {
+  var target = document.getElementById('gdrive_scan_builtin_state_rows');
+  bookoasisMateClear(target);
+  (rows || []).forEach(function(row) {
+    var card = document.createElement('div');
+    card.className = 'doctor-card gdrive-scan-state-card';
+    var heading = document.createElement('div');
+    heading.className = 'gdrive-scan-state-heading';
+    heading.appendChild(bookoasisMateText('strong', '', (row.remote || '-') + ' · ' + (row.root_name || row.root_id || '-')));
+    heading.appendChild(bookoasisMateText('span', row.status === 'error' ? 'text-danger' : 'text-success', row.status === 'error' ? '오류' : (row.checkpoint_ready ? '연결됨' : '초기화됨')));
+    card.appendChild(heading);
+    card.appendChild(bookoasisMateText('div', 'doctor-path', row.local_root || row.remote_path || '-'));
+    card.appendChild(bookoasisMateText('small', 'doctor-muted', 'Changes API 체크포인트 · ' + (row.checkpoint_ready ? '저장됨' : '없음')));
+    card.appendChild(bookoasisMateText('small', 'doctor-muted', '마지막 확인 · ' + (row.last_poll_at || '미실행')));
+    if (row.error) card.appendChild(bookoasisMateText('small', 'text-danger', row.error));
+    target.appendChild(card);
+  });
+}
+
+function gdriveScanRootField(label, input, help) {
+  var field = document.createElement('label');
+  field.className = 'gdrive-scan-root-field';
+  field.appendChild(bookoasisMateText('span', 'doctor-muted', label));
+  input.className = 'form-control';
+  field.appendChild(input);
+  field.appendChild(bookoasisMateText('small', 'gdrive-scan-root-field-help', help));
+  return field;
+}
+
+function gdriveScanRootInput(name, value, placeholder) {
+  var input = document.createElement('input');
+  input.type = 'text';
+  input.dataset.field = name;
+  input.value = value || '';
+  input.placeholder = placeholder || '';
+  return input;
+}
+
+function gdriveScanRootRemote(value) {
+  var select = document.createElement('select');
+  select.dataset.field = 'remote';
+  var names = gdriveScanDriveRemotes.slice();
+  if (value && names.indexOf(value) < 0) names.push(value);
+  var empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = names.length ? '리모트 선택' : 'Drive 리모트 없음';
+  select.appendChild(empty);
+  names.forEach(function(name) {
+    var option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    option.selected = name === value;
+    select.appendChild(option);
+  });
+  return select;
+}
+
+function gdriveScanAddRoot(row) {
+  if (document.querySelectorAll('.gdrive-scan-builtin-root').length >= 10) {
+    notify('감시 경로는 최대 10개까지 등록할 수 있습니다.', 'warning');
+    return;
+  }
+  row = row || {};
+  if (!row.remote && gdriveScanDriveRemotes.length === 1) row.remote = gdriveScanDriveRemotes[0];
+  var card = document.createElement('div');
+  card.className = 'doctor-card gdrive-scan-builtin-root';
+  var grid = document.createElement('div');
+  grid.className = 'gdrive-scan-root-grid';
+  grid.appendChild(gdriveScanRootField('rclone 리모트', gdriveScanRootRemote(row.remote || ''), 'FF rclone.conf에서 확인된 Google Drive 리모트입니다.'));
+  grid.appendChild(gdriveScanRootField('감시 폴더 ID', gdriveScanRootInput('root_id', row.root_id, 'Google Drive 폴더 ID'), 'Google Drive 폴더 URL의 ID입니다.'));
+  grid.appendChild(gdriveScanRootField('rclone 감시 경로', gdriveScanRootInput('remote_path', row.remote_path, 'GDRIVE/READING'), '리모트 내부의 상대 경로입니다. 예: GDRIVE/READING'));
+  grid.appendChild(gdriveScanRootField('BookOasis 경로 루트', gdriveScanRootInput('local_root', row.local_root, '/mnt/gds2/GDRIVE/READING'), 'BookOasis가 사용하는 절대 경로입니다. 예: /mnt/gds2/GDRIVE/READING'));
+  var removeWrap = document.createElement('div');
+  removeWrap.className = 'gdrive-scan-root-delete';
+  var remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'btn btn-outline-danger';
+  remove.textContent = '삭제';
+  remove.addEventListener('click', function() { card.remove(); });
+  removeWrap.appendChild(remove);
+  grid.appendChild(removeWrap);
+  card.appendChild(grid);
+  document.getElementById('gdrive_scan_builtin_root_rows').appendChild(card);
+}
+
+function gdriveScanSerializeRoots() {
+  var rows = [];
+  document.querySelectorAll('.gdrive-scan-builtin-root').forEach(function(card) {
+    var row = {};
+    card.querySelectorAll('[data-field]').forEach(function(input) {
+      row[input.dataset.field] = String(input.value || '').trim();
+    });
+    if (!row.remote && !row.root_id && !row.remote_path && !row.local_root) return;
+    if (!row.remote || !row.root_id || !row.local_root) {
+      throw new Error('각 감시 경로의 리모트, 폴더 ID와 BookOasis 경로 루트를 모두 입력해 주세요.');
+    }
+    if (row.remote_path.charAt(0) === '/') {
+      throw new Error('rclone 감시 경로는 /mnt 경로가 아닌 리모트 기준 상대 경로로 입력해 주세요.');
+    }
+    if (row.local_root.charAt(0) !== '/') {
+      throw new Error('BookOasis 경로 루트는 /로 시작하는 절대 경로여야 합니다.');
+    }
+    rows.push(row);
+  });
+  if ($('#gdrive_scan_input_mode').val() === 'builtin' && !rows.length) {
+    throw new Error('Mate 자체 변경 감지 경로를 하나 이상 추가해 주세요.');
+  }
+  document.getElementById('gdrive_scan_builtin_roots').value = JSON.stringify(rows);
+  return rows;
+}
+
+gdriveScanBuiltinRoots.forEach(gdriveScanAddRoot);
+if (!gdriveScanBuiltinRoots.length) gdriveScanAddRoot({});
+gdriveScanRenderStates(gdriveScanBuiltinStates);
+document.getElementById('gdrive_scan_builtin_add').addEventListener('click', function() { gdriveScanAddRoot({}); });
+
+var gdriveScanActiveSettingTab = 'basic';
+
+function gdriveScanShowSettingTab(tab) {
+  gdriveScanActiveSettingTab = tab;
+  var basic = tab === 'basic';
+  $('#gdrive_scan_basic_intro, #gdrive_scan_basic_settings, #gdrive_scan_basic_discord').toggle(basic);
+  $('#gdrive_scan_integration_mode').toggle(!basic);
+  $('#gdrive-scan-basic-tab').toggleClass('active', basic);
+  $('#gdrive-scan-integration-tab').toggleClass('active', !basic);
+  toggleGdriveInputMode();
+}
+
+function toggleGdriveInputMode() {
+  var mode = $('#gdrive_scan_input_mode').val();
+  var integration = gdriveScanActiveSettingTab === 'integration';
+  $('#gdrive_scan_external_mode, #gdrive_scan_external_settings').toggle(integration && mode !== 'builtin');
+  $('#gdrive_scan_builtin_mode').toggle(integration && mode === 'builtin');
+}
+$('#gdrive-scan-basic-tab').click(function(e) { e.preventDefault(); gdriveScanShowSettingTab('basic'); });
+$('#gdrive-scan-integration-tab').click(function(e) { e.preventDefault(); gdriveScanShowSettingTab('integration'); });
+$('#gdrive_scan_input_mode').change(toggleGdriveInputMode);
+gdriveScanShowSettingTab('basic');
+
 $('#setting_save_btn').click(function(e) {
   e.preventDefault();
+  try {
+    gdriveScanSerializeRoots();
+  } catch (error) {
+    notify(error.message, 'warning');
+    return;
+  }
   $.ajax({
     url:'/' + PACKAGE_NAME + '/ajax/setting_save',
     type:'POST',
@@ -78,6 +290,23 @@ $('#setting_save_btn').click(function(e) {
     success:function(ret) {
       notify(ret ? '설정을 저장했습니다.' : '설정 저장에 실패했습니다.', ret ? 'success' : 'warning');
     }
+  });
+});
+
+$('#gdrive_scan_builtin_test').click(function() {
+  var status = document.getElementById('gdrive_scan_builtin_status');
+  status.textContent = '연결 확인 중';
+  bookoasisMateAjax('gdrive_scan', 'builtin_test', {}, function(ret) {
+    status.textContent = ret.msg || '연결 확인 완료';
+    gdriveScanRenderStates((ret.data || {}).roots || []);
+  });
+});
+
+$('#gdrive_scan_builtin_reset').click(function() {
+  if (!confirm('자체 변경 감지 체크포인트와 파일 상태를 지우고 다시 초기화할까요?')) return;
+  bookoasisMateAjax('gdrive_scan', 'builtin_reset', {}, function(ret) {
+    document.getElementById('gdrive_scan_builtin_status').textContent = ret.msg || '';
+    gdriveScanRenderStates((ret.data || {}).roots || []);
   });
 });
 
@@ -115,6 +344,41 @@ function gdriveScanPreviewCard(label, value) {
   card.appendChild(bookoasisMateText('div', 'doctor-path', value || '-'));
   return card;
 }
+
+function gdriveScanUpdateSingleVfsRule(mapping) {
+  var lines = String($('#gdrive_scan_vfs_rules').val() || '').split(/\r?\n/);
+  var active = lines.filter(function(line) {
+    line = line.trim();
+    return line && line.charAt(0) !== '#';
+  });
+  if (active.length !== 1) return false;
+  var rule = active[0].split('|');
+  var pair = String(mapping || '').split('=>');
+  if (rule.length < 3 || pair.length !== 2) return false;
+  rule[0] = pair[1].trim();
+  rule[1] = pair[0].trim();
+  $('#gdrive_scan_vfs_rules').val(rule.join('|'));
+  return true;
+}
+
+$('#gdrive_scan_path_suggest_btn').click(function() {
+  var path = String($('#gdrive_scan_preview_path').val() || '').trim();
+  if (!path) {
+    notify('자동 제안에 사용할 실제 수신 경로를 입력해 주세요.', 'warning');
+    return;
+  }
+  var button = this;
+  button.disabled = true;
+  bookoasisMateAjax('gdrive_scan', 'path_suggest', {path:path}, function(ret) {
+    var data = ret.data || {};
+    if (!data.mapping) return;
+    $('#gdrive_scan_path_mappings').val(data.mapping);
+    var vfsUpdated = gdriveScanUpdateSingleVfsRule(data.mapping);
+    notify('확정 가능한 경로 매핑을 입력했습니다.' + (vfsUpdated ? ' 기존 VFS 규칙의 경로 쌍도 맞췄습니다.' : ''), 'success');
+  }, function() {
+    button.disabled = false;
+  }, {global:false});
+});
 
 $('#gdrive_scan_preview_btn').click(function() {
   var path = String($('#gdrive_scan_preview_path').val() || '').trim();

@@ -8,7 +8,23 @@ from flask import jsonify, render_template
 
 from .bookoasis_client import BookOasisClient
 from .discord_notifier import DiscordWebhookError, DiscordWebhookNotifier
-from .gdrive_scan import GDriveScanProcessor, parse_extensions, validate_event
+from .gdrive_changes import (
+    GoogleDriveChangesClient,
+    GoogleDriveChangesWatcher,
+    list_google_drive_remotes,
+    parse_builtin_roots,
+    resolve_ff_rclone_settings,
+)
+from .gdrive_scan import (
+    BookOasisDatabaseError,
+    GDriveScanProcessor,
+    infer_path_prefix_replacement,
+    parse_extensions,
+    replace_path_prefix,
+    suggest_path_mapping,
+    validate_event,
+    webhook_payload_to_event_fields,
+)
 from .setup import *
 
 
@@ -17,13 +33,21 @@ class ModuleGDriveScan(PluginModuleBase):
         super().__init__(plugin, name="gdrive_scan", first_menu="setting")
         self.db_default = {
             "gdrive_scan_enabled": "False",
+            "gdrive_scan_input_mode": "command",
+            "gdrive_scan_builtin_poll_seconds": "60",
+            "gdrive_scan_builtin_remote": "",
+            "gdrive_scan_builtin_root_id": "",
+            "gdrive_scan_builtin_remote_path": "",
+            "gdrive_scan_builtin_local_root": "",
+            "gdrive_scan_builtin_roots": "[]",
             "gdrive_scan_buffer_seconds": "60",
             "gdrive_scan_worker_interval": "2",
             "gdrive_scan_max_attempts": "3",
-            "gdrive_scan_extensions": ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json,.mp3,.m4b,.m4a,.flac,.aac,.wav,.ogg,.opus,.wma",
+            "gdrive_scan_extensions": ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json,.mp3,.m4b,.m4a,.flac,.aac,.wav,.ogg,.opus,.wma,.mp4,.mkv,.avi,.webm,.mov,.m4v,.ts,.smi,.srt,.vtt",
             "gdrive_scan_path_mappings": "/GDRIVE => /mnt/gds/GDRIVE",
             "gdrive_scan_vfs_rules": "/mnt/gds/GDRIVE|/GDRIVE|http://127.0.0.1:5572",
             "gdrive_scan_rc_timeout": "30",
+            "gdrive_scan_changes_timeout": "60",
             "gdrive_scan_path_timeout": "120",
             "gdrive_scan_history_limit": "200",
             "gdrive_scan_retention_days": "30",
@@ -35,6 +59,7 @@ class ModuleGDriveScan(PluginModuleBase):
         self._worker_thread = None
         self._worker_lock = threading.RLock()
         self._last_cleanup_monotonic = 0.0
+        self._last_builtin_poll_monotonic = 0.0
         self._worker_state = {
             "running": False,
             "last_started_at": None,
@@ -47,6 +72,14 @@ class ModuleGDriveScan(PluginModuleBase):
     def model(self):
         return getattr(P, "gdrive_scan_model", None)
 
+    @property
+    def state_model(self):
+        return getattr(P, "gdrive_scan_state_model", None)
+
+    @property
+    def item_model(self):
+        return getattr(P, "gdrive_item_state_model", None)
+
     @staticmethod
     def _as_int(value, default, minimum, maximum):
         try:
@@ -54,12 +87,41 @@ class ModuleGDriveScan(PluginModuleBase):
         except (TypeError, ValueError):
             return default
 
+    @staticmethod
+    def _builtin_state_view(root, state=None):
+        state = state or {}
+        return {
+            "remote": str(root.get("remote") or ""),
+            "root_id": str(root.get("root_id") or ""),
+            "remote_path": str(root.get("remote_path") or ""),
+            "local_root": str(root.get("local_root") or ""),
+            "status": str(state.get("status") or "unchecked"),
+            "checkpoint_ready": bool(state.get("page_token")),
+            "last_poll_at": state.get("last_poll_at"),
+            "error": str(state.get("error") or ""),
+        }
+
     def _settings(self):
         model = P.ModelSetting
         extensions = str(model.get("gdrive_scan_extensions") or "").strip()
-        legacy_extensions = ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json"
-        if extensions == legacy_extensions:
+        legacy_extensions = {
+            ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json",
+            ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json,.mp3,.m4b,.m4a,.flac,.aac,.wav,.ogg,.opus,.wma",
+        }
+        if extensions in legacy_extensions:
             extensions = self.db_default["gdrive_scan_extensions"]
+        input_mode = str(model.get("gdrive_scan_input_mode") or "command").strip().lower()
+        if input_mode not in {"command", "webhook", "builtin"}:
+            input_mode = "command"
+        builtin_roots = parse_builtin_roots(
+            model.get("gdrive_scan_builtin_roots"),
+            {
+                "remote": model.get("gdrive_scan_builtin_remote"),
+                "root_id": model.get("gdrive_scan_builtin_root_id"),
+                "remote_path": model.get("gdrive_scan_builtin_remote_path"),
+                "local_root": model.get("gdrive_scan_builtin_local_root"),
+            },
+        )
         return {
             "db_engine": model.get("db_engine") or "sqlite",
             "general_db_path": model.get("general_db_path"),
@@ -81,6 +143,15 @@ class ModuleGDriveScan(PluginModuleBase):
             "webhook_token": model.get("webhook_token"),
             "api_timeout": self._as_int(model.get("api_timeout"), 30, 1, 30),
             "gdrive_scan_enabled": model.get_bool("gdrive_scan_enabled"),
+            "gdrive_scan_input_mode": input_mode,
+            "gdrive_scan_builtin_poll_seconds": self._as_int(
+                model.get("gdrive_scan_builtin_poll_seconds"), 60, 15, 3600
+            ),
+            "gdrive_scan_builtin_remote": str(model.get("gdrive_scan_builtin_remote") or "").strip(),
+            "gdrive_scan_builtin_root_id": str(model.get("gdrive_scan_builtin_root_id") or "").strip(),
+            "gdrive_scan_builtin_remote_path": str(model.get("gdrive_scan_builtin_remote_path") or "").strip(),
+            "gdrive_scan_builtin_local_root": str(model.get("gdrive_scan_builtin_local_root") or "").strip(),
+            "gdrive_scan_builtin_roots": builtin_roots,
             "gdrive_scan_buffer_seconds": self._as_int(
                 model.get("gdrive_scan_buffer_seconds"), 60, 0, 3600
             ),
@@ -95,6 +166,9 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_vfs_rules": model.get("gdrive_scan_vfs_rules"),
             "gdrive_scan_rc_timeout": self._as_int(
                 model.get("gdrive_scan_rc_timeout"), 30, 1, 300
+            ),
+            "gdrive_scan_changes_timeout": self._as_int(
+                model.get("gdrive_scan_changes_timeout"), 60, 1, 300
             ),
             "gdrive_scan_path_timeout": self._as_int(
                 model.get("gdrive_scan_path_timeout"), 120, 10, 600
@@ -115,9 +189,50 @@ class ModuleGDriveScan(PluginModuleBase):
         page = page if page in {"setting", "list", "manual"} else "setting"
         P.logger.debug(f"[BookOasisMate] Google Drive 연동 메뉴 열기 page={page}")
         arg = P.ModelSetting.to_dict()
-        arg["gdrive_scan_extensions"] = self._settings()["gdrive_scan_extensions"]
+        current_settings = self._settings()
+        for key in self.db_default:
+            if key == "gdrive_scan_builtin_roots":
+                continue
+            arg[key] = current_settings.get(key, arg.get(key, self.db_default[key]))
+        arg["gdrive_scan_builtin_root_rows"] = current_settings["gdrive_scan_builtin_roots"]
+        try:
+            arg["gdrive_scan_builtin_states"] = [
+                self._builtin_state_view(
+                    root,
+                    self.state_model.get(root["remote"], root["root_id"])
+                    if self.state_model is not None
+                    else None,
+                )
+                for root in current_settings["gdrive_scan_builtin_roots"]
+            ]
+        except Exception as error:
+            arg["gdrive_scan_builtin_states"] = [
+                self._builtin_state_view(root, {"status": "error", "error": str(error)})
+                for root in current_settings["gdrive_scan_builtin_roots"]
+            ]
         webhook_url = str(arg.pop("gdrive_scan_discord_webhook_url", "") or "")
         arg["gdrive_scan_discord_webhook_configured"] = bool(webhook_url.strip())
+        try:
+            rclone_path, rclone_config_path = resolve_ff_rclone_settings(
+                getattr(F, "PluginManager", None)
+            )
+            arg["gdrive_scan_ff_rclone"] = {
+                "available": True,
+                "path": rclone_path,
+                "config": rclone_config_path,
+            }
+            arg["gdrive_scan_drive_remotes"] = (
+                list_google_drive_remotes(
+                    rclone_path,
+                    rclone_config_path,
+                    timeout=current_settings["gdrive_scan_rc_timeout"],
+                )
+                if page == "setting"
+                else []
+            )
+        except Exception as error:
+            arg["gdrive_scan_ff_rclone"] = {"available": False, "error": str(error)}
+            arg["gdrive_scan_drive_remotes"] = []
         arg["page"] = page
         return render_template(
             f"{P.package_name}_{self.name}_{page}.html",
@@ -132,14 +247,19 @@ class ModuleGDriveScan(PluginModuleBase):
         settings = self._settings()
         if not settings["gdrive_scan_enabled"]:
             return jsonify({"ret": "fail", "msg": "Google Drive 변경 감지 연동이 꺼져 있습니다."}), 503
+        if settings["gdrive_scan_input_mode"] == "builtin":
+            return jsonify({"ret": "fail", "msg": "자체 변경 감지 모드에서는 외부 이벤트 수신을 사용하지 않습니다."}), 409
+        if settings["gdrive_scan_input_mode"] == "webhook" and not req.is_json:
+            return jsonify({"ret": "fail", "msg": "WebhookDispatcher 모드는 JSON 요청만 받습니다."}), 415
         payload = req.get_json(silent=True) if req.is_json else {}
         payload = payload or req.form
         try:
+            fields = webhook_payload_to_event_fields(payload)
             event = validate_event(
-                payload.get("action"),
-                payload.get("item_type") or payload.get("type"),
-                payload.get("path"),
-                payload.get("removed_path") or payload.get("previous_path"),
+                fields["action"],
+                fields["item_type"],
+                fields["path"],
+                fields["removed_path"],
                 parse_extensions(settings["gdrive_scan_extensions"]),
             )
             if not event["relevant"]:
@@ -226,6 +346,145 @@ class ModuleGDriveScan(PluginModuleBase):
                         "data": preview,
                     }
                 )
+            if command == "path_suggest":
+                processor = GDriveScanProcessor(
+                    self._settings(),
+                    scan_callback=lambda *args: {},
+                    logger=P.logger,
+                )
+                suggestion = suggest_path_mapping(
+                    req.form.get("path"), processor.libraries
+                )
+                return jsonify(
+                    {
+                        "ret": "warning" if suggestion["warning"] else "success",
+                        "msg": suggestion["warning"] or "경로 매핑 후보를 찾았습니다.",
+                        "data": suggestion,
+                    }
+                )
+            if command in {
+                "failed_path_preview",
+                "failed_path_retry",
+                "failed_path_batch_preview",
+                "failed_path_batch_retry",
+            }:
+                if self.model is None:
+                    return jsonify({"ret": "danger", "msg": "이벤트 저장 모델을 사용할 수 없습니다."}), 503
+                event = self.model.failed(req.form.get("id"))
+                if not event:
+                    return jsonify({"ret": "warning", "msg": "수정할 최종 실패 이벤트를 찾을 수 없습니다."}), 404
+                validated, previews = self._validate_failed_paths(
+                    event,
+                    req.form.get("path"),
+                    req.form.get("removed_path"),
+                )
+                if command.startswith("failed_path_batch_"):
+                    data = self._prepare_failed_path_batch(event, validated)
+                    response_data = {
+                        key: value for key, value in data.items() if key != "updates"
+                    }
+                    if command == "failed_path_batch_preview":
+                        return jsonify({
+                            "ret": "success",
+                            "msg": f"공통 오류 경로 {data['valid']}건을 확인했습니다.",
+                            "data": response_data,
+                        })
+                    updated = self.model.update_failed_paths_batch_and_retry(data["updates"])
+                    if updated:
+                        self.wake_worker()
+                    return jsonify({
+                        "ret": "success" if updated else "warning",
+                        "msg": f"공통 오류 경로 {updated}건을 수정해 재시도에 등록했습니다." if updated else "대상 이벤트 상태가 변경되어 수정하지 못했습니다.",
+                        "data": {**response_data, "updated": updated},
+                    })
+                if command == "failed_path_preview":
+                    return jsonify({"ret": "success", "msg": "수정 경로를 확인했습니다.", "data": {"event": validated, "previews": previews}})
+                updated = self.model.update_failed_paths_and_retry(
+                    event["id"], validated["path"], validated["removed_path"]
+                )
+                if updated:
+                    self.wake_worker()
+                return jsonify({"ret": "success" if updated else "warning", "msg": "수정한 경로로 재시도를 등록했습니다." if updated else "실패 이벤트 상태가 변경되어 수정하지 못했습니다."})
+            if command in {"failed_retry_preview", "failed_retry_batch"}:
+                if self.model is None:
+                    return jsonify({"ret": "danger", "msg": "이벤트 저장 모델을 사용할 수 없습니다."}), 503
+                event = self.model.failed(req.form.get("id"))
+                if not event:
+                    return jsonify({"ret": "warning", "msg": "재시도할 최종 실패 이벤트를 찾을 수 없습니다."}), 404
+                data = self._prepare_failed_retry_batch(event)
+                response_data = {
+                    key: value for key, value in data.items() if key != "event_ids"
+                }
+                if command == "failed_retry_preview":
+                    return jsonify({
+                        "ret": "success",
+                        "msg": f"같은 오류 {data['matched']}건 중 현재 처리 가능한 {data['valid']}건을 확인했습니다.",
+                        "data": response_data,
+                    })
+                updated = self.model.retry_many(data["event_ids"])
+                if updated:
+                    self.wake_worker()
+                return jsonify({
+                    "ret": "success" if updated else "warning",
+                    "msg": f"검증된 실패 이벤트 {updated}건을 재시도에 등록했습니다." if updated else "대상 이벤트 상태가 변경되어 재시도하지 못했습니다.",
+                    "data": {**response_data, "updated": updated},
+                })
+            if command == "builtin_test":
+                clients = self._builtin_clients(self._settings())
+                checked = []
+                for client in clients:
+                    root = client.validate_root()
+                    token = client.start_page_token()
+                    saved = None
+                    if self.state_model is not None:
+                        current = self.state_model.get(client.remote, client.root_id) or {}
+                        saved = self.state_model.save_cursor(
+                            client.remote,
+                            client.root_id,
+                            current.get("page_token") or token,
+                            status="ready",
+                            error="",
+                        )
+                    checked.append({
+                        **self._builtin_state_view(
+                            {
+                                "remote": client.remote,
+                                "root_id": client.root_id,
+                                "remote_path": client.remote_path,
+                                "local_root": client.local_root,
+                            },
+                            saved or {"page_token": token, "status": "ready"},
+                        ),
+                        "root_name": root.get("name") or client.root_id,
+                    })
+                with self._worker_lock:
+                    self._worker_state["last_error"] = ""
+                return jsonify({"ret": "success", "msg": f"자체 변경 감지 설정 {len(checked)}개의 연결을 확인했습니다.", "data": {"roots": checked}})
+            if command == "builtin_reset":
+                settings = self._settings()
+                if self.state_model is None or self.item_model is None:
+                    return jsonify({"ret": "danger", "msg": "자체 변경 감지 상태 모델을 사용할 수 없습니다."}), 503
+                clients = self._builtin_clients(settings)
+                for client in clients:
+                    GoogleDriveChangesWatcher(
+                        client, self.state_model, self.item_model, self.model,
+                        parse_extensions(settings["gdrive_scan_extensions"]),
+                        settings["gdrive_scan_buffer_seconds"],
+                    ).reset()
+                self._last_builtin_poll_monotonic = 0.0
+                self.wake_worker()
+                roots = [
+                    self._builtin_state_view(
+                        {
+                            "remote": client.remote,
+                            "root_id": client.root_id,
+                            "remote_path": client.remote_path,
+                            "local_root": client.local_root,
+                        }
+                    )
+                    for client in clients
+                ]
+                return jsonify({"ret": "success", "msg": f"자체 변경 감지 체크포인트 {len(clients)}개를 초기화했습니다.", "data": {"roots": roots}})
             if self.model is None:
                 return jsonify(
                     {"ret": "danger", "msg": "이벤트 저장 모델을 사용할 수 없습니다."}
@@ -296,12 +555,159 @@ class ModuleGDriveScan(PluginModuleBase):
                     }
                 )
             return jsonify({"ret": "warning", "msg": "지원하지 않는 요청입니다."}), 400
+        except ValueError as error:
+            return jsonify({"ret": "warning", "msg": str(error)}), 400
         except Exception as error:
             P.logger.error(f"Google Drive 연동 요청 오류: {error}")
             P.logger.error(traceback.format_exc())
             return jsonify(
                 {"ret": "danger", "msg": "요청 처리에 실패했습니다. 로그를 확인해 주세요."}
             ), 500
+
+    def _validate_failed_paths(self, event, path, removed_path, processor=None):
+        path = str(path or "").strip()
+        removed_path = str(removed_path or "").strip()
+        if not path:
+            raise ValueError("처리 대상 경로를 입력해 주세요.")
+        if event.get("action") in {"move", "rename"} and not removed_path:
+            raise ValueError("이동·이름 변경 이벤트는 이전 경로가 필요합니다.")
+        settings = self._settings()
+        validated = validate_event(
+            event.get("action"), event.get("item_type"), path, removed_path,
+            parse_extensions(settings["gdrive_scan_extensions"]),
+        )
+        if not validated["relevant"]:
+            raise ValueError("수정한 경로는 현재 대상 확장자에 포함되지 않습니다.")
+        processor = processor or GDriveScanProcessor(
+            settings, scan_callback=lambda *args: {}, logger=P.logger
+        )
+        previews = []
+        current_label = "이동 후 경로" if event.get("action") in {"move", "rename"} else "처리 대상 경로"
+        for label, candidate in ((current_label, validated["path"]), ("이동 전 경로", validated["removed_path"])):
+            if not candidate:
+                continue
+            preview = processor.preview_path(candidate)
+            if preview.get("warning"):
+                raise ValueError(f"{label}: {preview['warning']}")
+            previews.append({"label": label, **preview})
+        return validated, previews
+
+    def _prepare_failed_path_batch(self, seed_event, corrected_event):
+        source, replacement = infer_path_prefix_replacement(
+            seed_event.get("path"), corrected_event.get("path")
+        )
+        candidates = self.model.failed_matching_prefix(source)
+        processor = GDriveScanProcessor(
+            self._settings(), scan_callback=lambda *args: {}, logger=P.logger
+        )
+        updates = []
+        excluded = []
+        for event in candidates:
+            try:
+                path = replace_path_prefix(event.get("path"), source, replacement)
+                removed_path = replace_path_prefix(
+                    event.get("removed_path"), source, replacement
+                ) if event.get("removed_path") else ""
+                validated, _ = self._validate_failed_paths(
+                    event, path, removed_path, processor=processor
+                )
+                updates.append({"id": event["id"], **validated})
+            except (BookOasisDatabaseError, ValueError) as error:
+                excluded.append({"id": event.get("id"), "reason": str(error)})
+        if not updates:
+            raise ValueError("공통 오류 접두사로 수정할 수 있는 최종 실패 이벤트가 없습니다.")
+        return {
+            "source_prefix": source,
+            "replacement_prefix": replacement,
+            "matched": len(candidates),
+            "valid": len(updates),
+            "excluded": excluded[:50],
+            "updates": updates,
+        }
+
+    def _prepare_failed_retry_batch(self, seed_event):
+        error = str(seed_event.get("error") or "").strip()
+        if not error:
+            raise ValueError("같은 오류 대상을 찾으려면 실패 원인이 필요합니다.")
+        candidates = self.model.failed_matching_error(error)
+        processor = GDriveScanProcessor(
+            self._settings(), scan_callback=lambda *args: {}, logger=P.logger
+        )
+        event_ids = []
+        excluded = []
+        for event in candidates:
+            try:
+                self._validate_failed_paths(
+                    event,
+                    event.get("path"),
+                    event.get("removed_path"),
+                    processor=processor,
+                )
+                event_ids.append(int(event["id"]))
+            except (BookOasisDatabaseError, ValueError) as error_value:
+                excluded.append({"id": event.get("id"), "reason": str(error_value)})
+        if not event_ids:
+            raise ValueError("같은 오류 중 현재 보관함 설정으로 처리 가능한 이벤트가 없습니다.")
+        return {
+            "error": error,
+            "matched": len(candidates),
+            "valid": len(event_ids),
+            "excluded": excluded[:50],
+            "event_ids": event_ids,
+        }
+
+    def _builtin_clients(self, settings):
+        rclone_path, rclone_config_path = resolve_ff_rclone_settings(
+            getattr(F, "PluginManager", None)
+        )
+        roots = settings.get("gdrive_scan_builtin_roots") or []
+        if not roots:
+            raise ValueError("Mate 자체 변경 감지 경로를 하나 이상 추가해 주세요.")
+        return [
+            GoogleDriveChangesClient(
+                rclone_path,
+                rclone_config_path,
+                root["remote"],
+                root["root_id"],
+                root["remote_path"],
+                root["local_root"],
+                timeout=settings["gdrive_scan_rc_timeout"],
+                api_timeout=settings["gdrive_scan_changes_timeout"],
+            )
+            for root in roots
+        ]
+
+    def _builtin_client(self, settings):
+        return self._builtin_clients(settings)[0]
+
+    def _poll_builtin_if_due(self, settings):
+        if not settings["gdrive_scan_enabled"] or settings["gdrive_scan_input_mode"] != "builtin":
+            return 0
+        now = time.monotonic()
+        if self._last_builtin_poll_monotonic and now - self._last_builtin_poll_monotonic < settings["gdrive_scan_builtin_poll_seconds"]:
+            return 0
+        self._last_builtin_poll_monotonic = now
+        if self.model is None or self.state_model is None or self.item_model is None:
+            raise RuntimeError("자체 변경 감지 상태 모델을 사용할 수 없습니다.")
+        accepted = 0
+        errors = []
+        for client in self._builtin_clients(settings):
+            watcher = GoogleDriveChangesWatcher(
+                client, self.state_model, self.item_model, self.model,
+                parse_extensions(settings["gdrive_scan_extensions"]),
+                settings["gdrive_scan_buffer_seconds"],
+            )
+            try:
+                accepted += watcher.poll_once()
+            except Exception as error:
+                errors.append(f"{client.remote}:{client.root_id} · {error}")
+        if accepted:
+            P.logger.info(f"[BookOasisMate] 자체 Google Drive 변경 이벤트 {accepted}건을 등록했습니다.")
+        if errors:
+            raise RuntimeError(" / ".join(errors))
+        with self._worker_lock:
+            self._worker_state["last_error"] = ""
+        return accepted
 
     def _scan_callback(self, db_type, library_id, library_name):
         settings = self._settings()
@@ -459,6 +865,7 @@ class ModuleGDriveScan(PluginModuleBase):
             interval = settings["gdrive_scan_worker_interval"]
             try:
                 self._cleanup_if_due(settings)
+                self._poll_builtin_if_due(settings)
                 processed = self._process_once()
                 if processed:
                     continue
@@ -528,6 +935,13 @@ class ModuleGDriveScan(PluginModuleBase):
     def setting_save_after(self, change_list):
         keys = {
             "gdrive_scan_enabled",
+            "gdrive_scan_input_mode",
+            "gdrive_scan_builtin_poll_seconds",
+            "gdrive_scan_builtin_remote",
+            "gdrive_scan_builtin_root_id",
+            "gdrive_scan_builtin_remote_path",
+            "gdrive_scan_builtin_local_root",
+            "gdrive_scan_builtin_roots",
             "gdrive_scan_buffer_seconds",
             "gdrive_scan_worker_interval",
             "gdrive_scan_max_attempts",
@@ -535,6 +949,7 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_path_mappings",
             "gdrive_scan_vfs_rules",
             "gdrive_scan_rc_timeout",
+            "gdrive_scan_changes_timeout",
             "gdrive_scan_history_limit",
             "gdrive_scan_retention_days",
             "gdrive_scan_auto_cleanup",
