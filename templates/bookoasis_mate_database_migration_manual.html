@@ -1,7 +1,7 @@
 {# 통DB 이관 절차와 안전 수칙을 카드형 매뉴얼로 안내합니다. #}
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=manual-diagrams-1">
 
 <div class="doctor-section doctor-card">
   <h3>통DB 이관 매뉴얼</h3>
@@ -17,6 +17,15 @@
       </tbody>
     </table>
   </div>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>이관 흐름 한눈에 보기</h4>
+  <p>Kavita 이관과 BookOasis 패키지 복원은 원본 형식은 다르지만 검사, Dry Run, 현재 DB 백업을 확인한 뒤 실제 적용합니다.</p>
+  <figure class="doctor-manual-diagram">
+    <img src="{{ url_for('bookoasis_mate.static', filename='img/manual/database-migration-workflow.svg') }}" alt="Kavita 이관과 BookOasis 패키지 복원이 검사, 매핑, Dry Run과 현재 DB 백업을 거쳐 대상 DB에 적용되는 흐름" loading="lazy">
+    <figcaption>현재 Mate 버전 기준 개념도입니다. Kavita는 도서를 생성하거나 갱신하고, BookOasis 공유 패키지는 같은 엔진의 전체 DB와 표지를 교체합니다.</figcaption>
+  </figure>
 </div>
 
 <div class="doctor-section doctor-card">
