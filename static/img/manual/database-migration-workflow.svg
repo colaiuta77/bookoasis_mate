@@ -21,7 +21,6 @@
       --arrow: #64748b;
       --arrow-emphasis: #34d399;
 
-      
       --mask: #0f172a;
 
       --frontend-fill:    rgba(8, 51, 68, 0.4);
