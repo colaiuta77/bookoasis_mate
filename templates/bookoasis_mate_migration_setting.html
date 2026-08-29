@@ -6,8 +6,7 @@
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 {{ macros.m_button_group([['migration_save_btn', '설정 저장']]) }}
-<form id="migration_setting">
-  {{ macros.setting_input_text_and_buttons('migration_work_dir', '이관 작업 디렉터리', [['select_migration_work_dir_btn', '경로 선택']], value=arg['migration_work_dir'], desc=['FlaskFarm 컨테이너에서 보이는 경로를 입력합니다.', '내보낸 .oasis.zip, 가져올 패키지와 DB 백업을 이 디렉터리에서 관리합니다.']) }}
+<form id="migration_setting" class="migration-uniform-form">
   <input type="hidden" id="migration_operation" name="migration_operation" value="{{ arg['migration_operation'] }}">
   <input type="hidden" id="migration_export_library_ids" name="migration_export_library_ids" value="{{ arg['migration_export_library_ids'] }}">
 
@@ -19,12 +18,17 @@
     </div>
   </div>
 
+  <div class="doctor-section doctor-card">
+    <h4>공통 설정</h4>
+    <p class="doctor-muted">내보낸 패키지, 가져올 패키지와 DB 백업을 같은 작업 디렉터리에서 관리합니다.</p>
+    {{ macros.setting_input_text_and_buttons('migration_work_dir', '이관 작업 디렉터리', [['select_migration_work_dir_btn', '경로 선택']], value=arg['migration_work_dir'], desc=['FlaskFarm 컨테이너에서 보이는 경로입니다.']) }}
+  </div>
+
   <div id="migration_export_panel" class="doctor-section doctor-card">
     <h4>내보내기 설정</h4>
     <p class="doctor-muted">선택한 도서·오디오북·비디오 카테고리의 메타데이터, 진행률과 표지·포스터를 공식 2.0 패키지로 저장합니다.</p>
-    <div class="form-group row">
-      <label class="col-sm-3 col-form-label">대상 DB</label>
-      <div class="col-sm-9">
+    {{ macros.setting_top('대상 DB') }}
+      <div class="input-group col-sm-9">
         <select id="migration_export_db_type" name="migration_export_db_type" class="form-control form-control-sm">
           <option value="general" {% if arg['migration_export_db_type'] == 'general' %}selected{% endif %}>일반 DB</option>
           {% if arg.get('adult_enabled') == 'True' %}
@@ -34,14 +38,12 @@
           <option value="video" {% if arg['migration_export_db_type'] == 'video' %}selected{% endif %}>비디오 DB</option>
         </select>
       </div>
-    </div>
-    <div class="form-group row">
-      <label class="col-sm-3 col-form-label">카테고리</label>
-      <div class="col-sm-9">
+    {{ macros.setting_bottom() }}
+    {{ macros.setting_top('카테고리') }}
+      <div class="input-group col-sm-9">
         <select id="migration_export_library_select" class="form-control form-control-sm" multiple size="10"></select>
-        <small class="form-text text-muted">Ctrl 또는 Shift를 사용해 여러 카테고리를 선택할 수 있습니다.</small>
       </div>
-    </div>
+    {{ macros.setting_bottom(['Ctrl 또는 Shift를 사용해 여러 카테고리를 선택할 수 있습니다.']) }}
   </div>
 
   <div id="migration_import_panel" class="doctor-section doctor-card">
@@ -49,31 +51,26 @@
     <p class="doctor-muted">패키지를 신규 카테고리로 만들거나 기존 카테고리에 병합합니다.</p>
     <input type="hidden" id="migration_import_mode" name="migration_import_mode" value="{{ arg['migration_import_mode'] }}">
     <input type="hidden" id="migration_merge_library_id" name="migration_merge_library_id" value="{{ arg['migration_merge_library_id'] }}">
-    <div class="form-group row">
-      <label class="col-sm-3 col-form-label">가져오기 방식</label>
-      <div class="col-sm-9">
+    {{ macros.setting_top('가져오기 방식') }}
+      <div class="input-group col-sm-9">
         <div class="btn-group btn-group-sm" role="group">
           <button type="button" id="migration_import_mode_new" class="btn btn-outline-primary">신규 카테고리</button>
           <button type="button" id="migration_import_mode_merge" class="btn btn-outline-primary">기존 카테고리 병합</button>
         </div>
       </div>
-    </div>
-    <div class="form-group row">
-      <label class="col-sm-3 col-form-label">패키지</label>
-      <div class="col-sm-9">
-        <div class="input-group input-group-sm">
-          <select id="migration_import_package_select" class="form-control"></select>
-          <div class="input-group-append">
-            <button type="button" id="migration_package_refresh_btn" class="btn btn-outline-secondary">새로고침</button>
-            <button type="button" id="migration_package_inspect_btn" class="btn btn-outline-info">패키지 검사</button>
-          </div>
+    {{ macros.setting_bottom() }}
+    {{ macros.setting_top('패키지') }}
+      <div class="input-group col-sm-9">
+        <select id="migration_import_package_select" class="form-control form-control-sm"></select>
+        <div class="btn-group btn-group-sm flex-wrap mr-2" role="group" style="padding-left:5px; padding-top:0px">
+          <button type="button" id="migration_package_refresh_btn" class="btn btn-sm btn-outline-primary">새로고침</button>
+          <button type="button" id="migration_package_inspect_btn" class="btn btn-sm btn-outline-primary">패키지 검사</button>
         </div>
         <input type="hidden" id="migration_import_package" name="migration_import_package" value="{{ arg['migration_import_package'] }}">
       </div>
-    </div>
-    <div class="form-group row">
-      <label class="col-sm-3 col-form-label">대상 DB</label>
-      <div class="col-sm-9">
+    {{ macros.setting_bottom() }}
+    {{ macros.setting_top('대상 DB') }}
+      <div class="input-group col-sm-9">
         <select id="migration_import_db_type" name="migration_import_db_type" class="form-control form-control-sm">
           <option value="auto" {% if arg['migration_import_db_type'] == 'auto' %}selected{% endif %}>패키지 DB 유형 사용</option>
           <option value="general" {% if arg['migration_import_db_type'] == 'general' %}selected{% endif %}>일반 DB</option>
@@ -84,25 +81,18 @@
           <option value="video" {% if arg['migration_import_db_type'] == 'video' %}selected{% endif %}>비디오 DB</option>
         </select>
       </div>
-    </div>
+    {{ macros.setting_bottom() }}
     <div id="migration_import_name_group">
-      {{ macros.setting_input_text('migration_import_name', '신규 카테고리 이름', value=arg['migration_import_name'], desc=['신규 카테고리로 가져올 때만 사용합니다.', '비워두면 패키지의 원본 카테고리명을 사용합니다.', '같은 이름이 있으면 Imported 시각을 붙여 구분합니다.']) }}
+      {{ macros.setting_input_text('migration_import_name', '신규 카테고리 이름', value=arg['migration_import_name'], desc=['신규 카테고리로 가져올 때만 사용합니다. 비워두면 패키지 원본 이름을 사용하며 같은 이름이 있으면 Imported 시각을 붙입니다.']) }}
     </div>
-    <div id="migration_merge_library_group" class="form-group row">
-      <label class="col-sm-3 col-form-label">병합 대상 카테고리</label>
-      <div class="col-sm-9">
+    <div id="migration_merge_library_group">
+      {{ macros.setting_top('병합 대상 카테고리') }}
+      <div class="input-group col-sm-9">
         <select id="migration_merge_library_select" class="form-control form-control-sm"></select>
-        <small class="form-text text-muted">선택한 DB의 기존 카테고리에 도서와 물리 경로를 추가합니다.</small>
       </div>
+      {{ macros.setting_bottom(['선택한 DB의 기존 카테고리에 도서와 물리 경로를 추가합니다.']) }}
     </div>
-    <div class="form-group row">
-      <label class="col-sm-3 col-form-label">대상 물리 경로</label>
-      <div class="col-sm-9">
-        <textarea id="migration_import_target_paths" name="migration_import_target_paths" class="form-control form-control-sm" rows="5" placeholder="/volume1/mnt/GDRIVE/READING/만화/완결A">{{ arg['migration_import_target_paths'] }}</textarea>
-        <button type="button" id="add_migration_import_target_path_btn" class="btn btn-sm btn-outline-secondary mt-2">대상 경로 추가</button>
-        <small class="form-text text-muted">개수 제한 없이 한 줄에 하나씩 입력합니다. 원본 경로 순서대로 대응하며, 경로가 부족하면 남은 도서는 첫 번째 대상 경로를 사용합니다.</small>
-      </div>
-    </div>
+    {{ macros.setting_input_textarea_and_buttons('migration_import_target_paths', '대상 물리 경로', [['add_migration_import_target_path_btn', '대상 경로 추가']], value=arg['migration_import_target_paths'], row='5', desc=['개수 제한 없이 한 줄에 하나씩 입력합니다. 원본 경로 순서대로 대응하며, 경로가 부족하면 남은 도서는 첫 번째 대상 경로를 사용합니다.']) }}
     {{ macros.setting_checkbox('migration_backup_before_import', '가져오기 전 DB 백업', value=arg['migration_backup_before_import'], desc=['SQLite는 backup API, MariaDB는 mariadb-dump로 작업 디렉터리의 backups 폴더에 대상 DB를 백업합니다.', '안전을 위해 기본값은 On입니다.']) }}
     <div id="migration_package_info" class="doctor-card doctor-muted">패키지 검사를 실행하면 원본 경로와 포함 항목을 표시합니다.</div>
   </div>

@@ -1,7 +1,7 @@
 {# BookOasis Mate의 공통 요구사항과 설치 방법을 안내합니다. #}
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=dependency-settings-1">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=manual-diagrams-1">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 <div class="doctor-section doctor-card">
@@ -31,6 +31,15 @@
     </table>
   </div>
   <p class="doctor-muted mb-0">오디오북과 비디오는 전용 스키마를 사용합니다. 일반·성인 도서용 진단을 억지로 적용하지 않고 전용 집계와 스캔 기능만 제공합니다.</p>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>Mate 전체 구조</h4>
+  <p>Mate는 FlaskFarm 화면에서 BookOasis의 API와 DB를 연결하고, 오래 걸리는 작업과 Google Drive 이벤트를 별도 경계에서 처리합니다.</p>
+  <figure class="doctor-manual-diagram">
+    <img src="{{ url_for('bookoasis_mate.static', filename='img/manual/mate-architecture.svg') }}" alt="FlaskFarm, BookOasis Mate, 별도 작업 프로세스, BookOasis API와 DB, Redis 및 Google Drive 연동 관계" loading="lazy">
+    <figcaption>현재 Mate 버전 기준 개념도입니다. 화살표는 주요 데이터·작업 흐름이며 실제 네트워크 배치는 설치 환경에 따라 달라질 수 있습니다.</figcaption>
+  </figure>
 </div>
 
 <div class="doctor-section doctor-card">

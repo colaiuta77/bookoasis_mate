@@ -103,12 +103,14 @@ function databaseMigrationResult(data, root) {
     if (result.cover_backup_path) root.append($('<div>').addClass('mt-1').text('기존 표지 백업 · ' + result.cover_backup_path));
   } else {
     root.append($('<div>').addClass('mt-1').text(
-      'Kavita 원본 ' + Number(result.source_books_count || 0).toLocaleString() + '권 · ' +
+      'Kavita 원본 ' + Number(result.source_books_count || 0).toLocaleString() + '건 · ' +
+      'BookOasis 이관 도서 ' + Number(result.unique_mapped_books_count || 0).toLocaleString() + '권 · ' +
       '신규 생성 ' + Number(result.books_created_count || result.new_books_count || 0).toLocaleString() + '권 · ' +
       '기존 갱신 ' + Number(result.books_updated_count || result.matched_books_count || 0).toLocaleString() + '권 · ' +
       '표지 ' + Number(result.covers_updated_count || result.cover_candidates_count || 0).toLocaleString() + '개 · ' +
       '진행률 ' + Number(result.progress_updated_count || result.progress_count || 0).toLocaleString() + '건'
     ));
+    bookoasisMateRenderKavitaDuplicateAnalysis(root, result);
   }
   if (result.backup_path) root.append($('<div>').addClass('mt-1').text('DB 백업 · ' + result.backup_path));
 }

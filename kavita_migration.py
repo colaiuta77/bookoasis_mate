@@ -22,6 +22,7 @@ class KavitaMigrationStopped(RuntimeError):
 
 BOOK_WRITE_BATCH_SIZE = 500
 COVER_MAX_WORKERS = 4
+DUPLICATE_DETAIL_LIMIT = 100
 
 
 def normalize_media_path(value):
@@ -330,7 +331,7 @@ class KavitaMigrationEngine:
             )
 
             books = []
-            seen_paths = set()
+            source_paths = set()
             for row_index, row in enumerate(rows, 1):
                 if row_index % 1000 == 0:
                     self._check_stop()
@@ -347,11 +348,12 @@ class KavitaMigrationEngine:
                 if selected and library_name not in selected:
                     continue
                 source_path = normalize_media_path(row["FilePath"])
-                if not source_path or source_path in seen_paths:
+                if not source_path:
                     continue
-                seen_paths.add(source_path)
+                source_paths.add(source_path)
                 books.append(
                     {
+                        "source_order": row_index,
                         "library_name": library_name,
                         "series_name": str(row["SeriesName"] or "").strip(),
                         "title": self._book_title(row),
@@ -451,7 +453,7 @@ class KavitaMigrationEngine:
                         """
                     )):
                         source_path = normalize_media_path(row["FilePath"])
-                        if source_path not in seen_paths:
+                        if source_path not in source_paths:
                             continue
                         progress.append(
                             {
@@ -551,6 +553,182 @@ class KavitaMigrationEngine:
                     roots = [common]
             mapped[library_name] = roots
         return mapped
+
+    @staticmethod
+    def _path_contains(root, path):
+        root = normalize_media_path(root)
+        path = normalize_media_path(path)
+        return bool(root) and (path == root or path.startswith(root + "/"))
+
+    @staticmethod
+    def _path_depth(path):
+        return len([part for part in normalize_media_path(path).split("/") if part])
+
+    @classmethod
+    def _resolve_migration_books(
+        cls,
+        books,
+        library_paths,
+        mappings,
+        target_books,
+    ):
+        mapped_library_paths = cls._mapped_library_paths(
+            books,
+            library_paths,
+            mappings,
+        )
+        groups = {}
+        for fallback_order, book in enumerate(books, 1):
+            mapped_path = apply_path_mappings(book["file_path"], mappings)
+            if mapped_path in {"", ".", "/"} or not posixpath.basename(mapped_path):
+                raise ValueError(
+                    "Kavita 도서의 최종 경로를 처리할 수 없습니다. "
+                    f"보관함: {book.get('library_name') or '-'} · "
+                    f"원본: {book.get('file_path') or '-'} · "
+                    f"최종 경로: {mapped_path or '-'}"
+                )
+            groups.setdefault(mapped_path, []).append(
+                (book, int(book.get("source_order") or fallback_order))
+            )
+
+        migration_books = []
+        duplicate_details = []
+        duplicate_groups = 0
+        duplicate_source_rows = 0
+        merged_extra_sources = 0
+        ambiguous_groups = 0
+        for mapped_path, grouped_sources in groups.items():
+            sources = []
+            for book, source_order in grouped_sources:
+                library_name = str(book.get("library_name") or "").strip()
+                roots = [
+                    root
+                    for root in mapped_library_paths.get(library_name, [])
+                    if cls._path_contains(root, mapped_path)
+                ]
+                if not library_name or not roots:
+                    raise ValueError(
+                        "Kavita 도서의 최종 보관함을 결정할 수 없습니다. "
+                        f"보관함: {library_name or '-'} · "
+                        f"원본: {book.get('file_path') or '-'} · "
+                        f"최종 경로: {mapped_path}"
+                    )
+                best_root = max(
+                    roots,
+                    key=lambda root: (cls._path_depth(root), len(root)),
+                )
+                sources.append(
+                    {
+                        "book": book,
+                        "source_order": source_order,
+                        "library_name": library_name,
+                        "source_path": book["file_path"],
+                        "mapped_library_roots": roots,
+                        "best_root": best_root,
+                    }
+                )
+            ranked = sorted(
+                sources,
+                key=lambda source: (
+                    -cls._path_depth(source["best_root"]),
+                    -len(source["best_root"]),
+                    source["source_order"],
+                ),
+            )
+            selected = ranked[0]
+            ambiguous = any(
+                source["library_name"] != selected["library_name"]
+                and source["best_root"] == selected["best_root"]
+                for source in ranked[1:]
+            )
+            canonical = min(
+                (
+                    source
+                    for source in sources
+                    if source["library_name"] == selected["library_name"]
+                ),
+                key=lambda source: source["source_order"],
+            )
+            migration_books.append(
+                (canonical["book"], mapped_path, target_books.get(mapped_path))
+            )
+            if len(sources) == 1:
+                continue
+            duplicate_groups += 1
+            duplicate_source_rows += len(sources)
+            merged_extra_sources += len(sources) - 1
+            ambiguous_groups += int(ambiguous)
+            if len(duplicate_details) < DUPLICATE_DETAIL_LIMIT:
+                duplicate_details.append(
+                    {
+                        "mapped_path": mapped_path,
+                        "source_count": len(sources),
+                        "selected_library": selected["library_name"],
+                        "selection_reason": (
+                            "stable_source_order"
+                            if ambiguous
+                            else "most_specific_library_root"
+                        ),
+                        "ambiguous": ambiguous,
+                        "sources": [
+                            {
+                                "library_name": source["library_name"],
+                                "source_path": source["source_path"],
+                                "mapped_library_roots": source[
+                                    "mapped_library_roots"
+                                ],
+                            }
+                            for source in sorted(
+                                sources,
+                                key=lambda source: source["source_order"],
+                            )
+                        ],
+                    }
+                )
+
+        return migration_books, {
+            "source_books_count": len(books),
+            "unique_mapped_books_count": len(migration_books),
+            "duplicate_path_groups_count": duplicate_groups,
+            "duplicate_source_rows_count": duplicate_source_rows,
+            "merged_extra_sources_count": merged_extra_sources,
+            "auto_merged_books_count": duplicate_groups,
+            "ambiguous_library_groups_count": ambiguous_groups,
+            "duplicate_path_groups": duplicate_details,
+            "duplicate_path_groups_truncated": (
+                duplicate_groups > len(duplicate_details)
+            ),
+        }
+
+    @staticmethod
+    def _resolve_mapped_progress(
+        progress,
+        mappings,
+        mapped_paths,
+        user_rules,
+        target_users,
+    ):
+        resolved = {}
+        for item in progress:
+            target_username = user_rules.get(item["source_user"])
+            if not target_username:
+                continue
+            mapped_path = apply_path_mappings(item["file_path"], mappings)
+            if mapped_path not in mapped_paths:
+                continue
+            target_user_id = target_users[target_username]
+            key = (mapped_path, target_user_id)
+            rank = (
+                int(item.get("pages_read") or 0),
+                str(item.get("last_read_at") or ""),
+            )
+            previous = resolved.get(key)
+            if previous is None or rank > previous[0]:
+                resolved[key] = (rank, item)
+        return [
+            (item, mapped_path, target_user_id)
+            for (mapped_path, target_user_id), (_, item) in resolved.items()
+        ]
 
     @staticmethod
     def _suggest_path_mappings(
@@ -677,12 +855,17 @@ class KavitaMigrationEngine:
             target_library_paths,
         )
         mappings = configured_mappings or suggested_mappings
+        migration_books, duplicate_analysis = self._resolve_migration_books(
+            books,
+            library_paths,
+            mappings,
+            targets,
+        )
         libraries = {}
         matched = 0
         cover_candidates = 0
-        for book in books:
-            mapped = apply_path_mappings(book["file_path"], mappings)
-            is_matched = mapped in targets
+        for book, mapped, target in migration_books:
+            is_matched = target is not None
             matched += int(is_matched)
             cover_candidates += int(bool(book["covers"]) and is_matched)
             item = libraries.setdefault(
@@ -710,10 +893,10 @@ class KavitaMigrationEngine:
         ]
         return {
             "libraries": sorted(libraries.values(), key=lambda item: item["name"]),
-            "books_count": len(books),
+            "books_count": len(migration_books),
             "target_books_count": len(targets),
             "matched_books_count": matched,
-            "new_books_count": len(books) - matched,
+            "new_books_count": len(migration_books) - matched,
             "unmatched_books_count": 0,
             "cover_candidates_count": cover_candidates,
             "progress_count": len(progress),
@@ -740,6 +923,7 @@ class KavitaMigrationEngine:
                 for path in paths
             }),
             "target_paths": target_library_paths,
+            **duplicate_analysis,
         }
 
     def _backup_database(self):
@@ -883,29 +1067,25 @@ class KavitaMigrationEngine:
                 "BookOasis에 없는 사용자입니다: " + ", ".join(invalid_users)
             )
 
-        migration_books = []
-        mapped_paths = set()
-        for book in books:
-            mapped_path = apply_path_mappings(book["file_path"], path_rules)
-            target = target_books.get(mapped_path)
-            if mapped_path in mapped_paths:
-                raise ValueError(
-                    f"경로 매핑 후 도서 경로가 중복됩니다: {mapped_path}"
-                )
-            mapped_paths.add(mapped_path)
-            migration_books.append((book, mapped_path, target))
+        migration_books, duplicate_analysis = self._resolve_migration_books(
+            books,
+            library_paths,
+            path_rules,
+            target_books,
+        )
+        mapped_paths = {mapped_path for _, mapped_path, _ in migration_books}
 
-        mapped_progress = []
-        if import_progress:
-            for item in progress:
-                target_username = user_rules.get(item["source_user"])
-                if not target_username:
-                    continue
-                mapped_path = apply_path_mappings(item["file_path"], path_rules)
-                if mapped_path in mapped_paths:
-                    mapped_progress.append(
-                        (item, mapped_path, target_users[target_username])
-                    )
+        mapped_progress = (
+            self._resolve_mapped_progress(
+                progress,
+                path_rules,
+                mapped_paths,
+                user_rules,
+                target_users,
+            )
+            if import_progress
+            else []
+        )
 
         existing_count = sum(1 for _, _, target in migration_books if target)
         new_count = len(migration_books) - existing_count
@@ -930,7 +1110,22 @@ class KavitaMigrationEngine:
             "unmatched": [],
             "unmatched_truncated": False,
             "backup_path": "",
+            **duplicate_analysis,
         }
+        if duplicate_analysis["duplicate_path_groups_count"]:
+            self._progress(
+                "prepare",
+                0,
+                len(migration_books),
+                (
+                    "Kavita 동일 경로 중복을 자동 병합했습니다. "
+                    f"원본 {len(books)}건 · 고유 도서 {len(migration_books)}권 · "
+                    "중복 그룹 "
+                    f"{duplicate_analysis['duplicate_path_groups_count']}건 · "
+                    "보관함 선택 경고 "
+                    f"{duplicate_analysis['ambiguous_library_groups_count']}건"
+                ),
+            )
         if dry_run:
             return preview
 

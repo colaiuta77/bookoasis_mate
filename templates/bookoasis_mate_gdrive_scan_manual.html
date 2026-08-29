@@ -1,7 +1,7 @@
 {# 외부 gd-poller와 Mate 자체 Google Drive 변경 감지 연동 절차를 안내합니다. #}
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=gdrive-manual-2">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=manual-diagrams-1">
 
 <div class="doctor-section doctor-card">
   <h3>Google Drive 변경 감지 연동 매뉴얼</h3>
@@ -49,24 +49,10 @@
 
 <div class="doctor-section doctor-card">
   <h4>3. 변경 감지 방식 선택</h4>
-  <div class="gdrive-mode-flows">
-    <div class="gdrive-mode-flow">
-      <strong>CommandDispatcher</strong>
-      <span>gd-poller → 래퍼 스크립트 → Mate 이벤트 API</span>
-      <small>기존 gd-poller 설정과 호환할 때 사용합니다.</small>
-    </div>
-    <div class="gdrive-mode-flow">
-      <strong>WebhookDispatcher</strong>
-      <span>gd-poller → Mate 이벤트 API</span>
-      <small>래퍼 없이 JSON 이벤트를 직접 전달합니다.</small>
-    </div>
-    <div class="gdrive-mode-flow">
-      <strong>Mate 자체 감지</strong>
-      <span>FF rclone → Mate Changes 감지</span>
-      <small>gd-poller 없이 Google Drive 변경을 확인합니다.</small>
-    </div>
-  </div>
-  <div class="gdrive-mode-common-flow">Mate 대기열 → VFS 이전 경로 정리 → BookOasis 개별 경로 스캔</div>
+  <figure class="doctor-manual-diagram">
+    <img src="{{ url_for('bookoasis_mate.static', filename='img/manual/gdrive-change-workflow.svg') }}" alt="세 가지 Google Drive 변경 감지 방식이 Mate 대기열로 합쳐져 VFS 이전 경로 정리와 BookOasis 개별 경로 스캔으로 이어지는 흐름" loading="lazy">
+    <figcaption>현재 Mate 버전 기준 개념도입니다. 세 입력 방식 중 하나만 선택하며 대기열 이후의 처리 경로는 같습니다.</figcaption>
+  </figure>
   <div class="doctor-manual-table-wrap">
     <table class="doctor-manual-table">
       <thead><tr><th>방식</th><th>외부 구성</th><th>인증 위치</th><th>권장 용도</th></tr></thead>
