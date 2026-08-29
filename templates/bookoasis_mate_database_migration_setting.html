@@ -20,24 +20,15 @@
   <div class="doctor-section doctor-card">
     <h4>공통 설정</h4>
     <p class="doctor-muted">두 이관 방식의 백업, 패키지와 임시 작업 파일을 같은 작업 디렉터리에서 관리합니다.</p>
-    <div class="form-group row mb-0">
-      <label for="migration_work_dir" class="col-sm-3 col-form-label">이관 작업 디렉터리</label>
-      <div class="col-sm-9">
-        <div class="input-group input-group-sm">
-          <input type="text" id="migration_work_dir" name="migration_work_dir" class="form-control" value="{{ arg.get('migration_work_dir', '') }}">
-          <div class="input-group-append"><button type="button" id="select_database_migration_work_dir_btn" class="btn btn-outline-secondary">경로 선택</button></div>
-        </div>
-        <small class="form-text text-muted">DB 백업과 임시 작업 파일을 저장합니다.</small>
-      </div>
-    </div>
+    {{ macros.setting_input_text_and_buttons('migration_work_dir', '이관 작업 디렉터리', [['select_database_migration_work_dir_btn', '경로 선택']], value=arg.get('migration_work_dir', ''), desc=['DB 백업과 임시 작업 파일을 저장합니다.']) }}
   </div>
 
   <div id="kavita_source_fields" class="doctor-section doctor-card">
     <h4>Kavita → BookOasis 설정</h4>
     <p class="doctor-muted">Kavita의 도서·메타데이터·표지와 선택한 사용자 진행률을 BookOasis 일반 또는 성인 DB로 이관합니다. 대상 DB 엔진은 SQLite와 MariaDB를 모두 지원합니다.</p>
-    <div id="kavita_target_database_field" class="form-group row">
-      <label class="col-sm-3 col-form-label">BookOasis 대상 DB</label>
-      <div class="col-sm-9">
+    <div id="kavita_target_database_field">
+      {{ macros.setting_top('BookOasis 대상 DB') }}
+      <div class="input-group col-sm-9">
         <select id="database_migration_target_db_type" name="kavita_target_db_type" class="form-control form-control-sm">
           {% set target_db = arg.get('kavita_target_db_type', 'general') %}
           <option value="general" {% if target_db == 'general' %}selected{% endif %}>일반 DB</option>
@@ -45,54 +36,38 @@
           <option value="adult" {% if target_db == 'adult' %}selected{% endif %}>성인 DB</option>
           {% endif %}
         </select>
-        <small class="form-text text-muted">일반·성인 DB는 안전한 백업과 롤백을 위해 한 번에 하나씩 실행합니다.</small>
       </div>
+      {{ macros.setting_bottom(['일반·성인 DB는 안전한 백업과 롤백을 위해 한 번에 하나씩 실행합니다.']) }}
     </div>
-    <div class="form-group row">
-      <label for="kavita_db_path" class="col-sm-3 col-form-label">Kavita DB 파일</label>
-      <div class="col-sm-9">
-        <div class="input-group input-group-sm">
-          <input type="text" id="kavita_db_path" name="kavita_db_path" class="form-control" value="{{ arg.get('kavita_db_path', '') }}">
-          <div class="input-group-append"><button type="button" id="select_kavita_db_path_btn" class="btn btn-outline-secondary">파일 선택</button></div>
-        </div>
-        <small class="form-text text-muted">FlaskFarm 컨테이너에서 보이는 kavita.db 파일입니다.</small>
-      </div>
-    </div>
-    <div class="form-group row">
-      <label for="kavita_cover_path" class="col-sm-3 col-form-label">Kavita 표지 디렉터리</label>
-      <div class="col-sm-9">
-        <div class="input-group input-group-sm">
-          <input type="text" id="kavita_cover_path" name="kavita_cover_path" class="form-control" value="{{ arg.get('kavita_cover_path', '') }}">
-          <div class="input-group-append"><button type="button" id="select_kavita_cover_path_btn" class="btn btn-outline-secondary">경로 선택</button></div>
-        </div>
-        <small class="form-text text-muted">Kavita config 아래 covers 디렉터리입니다. 표지를 이관하지 않으면 비워둘 수 있습니다.</small>
-      </div>
-    </div>
+    {{ macros.setting_input_text_and_buttons('kavita_db_path', 'Kavita DB 파일', [['select_kavita_db_path_btn', '파일 선택']], value=arg.get('kavita_db_path', ''), desc=['FlaskFarm 컨테이너에서 보이는 kavita.db 파일입니다.']) }}
+    {{ macros.setting_input_text_and_buttons('kavita_cover_path', 'Kavita 표지 디렉터리', [['select_kavita_cover_path_btn', '경로 선택']], value=arg.get('kavita_cover_path', ''), desc=['Kavita config 아래 covers 디렉터리입니다. 표지를 이관하지 않으면 비워둘 수 있습니다.']) }}
     <input type="hidden" id="kavita_selected_libraries" name="kavita_selected_libraries" value="{{ arg.get('kavita_selected_libraries', '') }}">
-    <div class="form-group row">
-      <label class="col-sm-3 col-form-label">경로 프리픽스 매핑</label>
-      <div class="col-sm-9">
-        <textarea id="kavita_path_mappings" name="kavita_path_mappings" class="form-control form-control-sm" rows="4" placeholder="/kavita/books => /volume1/books">{{ arg.get('kavita_path_mappings', '') }}</textarea>
-        <small class="form-text text-muted">Kavita DB 검사 시 원본 도서 상대 경로와 BookOasis 도서 경로가 일치하면 빈 입력란에 안전한 프리픽스 제안값을 자동으로 채웁니다.</small>
-        <div class="input-group input-group-sm mt-2">
-          <input type="text" id="kavita_mapping_source" class="form-control" placeholder="Kavita 원본 폴더">
-          <div class="input-group-append"><button type="button" id="select_kavita_mapping_source_btn" class="btn btn-outline-secondary">원본 선택</button></div>
-          <input type="text" id="kavita_mapping_target" class="form-control" placeholder="BookOasis 대상 폴더">
-          <div class="input-group-append">
-            <button type="button" id="select_kavita_mapping_target_btn" class="btn btn-outline-secondary">대상 선택</button>
-            <button type="button" id="add_kavita_path_mapping_btn" class="btn btn-outline-primary">매핑 추가</button>
+    {{ macros.setting_top('경로 프리픽스 매핑') }}
+      <div class="input-group col-sm-9">
+        <div class="col-md-12">
+          <div class="row">
+            <textarea id="kavita_path_mappings" name="kavita_path_mappings" class="col-md-12" rows="4" placeholder="/kavita/books => /volume1/books">{{ arg.get('kavita_path_mappings', '') }}</textarea>
+          </div>
+          <div class="input-group input-group-sm mt-2">
+            <input type="text" id="kavita_mapping_source" class="form-control" placeholder="Kavita 원본 폴더">
+            <div class="input-group-append"><button type="button" id="select_kavita_mapping_source_btn" class="btn btn-sm btn-outline-primary">원본 선택</button></div>
+            <input type="text" id="kavita_mapping_target" class="form-control" placeholder="BookOasis 대상 폴더">
+            <div class="input-group-append">
+              <button type="button" id="select_kavita_mapping_target_btn" class="btn btn-sm btn-outline-primary">대상 선택</button>
+              <button type="button" id="add_kavita_path_mapping_btn" class="btn btn-sm btn-outline-primary">매핑 추가</button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-    <div class="form-group row">
-      <label class="col-sm-3 col-form-label">사용자 매핑</label>
-      <div class="col-sm-9">
-        <div id="kavita_user_mapping_selectors" class="doctor-card doctor-muted mb-2">Kavita DB 검사를 실행하면 사용자별 BookOasis 계정을 선택할 수 있습니다.</div>
-        <textarea id="kavita_user_mappings" name="kavita_user_mappings" class="form-control form-control-sm" rows="4" placeholder="kavita사용자 => bookoasis사용자">{{ arg.get('kavita_user_mappings', '') }}</textarea>
-        <small class="form-text text-muted">선택 결과는 기존 `Kavita 사용자 => BookOasis 사용자` 형식으로 저장됩니다. 같은 사용자명만 자동 선택하며 다른 이름은 직접 선택해야 합니다.</small>
+    {{ macros.setting_bottom(['Kavita DB 검사 시 원본 도서 상대 경로와 BookOasis 도서 경로가 일치하면 빈 입력란에 안전한 프리픽스 제안값을 자동으로 채웁니다.']) }}
+    {{ macros.setting_top('사용자 매핑') }}
+      <div class="input-group col-sm-9">
+        <div class="col-md-12">
+          <div id="kavita_user_mapping_selectors" class="doctor-card doctor-muted mb-2">Kavita DB 검사를 실행하면 사용자별 BookOasis 계정을 선택할 수 있습니다.</div>
+          <textarea id="kavita_user_mappings" name="kavita_user_mappings" class="col-md-12" rows="4" placeholder="kavita사용자 => bookoasis사용자">{{ arg.get('kavita_user_mappings', '') }}</textarea>
+        </div>
       </div>
-    </div>
+    {{ macros.setting_bottom(['선택 결과는 기존 `Kavita 사용자 => BookOasis 사용자` 형식으로 저장됩니다. 같은 사용자명만 자동 선택하며 다른 이름은 직접 선택해야 합니다.']) }}
     {{ macros.setting_checkbox('kavita_import_covers', 'Kavita 표지 이관', value=arg.get('kavita_import_covers', 'True'), desc=['유효한 표지만 WebP로 변환합니다.']) }}
     {{ macros.setting_checkbox('kavita_import_progress', '독서 진행률 이관', value=arg.get('kavita_import_progress', 'False'), desc=['명시적으로 매핑한 사용자만 반영합니다.']) }}
     {{ macros.setting_checkbox('kavita_lock_metadata', '이관 메타데이터 잠금', value=arg.get('kavita_lock_metadata', 'True'), desc=['스캐너가 이관 메타데이터를 덮어쓰지 않도록 잠급니다.']) }}
@@ -113,13 +88,7 @@
     <div id="bookoasis_export_panel" class="doctor-section doctor-card">
       <h4>내보내기 설정</h4>
       <p class="doctor-muted">현재 일반·성인·오디오북·비디오 DB와 전체 표지를 공유 가능한 두 개의 패키지로 저장합니다.</p>
-      <div class="form-group row mb-0">
-        <label class="col-sm-3 col-form-label">패키지 이름</label>
-        <div class="col-sm-9">
-          <input type="text" id="bookoasis_export_name" name="bookoasis_export_name" class="form-control form-control-sm" value="{{ arg.get('bookoasis_export_name', 'dist_books') }}" placeholder="dist_books">
-          <small class="form-text text-muted">이관 작업 디렉터리에 `db_이름_날짜.tar.gz`와 `covers_이름_날짜.tar.gz`를 생성합니다. SQLite는 존재하는 일반·성인·오디오북·비디오 DB를 backup API로 복사하고, MariaDB는 4개 DB의 논리 백업을 생성합니다.</small>
-        </div>
-      </div>
+      {{ macros.setting_input_text('bookoasis_export_name', '패키지 이름', value=arg.get('bookoasis_export_name', 'dist_books'), placeholder='dist_books', desc=['이관 작업 디렉터리에 `db_이름_날짜.tar.gz`와 `covers_이름_날짜.tar.gz`를 생성합니다. SQLite는 존재하는 일반·성인·오디오북·비디오 DB를 backup API로 복사하고, MariaDB는 4개 DB의 논리 백업을 생성합니다.']) }}
       <div class="alert alert-info mt-3 mb-0">DB와 표지의 시점을 정확히 맞추려면 스캐너와 메타데이터 변경 작업을 멈춘 상태에서 내보내세요.</div>
     </div>
     <div id="bookoasis_import_panel" class="doctor-section doctor-card">
@@ -128,42 +97,38 @@
       <div class="alert alert-warning">패키지에 포함된 일반·성인·오디오북·비디오 DB와 전체 표지 디렉터리를 공유 패키지 세트로 교체합니다. 기존 DB와 병합하지 않으며 사용자·진행률도 공유 DB 내용으로 바뀝니다.</div>
       <input type="hidden" id="bookoasis_db_package_path" name="bookoasis_db_package_path" value="{{ arg.get('bookoasis_db_package_path', '') }}">
       <input type="hidden" id="bookoasis_cover_package_path" name="bookoasis_cover_package_path" value="{{ arg.get('bookoasis_cover_package_path', '') }}">
-      <div class="form-group row">
-        <label class="col-sm-3 col-form-label">공유 DB 패키지</label>
-        <div class="col-sm-9">
-          <div class="input-group input-group-sm">
-            <select id="bookoasis_db_package_select" class="form-control"></select>
-            <div class="input-group-append">
-              <button type="button" id="bookoasis_package_refresh_btn" class="btn btn-outline-secondary">새로고침</button>
-              <button type="button" id="database_migration_database_inspect_btn" class="btn btn-outline-info">DB 패키지 검사</button>
-            </div>
+      {{ macros.setting_top('공유 DB 패키지') }}
+        <div class="input-group col-sm-9">
+          <select id="bookoasis_db_package_select" class="form-control form-control-sm"></select>
+          <div class="btn-group btn-group-sm flex-wrap mr-2" role="group" style="padding-left:5px; padding-top:0px">
+            <button type="button" id="bookoasis_package_refresh_btn" class="btn btn-sm btn-outline-primary">새로고침</button>
+            <button type="button" id="database_migration_database_inspect_btn" class="btn btn-sm btn-outline-primary">DB 패키지 검사</button>
           </div>
-          <small class="form-text text-muted">작업 디렉터리의 `db_*.tar.gz` 파일을 선택합니다. 패키지 검사는 DB 구조·무결성·원본 경로만 확인합니다.</small>
         </div>
-      </div>
-      <div class="form-group row">
-        <label class="col-sm-3 col-form-label">공유 표지 패키지</label>
-        <div class="col-sm-9">
+      {{ macros.setting_bottom(['작업 디렉터리의 `db_*.tar.gz` 파일을 선택합니다. 패키지 검사는 DB 구조·무결성·원본 경로만 확인합니다.']) }}
+      {{ macros.setting_top('공유 표지 패키지') }}
+        <div class="input-group col-sm-9">
           <select id="bookoasis_cover_package_select" class="form-control form-control-sm"></select>
-          <small class="form-text text-muted">작업 디렉터리의 `covers_*.tar.gz` 파일을 별도로 선택합니다. Dry Run 또는 실제 가져오기를 시작할 때 필요합니다.</small>
         </div>
-      </div>
-      <div class="form-group row">
-        <label class="col-sm-3 col-form-label">미디어 경로 매핑</label>
-        <div class="col-sm-9">
-          <textarea id="bookoasis_package_path_mappings" name="bookoasis_package_path_mappings" class="form-control form-control-sm" rows="5" placeholder="/원본/미디어 => /현재/미디어">{{ arg.get('bookoasis_package_path_mappings', '') }}</textarea>
-          <small class="form-text text-muted">`/books => /mnt/gds2`처럼 `/GDRIVE` 상위 폴더만 한 줄로 매핑하면 `/GDRIVE/READING/...` 하위 경로는 그대로 유지됩니다.</small>
-          <div class="input-group input-group-sm mt-2">
-            <input type="text" id="bookoasis_package_mapping_source" class="form-control" placeholder="공유 DB의 GDRIVE 상위 폴더">
-            <div class="input-group-append"><button type="button" id="select_bookoasis_package_source_btn" class="btn btn-outline-secondary">원본 선택</button></div>
-            <input type="text" id="bookoasis_package_mapping_target" class="form-control" placeholder="현재 서버의 GDRIVE 상위 폴더">
-            <div class="input-group-append">
-              <button type="button" id="select_bookoasis_package_target_btn" class="btn btn-outline-secondary">대상 선택</button>
-              <button type="button" id="add_bookoasis_package_mapping_btn" class="btn btn-outline-primary">매핑 추가</button>
+      {{ macros.setting_bottom(['작업 디렉터리의 `covers_*.tar.gz` 파일을 별도로 선택합니다. Dry Run 또는 실제 가져오기를 시작할 때 필요합니다.']) }}
+      {{ macros.setting_top('미디어 경로 매핑') }}
+        <div class="input-group col-sm-9">
+          <div class="col-md-12">
+            <div class="row">
+              <textarea id="bookoasis_package_path_mappings" name="bookoasis_package_path_mappings" class="col-md-12" rows="5" placeholder="/원본/미디어 => /현재/미디어">{{ arg.get('bookoasis_package_path_mappings', '') }}</textarea>
+            </div>
+            <div class="input-group input-group-sm mt-2">
+              <input type="text" id="bookoasis_package_mapping_source" class="form-control" placeholder="공유 DB의 GDRIVE 상위 폴더">
+              <div class="input-group-append"><button type="button" id="select_bookoasis_package_source_btn" class="btn btn-sm btn-outline-primary">원본 선택</button></div>
+              <input type="text" id="bookoasis_package_mapping_target" class="form-control" placeholder="현재 서버의 GDRIVE 상위 폴더">
+              <div class="input-group-append">
+                <button type="button" id="select_bookoasis_package_target_btn" class="btn btn-sm btn-outline-primary">대상 선택</button>
+                <button type="button" id="add_bookoasis_package_mapping_btn" class="btn btn-sm btn-outline-primary">매핑 추가</button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      {{ macros.setting_bottom(['`/books => /mnt/gds2`처럼 `/GDRIVE` 상위 폴더만 한 줄로 매핑하면 `/GDRIVE/READING/...` 하위 경로는 그대로 유지됩니다.']) }}
       {{ macros.setting_checkbox('bookoasis_backup_before_import', '실행 전 DB 백업', value=arg.get('bookoasis_backup_before_import', 'True'), desc=['SQLite는 패키지에 포함된 일반·성인·오디오북·비디오 DB 중 현재 존재하는 대상 DB를 backup API로 백업합니다.', 'MariaDB는 일반·성인·오디오북·비디오 4개 DB를 mariadb-dump 논리 백업으로 저장하며 실제 가져오기에서는 반드시 켜야 합니다.', '현재 표지 디렉터리는 같은 상위 경로에 별도 백업 디렉터리로 보존합니다.']) }}
       {{ macros.setting_checkbox('bookoasis_package_dry_run', 'BookOasis 패키지 Dry Run', value=arg.get('bookoasis_package_dry_run', 'True'), desc=['임시 DB와 임시 표지에서 압축 해제·경로 변경·무결성 검사를 끝까지 실행하되 현재 설치에는 적용하지 않습니다.']) }}
       <div class="alert alert-danger mt-3 mb-0">Dry Run을 끈 실제 가져오기는 상태 화면에서 매번 BookOasis 중지 여부를 확인해야 시작됩니다. 상태 API가 healthy로 응답하면 적용을 차단합니다.</div>
