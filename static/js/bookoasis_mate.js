@@ -50,6 +50,59 @@ function bookoasisMateClear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
+function bookoasisMateRenderKavitaDuplicateAnalysis(root, data) {
+  var count = Number(data.duplicate_path_groups_count || 0);
+  if (!count) return;
+  var summary = $('<div>').addClass('alert alert-info mt-3 mb-0');
+  summary.append($('<strong>').text('경로 중복 분석'));
+  summary.append($('<div>').addClass('mt-1').text(
+    '동일 실제 도서 자동 병합 ' + count.toLocaleString() + '건 · ' +
+    '병합되는 추가 Kavita 등록 ' +
+    Number(data.merged_extra_sources_count || 0).toLocaleString() + '건 · ' +
+    '보관함 선택 경고 ' +
+    Number(data.ambiguous_library_groups_count || 0).toLocaleString() + '건'
+  ));
+  summary.append($('<div>').addClass('mt-1').text(
+    '최종 파일 경로를 가장 구체적으로 포함하는 Kavita 보관함을 선택해 BookOasis 도서 1권으로 병합합니다.'
+  ));
+  root.append(summary);
+
+  var details = $('<details>').addClass('doctor-summary-notes mt-2');
+  details.append($('<summary>').text(
+    '자동 병합 상세 ' +
+    Number((data.duplicate_path_groups || []).length).toLocaleString() + '건 보기'
+  ));
+  var body = $('<div>').addClass('px-3 pb-3');
+  (data.duplicate_path_groups || []).forEach(function(group) {
+    var card = $('<div>').addClass('doctor-card mt-2');
+    card.append($('<strong>').text(
+      group.ambiguous ? '자동 병합 · 보관함 선택 경고' : '자동 병합'
+    ));
+    card.append($('<div>').addClass('mt-1').text('최종 경로 · ' + (group.mapped_path || '-')));
+    card.append($('<div>').addClass('mt-1').text(
+      '선택 보관함 · ' + (group.selected_library || '-') + ' · ' +
+      (group.selection_reason === 'stable_source_order'
+        ? '동일 경로 우선순위에서 원본 순서 사용'
+        : '가장 구체적인 보관함 경로 사용')
+    ));
+    (group.sources || []).forEach(function(source, index) {
+      card.append($('<div>').addClass('doctor-muted mt-1').text(
+        '원본 ' + (index + 1) + ' · ' + (source.library_name || '-') + ' · ' +
+        (source.source_path || '-') + ' · 매핑된 보관함 루트 ' +
+        ((source.mapped_library_roots || []).join(', ') || '-')
+      ));
+    });
+    body.append(card);
+  });
+  if (data.duplicate_path_groups_truncated) {
+    body.append($('<div>').addClass('doctor-muted mt-2').text(
+      '상세는 처음 100건만 표시합니다. 전체 통계에는 모든 중복이 포함됩니다.'
+    ));
+  }
+  details.append(body);
+  root.append(details);
+}
+
 function bookoasisMateEscape(value) {
   var node = document.createElement('div');
   node.textContent = value == null ? '' : String(value);

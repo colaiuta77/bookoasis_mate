@@ -6,8 +6,7 @@
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 {{ macros.m_button_group([['migration_save_btn', '설정 저장']]) }}
-<form id="migration_setting">
-  {{ macros.setting_input_text_and_buttons('migration_work_dir', '이관 작업 디렉터리', [['select_migration_work_dir_btn', '경로 선택']], value=arg['migration_work_dir'], desc=['FlaskFarm 컨테이너에서 보이는 경로를 입력합니다.', '내보낸 .oasis.zip, 가져올 패키지와 DB 백업을 이 디렉터리에서 관리합니다.']) }}
+<form id="migration_setting" class="migration-uniform-form">
   <input type="hidden" id="migration_operation" name="migration_operation" value="{{ arg['migration_operation'] }}">
   <input type="hidden" id="migration_export_library_ids" name="migration_export_library_ids" value="{{ arg['migration_export_library_ids'] }}">
 
@@ -16,6 +15,21 @@
     <div class="btn-group btn-group-sm" role="group">
       <button type="button" id="migration_mode_export" class="btn btn-outline-primary">내보내기</button>
       <button type="button" id="migration_mode_import" class="btn btn-outline-primary">가져오기</button>
+    </div>
+  </div>
+
+  <div class="doctor-section doctor-card">
+    <h4>공통 설정</h4>
+    <p class="doctor-muted">내보낸 패키지, 가져올 패키지와 DB 백업을 같은 작업 디렉터리에서 관리합니다.</p>
+    <div class="form-group row mb-0">
+      <label for="migration_work_dir" class="col-sm-3 col-form-label">이관 작업 디렉터리</label>
+      <div class="col-sm-9">
+        <div class="input-group input-group-sm">
+          <input type="text" id="migration_work_dir" name="migration_work_dir" class="form-control" value="{{ arg['migration_work_dir'] }}">
+          <div class="input-group-append"><button type="button" id="select_migration_work_dir_btn" class="btn btn-outline-secondary">경로 선택</button></div>
+        </div>
+        <small class="form-text text-muted">FlaskFarm 컨테이너에서 보이는 경로입니다.</small>
+      </div>
     </div>
   </div>
 
@@ -85,8 +99,12 @@
         </select>
       </div>
     </div>
-    <div id="migration_import_name_group">
-      {{ macros.setting_input_text('migration_import_name', '신규 카테고리 이름', value=arg['migration_import_name'], desc=['신규 카테고리로 가져올 때만 사용합니다.', '비워두면 패키지의 원본 카테고리명을 사용합니다.', '같은 이름이 있으면 Imported 시각을 붙여 구분합니다.']) }}
+    <div id="migration_import_name_group" class="form-group row">
+      <label for="migration_import_name" class="col-sm-3 col-form-label">신규 카테고리 이름</label>
+      <div class="col-sm-9">
+        <input type="text" id="migration_import_name" name="migration_import_name" class="form-control form-control-sm" value="{{ arg['migration_import_name'] }}">
+        <small class="form-text text-muted">신규 카테고리로 가져올 때만 사용합니다. 비워두면 패키지 원본 이름을 사용하며 같은 이름이 있으면 Imported 시각을 붙입니다.</small>
+      </div>
     </div>
     <div id="migration_merge_library_group" class="form-group row">
       <label class="col-sm-3 col-form-label">병합 대상 카테고리</label>

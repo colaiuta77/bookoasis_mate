@@ -6,7 +6,7 @@
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 {{ macros.m_button_group([['database_migration_save_btn', '설정 저장']]) }}
-<form id="database_migration_setting">
+<form id="database_migration_setting" class="migration-uniform-form">
   <input type="hidden" id="database_migration_source" name="database_migration_source" value="{{ arg.get('database_migration_source', 'kavita') }}">
 
   <div class="doctor-section">
@@ -20,7 +20,16 @@
   <div class="doctor-section doctor-card">
     <h4>공통 설정</h4>
     <p class="doctor-muted">두 이관 방식의 백업, 패키지와 임시 작업 파일을 같은 작업 디렉터리에서 관리합니다.</p>
-    {{ macros.setting_input_text_and_buttons('migration_work_dir', '이관 작업 디렉터리', [['select_database_migration_work_dir_btn', '경로 선택']], value=arg.get('migration_work_dir', ''), desc=['DB 백업과 임시 작업 파일을 저장합니다.']) }}
+    <div class="form-group row mb-0">
+      <label for="migration_work_dir" class="col-sm-3 col-form-label">이관 작업 디렉터리</label>
+      <div class="col-sm-9">
+        <div class="input-group input-group-sm">
+          <input type="text" id="migration_work_dir" name="migration_work_dir" class="form-control" value="{{ arg.get('migration_work_dir', '') }}">
+          <div class="input-group-append"><button type="button" id="select_database_migration_work_dir_btn" class="btn btn-outline-secondary">경로 선택</button></div>
+        </div>
+        <small class="form-text text-muted">DB 백업과 임시 작업 파일을 저장합니다.</small>
+      </div>
+    </div>
   </div>
 
   <div id="kavita_source_fields" class="doctor-section doctor-card">
@@ -39,8 +48,26 @@
         <small class="form-text text-muted">일반·성인 DB는 안전한 백업과 롤백을 위해 한 번에 하나씩 실행합니다.</small>
       </div>
     </div>
-    {{ macros.setting_input_text_and_buttons('kavita_db_path', 'Kavita DB 파일', [['select_kavita_db_path_btn', '파일 선택']], value=arg.get('kavita_db_path', ''), desc=['FlaskFarm 컨테이너에서 보이는 kavita.db 파일을 선택합니다.']) }}
-    {{ macros.setting_input_text_and_buttons('kavita_cover_path', 'Kavita 표지 디렉터리', [['select_kavita_cover_path_btn', '경로 선택']], value=arg.get('kavita_cover_path', ''), desc=['Kavita config 아래 covers 디렉터리입니다.', '표지를 이관하지 않으면 비워둘 수 있습니다.']) }}
+    <div class="form-group row">
+      <label for="kavita_db_path" class="col-sm-3 col-form-label">Kavita DB 파일</label>
+      <div class="col-sm-9">
+        <div class="input-group input-group-sm">
+          <input type="text" id="kavita_db_path" name="kavita_db_path" class="form-control" value="{{ arg.get('kavita_db_path', '') }}">
+          <div class="input-group-append"><button type="button" id="select_kavita_db_path_btn" class="btn btn-outline-secondary">파일 선택</button></div>
+        </div>
+        <small class="form-text text-muted">FlaskFarm 컨테이너에서 보이는 kavita.db 파일입니다.</small>
+      </div>
+    </div>
+    <div class="form-group row">
+      <label for="kavita_cover_path" class="col-sm-3 col-form-label">Kavita 표지 디렉터리</label>
+      <div class="col-sm-9">
+        <div class="input-group input-group-sm">
+          <input type="text" id="kavita_cover_path" name="kavita_cover_path" class="form-control" value="{{ arg.get('kavita_cover_path', '') }}">
+          <div class="input-group-append"><button type="button" id="select_kavita_cover_path_btn" class="btn btn-outline-secondary">경로 선택</button></div>
+        </div>
+        <small class="form-text text-muted">Kavita config 아래 covers 디렉터리입니다. 표지를 이관하지 않으면 비워둘 수 있습니다.</small>
+      </div>
+    </div>
     <input type="hidden" id="kavita_selected_libraries" name="kavita_selected_libraries" value="{{ arg.get('kavita_selected_libraries', '') }}">
     <div class="form-group row">
       <label class="col-sm-3 col-form-label">경로 프리픽스 매핑</label>
@@ -358,7 +385,9 @@ function databaseMigrationRenderKavita(data, root) {
     }
   }
   root.append($('<div>').append($('<strong>').text(
-    '도서 ' + Number(data.books_count || 0).toLocaleString() + '권 · 오디오북 ' + Number(data.audiobooks_count || 0).toLocaleString() + '개 · 비디오 ' + Number(data.videos_count || 0).toLocaleString() + '개 · ' +
+    'Kavita 원본 ' + Number(data.source_books_count || data.books_count || 0).toLocaleString() + '건 · ' +
+    'BookOasis 이관 도서 ' + Number(data.unique_mapped_books_count || data.books_count || 0).toLocaleString() + '권 · ' +
+    '오디오북 ' + Number(data.audiobooks_count || 0).toLocaleString() + '개 · 비디오 ' + Number(data.videos_count || 0).toLocaleString() + '개 · ' +
     '기존 도서 갱신 ' + Number(data.matched_books_count || 0).toLocaleString() + '권 · ' +
     '신규 도서 생성 ' + Number(data.new_books_count || 0).toLocaleString() + '권'
   )));
@@ -367,6 +396,7 @@ function databaseMigrationRenderKavita(data, root) {
     '표지 후보 ' + Number(data.cover_candidates_count || 0).toLocaleString() + '개 · ' +
     '진행률 ' + Number(data.progress_count || 0).toLocaleString() + '건'
   ));
+  bookoasisMateRenderKavitaDuplicateAnalysis(root, data);
   if (data.path_mappings_auto_applied) {
     root.append($('<div>').addClass('text-info mt-2').text(
       'Kavita와 BookOasis의 도서 상대 경로를 대조해 경로 프리픽스 ' +
