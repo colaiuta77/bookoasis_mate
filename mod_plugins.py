@@ -39,6 +39,7 @@ class ModulePlugins(PluginModuleBase):
     def _settings(self):
         keys = (
             "bookoasis_root_path",
+            "bookoasis_url",
             *self.db_default.keys(),
         )
         settings = {"package_name": P.package_name}
@@ -133,6 +134,11 @@ class ModulePlugins(PluginModuleBase):
                     "load_status": runtime.get("load_status") if runtime else "unknown",
                     "load_message": runtime.get("load_message") if runtime else "",
                     "config_fields": runtime.get("config_fields") if runtime else [],
+                    "config_mode": (
+                        runtime.get("config_mode")
+                        if runtime
+                        else "none"
+                    ),
                     "update_supported": bool(
                         runtime and runtime.get("update_supported")
                     ),

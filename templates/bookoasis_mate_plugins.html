@@ -3,6 +3,7 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+<input id="plugin_bookoasis_url" type="hidden" value="{{ arg.get('bookoasis_url', '') }}">
 
 <div class="doctor-plugin-manager-head">
   <div>
@@ -164,11 +165,18 @@
   </div>
 </div>
 
-<div class="modal fade" id="plugin_config_modal" tabindex="-1" role="dialog" aria-hidden="true">
+<div class="modal fade doctor-plugin-config-modal" id="plugin_config_modal" tabindex="-1" role="dialog" aria-labelledby="plugin_config_title" aria-hidden="true">
   <div class="modal-dialog modal-lg" role="document"><div class="modal-content">
     <div class="modal-header"><h5 id="plugin_config_title" class="modal-title">플러그인 설정</h5><button type="button" class="close" data-dismiss="modal" aria-label="닫기"><span aria-hidden="true">&times;</span></button></div>
-    <div class="modal-body"><div id="plugin_config_fields"></div><p class="doctor-muted">비밀번호·토큰 필드는 현재 값을 표시하지 않습니다. 비워 두면 기존 값을 유지하고, 삭제 체크 시에만 초기화합니다.</p></div>
-    <div class="modal-footer"><button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button><button id="plugin_config_save" type="button" class="btn btn-primary">설정 저장</button></div>
+    <div class="modal-body">
+      <p id="plugin_config_meta" class="doctor-plugin-config-meta"></p>
+      <div id="plugin_config_custom_notice" class="doctor-plugin-config-notice" style="display:none">
+        이 플러그인은 BookOasis 전용 설정 화면을 사용합니다. Mate에서는 일부 항목만 따로 저장하지 않고 BookOasis에서 전체 설정을 관리합니다.
+      </div>
+      <form id="plugin_config_form"><div id="plugin_config_fields"></div></form>
+      <p id="plugin_config_secret_note" class="doctor-muted mb-0">비밀번호·토큰 필드는 현재 값을 표시하지 않습니다. 비워 두면 기존 값을 유지하고, 삭제를 선택한 경우에만 초기화합니다.</p>
+    </div>
+    <div class="modal-footer"><button id="plugin_config_open_bookoasis" type="button" class="btn btn-outline-primary" style="display:none">BookOasis에서 설정</button><button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button><button id="plugin_config_save" type="submit" form="plugin_config_form" class="btn btn-primary">설정 저장</button></div>
   </div></div>
 </div>
 
@@ -342,6 +350,11 @@ function pluginManagerRenderInstalledCards(items) {
     }
     if (item.update_available) badges.appendChild(pluginManagerBadge('업데이트 가능 ' + item.latest_version, 'doctor-plugin-badge-update'));
     if (item.version_error) badges.appendChild(pluginManagerBadge('업데이트 확인 실패', 'doctor-plugin-badge-warning'));
+    if (item.runtime_available) {
+      if (item.custom_settings_ui) badges.appendChild(pluginManagerBadge('BookOasis 전용 설정', 'doctor-plugin-badge-warning'));
+      else if ((item.config_fields || []).length) badges.appendChild(pluginManagerBadge('Mate 설정 가능', 'doctor-plugin-badge-installed'));
+      else badges.appendChild(pluginManagerBadge('설정 없음', ''));
+    }
     card.appendChild(badges);
     card.appendChild(pluginManagerText('p', 'doctor-plugin-description', item.load_message || item.description || '설치된 BookOasis 플러그인입니다.'));
     var footer = pluginManagerText('div', 'doctor-plugin-card-footer', '');
@@ -349,7 +362,7 @@ function pluginManagerRenderInstalledCards(items) {
     if (repositoryLink) footer.appendChild(repositoryLink);
     if (item.runtime_available) {
       var switchLabel = pluginManagerText('label', 'doctor-plugin-switch', ''); var toggle = document.createElement('input'); toggle.type='checkbox'; toggle.checked=!!item.enabled; toggle.dataset.pluginId=item.id; toggle.addEventListener('change', pluginRuntimeToggle); switchLabel.appendChild(toggle); switchLabel.appendChild(pluginManagerText('span', 'doctor-plugin-switch-track', '')); switchLabel.appendChild(pluginManagerText('span', 'doctor-plugin-switch-text', item.enabled ? '사용 중' : '사용 안 함')); footer.appendChild(switchLabel);
-      if ((item.config_fields || []).length) { var config = pluginManagerText('button', 'btn btn-sm btn-outline-secondary', '설정'); config.type='button'; config.dataset.pluginId=item.id; config.addEventListener('click', pluginRuntimeOpenConfig); footer.appendChild(config); }
+      if ((item.config_fields || []).length || item.custom_settings_ui) { var config = pluginManagerText('button', 'btn btn-sm btn-outline-secondary', '설정'); config.type='button'; config.dataset.pluginId=item.id; config.addEventListener('click', pluginRuntimeOpenConfig); footer.appendChild(config); }
     }
     if (item.update_available) {
       var update = pluginManagerText('button', 'btn btn-sm btn-success doctor-plugin-update-action', '업데이트'); update.type='button'; update.dataset.pluginId=item.id; update.dataset.pluginName=item.name||item.id;
@@ -533,24 +546,55 @@ function pluginManagerStartInstalledUpdateRefresh() {
 function pluginRuntimeToggle(event) { var input=event.currentTarget,requested=input.checked; input.disabled=true; bookoasisMateAjax('plugins','runtime_toggle',{plugin_id:input.dataset.pluginId,enabled:requested?'true':'false'},function(){ pluginManagerLoadInstalled(false); },function(){ input.disabled=false; },{error:function(){ input.checked=!requested; }}); }
 function pluginRuntimeUpdate(event) { var id=event.currentTarget.dataset.pluginId; if(!confirm(id+' 플러그인의 네이티브 업데이트를 실행할까요?')) return; bookoasisMateAjax('plugins','runtime_update',{plugin_id:id},function(ret){ if(ret.msg) notify(ret.msg,ret.ret||'info'); pluginManagerLoadInstalled(false); }); }
 function pluginRuntimeOpenConfig(event) {
-  var item=pluginRuntimeItems[event.currentTarget.dataset.pluginId]; if(!item) return; pluginRuntimeConfigId=item.id; $('#plugin_config_title').text((item.name||item.id)+' 설정'); var target=document.getElementById('plugin_config_fields'); bookoasisMateClear(target);
-  (item.config_fields||[]).forEach(function(field){
-    var group=pluginManagerText('div','form-group',''); group.dataset.key=field.key; group.dataset.secret=field.secret?'true':'false'; group.dataset.type=field.type||'text'; group.appendChild(pluginManagerText('label','',field.label||field.key));
+  var item=pluginRuntimeItems[event.currentTarget.dataset.pluginId];
+  if(!item) return;
+  pluginRuntimeConfigId=item.id;
+  $('#plugin_config_title').text((item.name||item.id)+' 설정');
+  $('#plugin_config_meta').text('플러그인 ID ' + item.id + (item.installed_version ? ' · v' + item.installed_version : ''));
+  var target=document.getElementById('plugin_config_fields');
+  bookoasisMateClear(target);
+  var custom=!!item.custom_settings_ui || item.config_mode==='custom';
+  $('#plugin_config_custom_notice, #plugin_config_open_bookoasis').toggle(custom);
+  $('#plugin_config_form, #plugin_config_secret_note, #plugin_config_save').toggle(!custom);
+  if(custom) { $('#plugin_config_modal').modal('show'); return; }
+
+  (item.config_fields||[]).forEach(function(field,index){
+    var group=pluginManagerText('div','form-group doctor-plugin-config-field','');
+    group.dataset.key=field.key; group.dataset.secret=field.secret?'true':'false'; group.dataset.type=field.type||'text';
+    var inputId='plugin_config_'+index;
+    var label=pluginManagerText('label','doctor-plugin-config-label',field.label||field.key); label.htmlFor=inputId;
+    if(field.required) label.appendChild(pluginManagerText('span','doctor-plugin-required',' *'));
+    group.appendChild(label);
+    var control=pluginManagerText('div','doctor-plugin-config-control','');
     var input;
     if(field.type==='select') {
       input=document.createElement('select'); input.className='form-control';
       (field.options||[]).forEach(function(option){ var node=document.createElement('option'); var value=typeof option==='object'?option.value:option; node.value=value===null||value===undefined?'':String(value); node.textContent=typeof option==='object'?(option.label||node.value):node.value; input.appendChild(node); });
       input.value=field.value===null||field.value===undefined?'':String(field.value);
     } else {
-      input=document.createElement('input'); input.className='form-control'; input.type=field.secret?'password':(field.type==='number'?'number':(field.type==='checkbox'?'checkbox':'text'));
+      input=document.createElement('input');
+      input.type=field.secret?'password':(field.type==='number'?'number':(field.type==='checkbox'?'checkbox':'text'));
       if(field.type==='checkbox') input.checked=field.value===true||String(field.value).toLowerCase()==='true'||String(field.value)==='1';
-      else input.value=field.value===null||field.value===undefined?'':String(field.value);
-      input.placeholder=field.secret&&field.configured?'기존 값 유지':(field.placeholder||'');
+      else { input.className='form-control'; input.value=field.value===null||field.value===undefined?'':String(field.value); input.placeholder=field.secret&&field.configured?'새 값 입력 시 변경':(field.placeholder||''); }
     }
-    group.appendChild(input); if(field.description) group.appendChild(pluginManagerText('small','form-text text-muted',field.description)); if(field.secret&&field.configured){ var clear=pluginManagerText('label','doctor-muted',''); var check=document.createElement('input'); check.type='checkbox'; check.className='plugin-secret-clear'; clear.appendChild(check); clear.appendChild(document.createTextNode(' 저장된 값 삭제')); group.appendChild(clear); } target.appendChild(group);
-  }); $('#plugin_config_modal').modal('show');
+    input.id=inputId; input.required=!!field.required && !(field.secret&&field.configured); input.setAttribute('data-plugin-config-input','');
+    if(field.type==='checkbox') { var switchLabel=pluginManagerText('label','doctor-plugin-config-checkbox doctor-plugin-switch',''); switchLabel.htmlFor=inputId; switchLabel.appendChild(input); switchLabel.appendChild(pluginManagerText('span','doctor-plugin-switch-track','')); switchLabel.appendChild(pluginManagerText('span','doctor-plugin-switch-text','사용')); control.appendChild(switchLabel); }
+    else control.appendChild(input);
+    if(field.description) control.appendChild(pluginManagerText('small','form-text text-muted',field.description));
+    if(field.secret&&field.configured){ var clear=pluginManagerText('label','doctor-plugin-secret-clear',''); var check=document.createElement('input'); check.type='checkbox'; check.className='plugin-secret-clear'; clear.appendChild(check); clear.appendChild(document.createTextNode(' 저장된 값 삭제')); control.appendChild(clear); }
+    group.appendChild(control); target.appendChild(group);
+  });
+  $('#plugin_config_modal').modal('show');
 }
-$('#plugin_config_save').click(function(){ var changes={},clearKeys=[]; $('#plugin_config_fields .form-group').each(function(){ var key=this.dataset.key,input=this.querySelector('.form-control'),clear=this.querySelector('.plugin-secret-clear'); if(clear&&clear.checked) clearKeys.push(key); else if(this.dataset.secret!=='true'||String(input.value||'')!=='') changes[key]=this.dataset.type==='checkbox'?!!input.checked:(input.type==='number'&&input.value!==''?Number(input.value):input.value); }); bookoasisMateAjax('plugins','runtime_config_save',{plugin_id:pluginRuntimeConfigId,changes:JSON.stringify(changes),clear_keys:JSON.stringify(clearKeys)},function(ret){ if(ret.msg) notify(ret.msg,ret.ret||'info'); $('#plugin_config_modal').modal('hide'); pluginManagerLoadInstalled(false); }); });
+$('#plugin_config_open_bookoasis').click(function(){ var url=String($('#plugin_bookoasis_url').val()||'').trim(); if(!url){ notify('BookOasis URL을 먼저 기본 설정에 저장해 주세요.','warning'); return; } var opened=window.open(url.replace(/\/+$/,''),'_blank'); if(opened) opened.opener=null; });
+$('#plugin_config_form').submit(function(event){
+  event.preventDefault();
+  var form=document.getElementById('plugin_config_form');
+  if(!form.checkValidity()){ form.reportValidity(); return; }
+  var button=$('#plugin_config_save'),changes={},clearKeys=[]; button.prop('disabled',true).text('저장 중...');
+  $('#plugin_config_fields .form-group').each(function(){ var key=this.dataset.key,input=this.querySelector('[data-plugin-config-input]'),clear=this.querySelector('.plugin-secret-clear'); if(clear&&clear.checked) clearKeys.push(key); else if(this.dataset.secret!=='true'||String(input.value||'')!=='') changes[key]=this.dataset.type==='checkbox'?!!input.checked:(input.type==='number'&&input.value!==''?Number(input.value):input.value); });
+  bookoasisMateAjax('plugins','runtime_config_save',{plugin_id:pluginRuntimeConfigId,changes:JSON.stringify(changes),clear_keys:JSON.stringify(clearKeys)},function(ret){ if(ret.msg) notify(ret.msg,ret.ret||'info'); $('#plugin_config_modal').modal('hide'); pluginManagerLoadInstalled(false); },function(){ button.prop('disabled',false).text('설정 저장'); });
+});
 
 function pluginManagerInstallCatalog(event) {
   var button = event.currentTarget;

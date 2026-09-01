@@ -476,6 +476,15 @@
 .doctor-plugin-switch input:checked + .doctor-plugin-switch-track::after { transform:translateX(17px); }
 .doctor-plugin-switch input:focus + .doctor-plugin-switch-track { box-shadow:0 0 0 3px rgba(111,66,193,.2); }
 .doctor-plugin-switch-text { font-size:.78rem; color:#495057; }
+.doctor-plugin-config-modal .modal-body { max-height:70vh; overflow-y:auto; }
+.doctor-plugin-config-meta { margin:0 0 14px; color:#6c757d; font-size:.82rem; }
+.doctor-plugin-config-notice { padding:14px 16px; border:1px solid #bee5eb; border-radius:7px; color:#0c5460; background:#d1ecf1; line-height:1.6; }
+.doctor-plugin-config-field { display:grid; grid-template-columns:minmax(150px, 28%) 1fr; gap:8px 16px; align-items:start; margin-bottom:18px; }
+.doctor-plugin-config-label { margin:8px 0 0; font-weight:600; }
+.doctor-plugin-required { color:#dc3545; }
+.doctor-plugin-config-control { min-width:0; }
+.doctor-plugin-config-checkbox { min-height:36px; margin:0; }
+.doctor-plugin-secret-clear { display:block; margin:7px 0 0; color:#6c757d; font-size:.82rem; }
 .doctor-plugin-update-action { box-shadow:0 2px 8px rgba(40,167,69,.25); font-weight:700; }
 .doctor-plugin-source-card { max-width:900px; padding:20px; }
 .doctor-plugin-source-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
@@ -497,6 +506,8 @@
   .doctor-plugin-server-info { flex-basis:calc(100% - 30px); }
   .doctor-plugin-effective-paths, .doctor-plugin-source-row { grid-template-columns:1fr; }
   .doctor-plugin-overview-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .doctor-plugin-config-field { grid-template-columns:1fr; gap:5px; }
+  .doctor-plugin-config-label { margin:0; }
 }
 
 /* Mate 버전·업데이트 상태와 매뉴얼 Changelog */
