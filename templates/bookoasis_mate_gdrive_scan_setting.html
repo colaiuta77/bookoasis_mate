@@ -41,7 +41,7 @@
     {{ macros.setting_input_text_and_buttons(
       'gdrive_scan_rclone_path',
       'rclone 실행 파일',
-      [['gdrive_scan_rclone_version_btn', '버전 확인'], ['select_gdrive_scan_rclone_path_btn', '파일 선택']],
+      [['select_gdrive_scan_rclone_path_btn', '파일 선택'], ['gdrive_scan_rclone_version_btn', '버전 확인']],
       value=arg.get('gdrive_scan_rclone_path', ''),
       desc=['FlaskFarm 컨테이너에서 실행 가능한 rclone 파일입니다.', '직접 설정을 사용하지 않으면 rclone.conf 경로와 함께 비워 둡니다.']
     ) }}
