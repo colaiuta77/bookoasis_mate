@@ -13,7 +13,7 @@
 - BookOasis 일반·성인·오디오북·비디오 카테고리 내보내기·가져오기.
 - Kavita 및 BookOasis 공유 패키지 통DB 이관.
 - BookOasis 커스텀 폰트 업로드와 설치 상태 확인.
-- GitHub·비공개 Gitea 카탈로그를 포함한 BookOasis 네이티브 플러그인 설치·업데이트·삭제 관리.
+- GitHub·비공개 Gitea 카탈로그를 포함한 BookOasis 네이티브 플러그인 설치·업데이트·삭제와 설정 계약 관리.
 - BookOasis `.env`·Docker Compose 안전 편집과 BookOasis 단일 서비스 Docker 재시작·구성 적용·업데이트 관리.
 - GHCR 이미지 업데이트 감지, Docker 작업 실시간 로그와 Ubuntu·Synology 호스트 Docker 자동 호환.
 - 설정 화면에서 MariaDB 필수 구성요소 상태 확인 및 필요한 패키지만 선택 설치.
@@ -31,7 +31,7 @@ volumes:
 
 ## DB 엔진 설정
 
-- BookOasis Mate v1.9.9는 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
+- BookOasis Mate v1.9.10은 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
 - MariaDB 모드는 `PyMySQL 1.1` 이상이 필요하며 호스트·포트·사용자·비밀번호·DB 접두어를 입력합니다.
 - 자동 감지는 FF의 `DB_ENGINE`, `DBMS` 환경변수와 MariaDB 설정을 확인합니다. 연결 실패 시 남아 있는 SQLite 파일로 자동 전환하지 않습니다.
 - 상태 요약, 문제 도서, 스캔 상태, 시리즈 누락, 표지 검사, 고아 표지 정리, Google Drive 연동과 읽기 전용 SQL은 두 엔진을 지원합니다.
@@ -41,6 +41,12 @@ volumes:
 - SQLite와 MariaDB 통DB 패키지는 서로 교차 복원할 수 없습니다.
 
 ## Changelog
+
+- v1.9.10 (2026-09-01)
+  - 플러그인 설치·업데이트 작업 상태를 메뉴 상단에 표시하고, 실제 설치 성공만 자동으로 숨기며 검사·실패·중지 결과는 확인할 수 있도록 유지.
+  - 설치 플러그인과 미설치 카탈로그를 하나의 현황 화면으로 통합하고 전체·활성화·비활성화·설치됨·미설치 집계 필터와 일관된 카드·버전 표시를 추가.
+  - BookOasis 커스텀 설정 UI와 Mate 스키마 설정을 구분해 부분 설정 저장을 방지하고, 스키마 폼의 필수값·비밀값·체크박스·저장 상태와 접근성을 개선.
+  - 다수 플러그인의 UI 번들이 포함된 관리 API 응답이 2MiB를 넘을 때 실행 상태 조회가 실패하던 문제를 관리 목록 전용 16MiB 제한으로 수정하고 다른 API의 기존 제한은 유지.
 
 - v1.9.9 (2026-09-01)
   - Mate 전용 rclone 실행 파일과 rclone.conf를 직접 지정하고, 두 값을 비우면 기존 FF rclone 설정을 사용하는 선택적 폴백을 지원.

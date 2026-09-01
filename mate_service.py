@@ -1815,22 +1815,25 @@ class BookOasisMateService:
             config = item.get("config") if isinstance(item.get("config"), dict) else {}
             fields = []
             secret_configured = False
-            schema = item.get("config_schema") if isinstance(item.get("config_schema"), list) else []
-            for raw_field in schema:
-                if not isinstance(raw_field, dict) or not raw_field.get("key"):
-                    continue
-                field = {
-                    key: raw_field.get(key)
-                    for key in ("key", "label", "type", "required", "description", "options", "placeholder", "default")
-                    if key in raw_field
-                }
-                key = str(raw_field["key"])
-                is_secret = self._plugin_secret_field(raw_field)
-                field["secret"] = is_secret
-                field["configured"] = bool(config.get(key))
-                field["value"] = "" if is_secret else config.get(key, raw_field.get("default", ""))
-                secret_configured = secret_configured or (is_secret and bool(config.get(key)))
-                fields.append(field)
+            custom_settings_ui = bool(item.get("settings_ui"))
+            if not custom_settings_ui:
+                schema = item.get("config_schema") if isinstance(item.get("config_schema"), list) else []
+                for raw_field in schema:
+                    if not isinstance(raw_field, dict) or not raw_field.get("key"):
+                        continue
+                    field = {
+                        key: raw_field.get(key)
+                        for key in ("key", "label", "type", "required", "description", "options", "placeholder", "default")
+                        if key in raw_field
+                    }
+                    key = str(raw_field["key"])
+                    is_secret = self._plugin_secret_field(raw_field)
+                    field["secret"] = is_secret
+                    field["configured"] = bool(config.get(key))
+                    field["value"] = "" if is_secret else config.get(key, raw_field.get("default", ""))
+                    secret_configured = secret_configured or (is_secret and bool(config.get(key)))
+                    fields.append(field)
+            config_mode = "custom" if custom_settings_ui else ("schema" if fields else "none")
             load = load_by_id.get(plugin_id, {})
             plugins.append({
                 "id": plugin_id,
@@ -1841,9 +1844,10 @@ class BookOasisMateService:
                 "load_message": str(load.get("message") or ""),
                 "load_occurred_at": str(load.get("occurred_at") or ""),
                 "config_fields": fields,
+                "config_mode": config_mode,
                 "secret_configured": secret_configured,
                 "update_supported": bool(item.get("update_manifest")),
-                "custom_settings_ui": bool(item.get("settings_ui")),
+                "custom_settings_ui": custom_settings_ui,
             })
         result = {
             "success": True,

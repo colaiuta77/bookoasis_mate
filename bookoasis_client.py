@@ -10,6 +10,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 
 
 MAX_JSON_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_PLUGIN_MANAGEMENT_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_ERROR_RESPONSE_BYTES = 64 * 1024
 
 
@@ -44,8 +45,8 @@ class BookOasisClient:
             return f"HTTP 오류 {error.code}"
 
     @staticmethod
-    def _response_payload(response):
-        return _read_json_response(response)
+    def _response_payload(response, max_bytes=MAX_JSON_RESPONSE_BYTES):
+        return _read_json_response(response, max_bytes)
 
     def _admin_error(self, message, http_status=None, retryable=False):
         data = {"success": False, "message": str(message or "BookOasis 관리자 API 요청에 실패했습니다.")}
@@ -87,7 +88,10 @@ class BookOasisClient:
             self._authenticated = False
             return self._admin_error(f"BookOasis 관리자 로그인 실패: {getattr(error, 'reason', error)}")
 
-    def _admin_request(self, path, method="GET", form=None, payload=None, query=None, retry=True, timeout=None):
+    def _admin_request(
+        self, path, method="GET", form=None, payload=None, query=None,
+        retry=True, timeout=None, max_response_bytes=MAX_JSON_RESPONSE_BYTES,
+    ):
         login = self.login_admin()
         if not login.get("success"):
             return login
@@ -107,13 +111,17 @@ class BookOasisClient:
         try:
             request_timeout = self.timeout if timeout is None else max(1, min(int(timeout), 600))
             with self._opener.open(request, timeout=request_timeout) as response:
-                return self._response_payload(response)
+                return self._response_payload(response, max_response_bytes)
         except HTTPError as error:
             if error.code == 401 and retry:
                 self._authenticated = False
                 login = self.login_admin(force=True)
                 if login.get("success"):
-                    return self._admin_request(path, method=method, form=form, payload=payload, query=query, retry=False, timeout=timeout)
+                    return self._admin_request(
+                        path, method=method, form=form, payload=payload,
+                        query=query, retry=False, timeout=timeout,
+                        max_response_bytes=max_response_bytes,
+                    )
             return self._admin_error(
                 self._http_error_message(error),
                 error.code,
@@ -164,7 +172,10 @@ class BookOasisClient:
         return self._admin_request("api/media/metadata/plugins")
 
     def metadata_plugins_manage(self):
-        return self._admin_request("api/media/metadata/plugins/manage")
+        return self._admin_request(
+            "api/media/metadata/plugins/manage",
+            max_response_bytes=MAX_PLUGIN_MANAGEMENT_RESPONSE_BYTES,
+        )
 
     def plugin_load_status(self, token=""):
         token = str(token or "").strip()
