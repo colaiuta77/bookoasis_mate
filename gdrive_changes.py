@@ -4,6 +4,7 @@ import posixpath
 import shlex
 import subprocess
 import time
+from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -33,7 +34,13 @@ class GoogleDriveApiError(RuntimeError):
         )
 
 
-def resolve_ff_rclone_settings(plugin_manager):
+def resolve_ff_rclone_settings(plugin_manager, rclone_path=None, config_path=None):
+    direct_binary = str(rclone_path or "").strip()
+    direct_config = str(config_path or "").strip()
+    if direct_binary or direct_config:
+        if not direct_binary or not direct_config:
+            raise ValueError("Mate rclone 실행 파일과 설정 파일 경로를 함께 입력해 주세요.")
+        return direct_binary, direct_config
     plugin = plugin_manager.get_plugin_instance("rclone") if plugin_manager else None
     model = getattr(plugin, "ModelSetting", None)
     if model is None:
@@ -43,6 +50,19 @@ def resolve_ff_rclone_settings(plugin_manager):
     if not config:
         raise RuntimeError("FF rclone 설정 파일 경로가 비어 있습니다.")
     return binary, config
+
+
+def _token_is_expired(token):
+    expiry = str((token or {}).get("expiry") or "").strip()
+    if not expiry:
+        return False
+    try:
+        value = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value <= datetime.now(timezone.utc)
 
 
 def _rclone_config_dump(rclone_path, config_path, timeout=30, runner=None):
@@ -220,6 +240,11 @@ class GoogleDriveChangesClient:
         access_token = str(token.get("access_token") or "").strip()
         if not access_token:
             raise RuntimeError("rclone Google Drive 액세스 토큰을 읽을 수 없습니다.")
+        if _token_is_expired(token):
+            raise RuntimeError(
+                "rclone이 갱신된 토큰을 설정 파일에 저장하지 못했습니다. "
+                "rclone.conf와 부모 디렉터리의 쓰기·rename 권한 및 디렉터리 마운트를 확인해 주세요."
+            )
         self._credentials = (access_token, str(remote.get("team_drive") or "").strip())
         return self._credentials
 

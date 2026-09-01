@@ -42,6 +42,8 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_builtin_remote_path": "",
             "gdrive_scan_builtin_local_root": "",
             "gdrive_scan_builtin_roots": "[]",
+            "gdrive_scan_rclone_path": "",
+            "gdrive_scan_rclone_config_path": "",
             "gdrive_scan_buffer_seconds": "60",
             "gdrive_scan_worker_interval": "2",
             "gdrive_scan_max_attempts": "3",
@@ -155,6 +157,12 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_builtin_remote_path": str(model.get("gdrive_scan_builtin_remote_path") or "").strip(),
             "gdrive_scan_builtin_local_root": str(model.get("gdrive_scan_builtin_local_root") or "").strip(),
             "gdrive_scan_builtin_roots": builtin_roots,
+            "gdrive_scan_rclone_path": str(
+                model.get("gdrive_scan_rclone_path") or ""
+            ).strip(),
+            "gdrive_scan_rclone_config_path": str(
+                model.get("gdrive_scan_rclone_config_path") or ""
+            ).strip(),
             "gdrive_scan_buffer_seconds": self._as_int(
                 model.get("gdrive_scan_buffer_seconds"), 60, 0, 3600
             ),
@@ -220,12 +228,17 @@ class ModuleGDriveScan(PluginModuleBase):
         arg["gdrive_scan_discord_webhook_configured"] = bool(webhook_url.strip())
         try:
             rclone_path, rclone_config_path = resolve_ff_rclone_settings(
-                getattr(F, "PluginManager", None)
+                getattr(F, "PluginManager", None),
+                current_settings["gdrive_scan_rclone_path"],
+                current_settings["gdrive_scan_rclone_config_path"],
             )
-            arg["gdrive_scan_ff_rclone"] = {
+            arg["gdrive_scan_rclone"] = {
                 "available": True,
                 "path": rclone_path,
                 "config": rclone_config_path,
+                "source": "Mate 직접 설정"
+                if current_settings["gdrive_scan_rclone_path"]
+                else "FF rclone 설정",
             }
             arg["gdrive_scan_drive_sources"] = (
                 list_google_drive_sources(
@@ -237,7 +250,7 @@ class ModuleGDriveScan(PluginModuleBase):
                 else []
             )
         except Exception as error:
-            arg["gdrive_scan_ff_rclone"] = {"available": False, "error": str(error)}
+            arg["gdrive_scan_rclone"] = {"available": False, "error": str(error)}
             arg["gdrive_scan_drive_sources"] = []
         arg["page"] = page
         return render_template(
@@ -468,7 +481,7 @@ class ModuleGDriveScan(PluginModuleBase):
                     })
                 with self._worker_lock:
                     self._worker_state["last_error"] = ""
-                return jsonify({"ret": "success", "msg": f"자체 변경 감지 설정 {len(checked)}개의 연결을 확인했습니다.", "data": {"roots": checked}})
+                return jsonify({"ret": "success", "msg": f"rclone 토큰과 자체 변경 감지 설정 {len(checked)}개의 연결을 확인했습니다.", "data": {"roots": checked}})
             if command == "builtin_reset":
                 settings = self._settings()
                 if self.state_model is None or self.item_model is None:
@@ -668,7 +681,9 @@ class ModuleGDriveScan(PluginModuleBase):
 
     def _builtin_clients(self, settings):
         rclone_path, rclone_config_path = resolve_ff_rclone_settings(
-            getattr(F, "PluginManager", None)
+            getattr(F, "PluginManager", None),
+            settings.get("gdrive_scan_rclone_path"),
+            settings.get("gdrive_scan_rclone_config_path"),
         )
         roots = settings.get("gdrive_scan_builtin_roots") or []
         if not roots:
@@ -960,6 +975,8 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_builtin_remote_path",
             "gdrive_scan_builtin_local_root",
             "gdrive_scan_builtin_roots",
+            "gdrive_scan_rclone_path",
+            "gdrive_scan_rclone_config_path",
             "gdrive_scan_buffer_seconds",
             "gdrive_scan_worker_interval",
             "gdrive_scan_max_attempts",
