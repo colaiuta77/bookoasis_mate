@@ -23,7 +23,7 @@
     [
       ['command', 'gd-poller CommandDispatcher'],
       ['webhook', 'gd-poller WebhookDispatcher'],
-      ['builtin', 'Mate 자체 감지 · FF rclone']
+      ['builtin', 'Mate 자체 감지 · rclone']
     ],
     col='6',
     desc=['한 가지 방식만 선택합니다. 기존 설치는 CommandDispatcher가 기본값입니다.'],
@@ -37,11 +37,29 @@
   </div>
   <div id="gdrive_scan_builtin_mode" class="doctor-section doctor-card">
     <h4>Mate 자체 변경 감지</h4>
-    <p class="doctor-muted">FF rclone 플러그인의 실행 파일과 rclone.conf를 재사용합니다. 직접 Drive 또는 Union 안의 실제 Drive upstream을 감시하며 Google Drive Changes API 체크포인트와 파일 경로 상태는 Mate DB에 저장합니다.</p>
+    <p class="doctor-muted">Mate 전용 rclone 실행 파일과 rclone.conf를 사용합니다. 직접 Drive 또는 Union 안의 실제 Drive upstream을 감시하며 Google Drive Changes API 체크포인트와 파일 경로 상태는 Mate DB에 저장합니다.</p>
+    {{ macros.setting_input_text_and_buttons(
+      'gdrive_scan_rclone_path',
+      'rclone 실행 파일',
+      [['select_gdrive_scan_rclone_path_btn', '파일 선택'], ['gdrive_scan_rclone_version_btn', '버전 확인']],
+      value=arg.get('gdrive_scan_rclone_path', ''),
+      desc=['FlaskFarm 컨테이너에서 실행 가능한 rclone 파일입니다.', '직접 설정을 사용하지 않으면 rclone.conf 경로와 함께 비워 둡니다.']
+    ) }}
+    {{ macros.setting_input_text_and_buttons(
+      'gdrive_scan_rclone_config_path',
+      'rclone.conf 파일',
+      [['select_gdrive_scan_rclone_config_path_btn', '파일 선택'], ['gdrive_scan_rclone_config_btn', '설정 확인']],
+      value=arg.get('gdrive_scan_rclone_config_path', ''),
+      desc=['FlaskFarm 컨테이너에서 보이고 쓰기 가능한 설정 파일입니다.', '예: /data/rclone.conf', '설정 확인 팝업에는 OAuth 토큰과 client_secret도 원문으로 표시됩니다.']
+    ) }}
     <div class="alert alert-info gdrive-scan-rclone-status">
-      <strong>FF rclone 연결 정보</strong>
-      <span>실행 파일 <code>{{ arg.get('gdrive_scan_ff_rclone', {}).get('path', '사용 불가') }}</code></span>
-      <span>설정 파일 <code>{{ arg.get('gdrive_scan_ff_rclone', {}).get('config', arg.get('gdrive_scan_ff_rclone', {}).get('error', '')) }}</code></span>
+      <strong>{{ arg.get('gdrive_scan_rclone', {}).get('source', 'rclone 연결 정보') }}</strong>
+      <span>실행 파일 <code>{{ arg.get('gdrive_scan_rclone', {}).get('path', '사용 불가') }}</code></span>
+      <span>설정 파일 <code>{{ arg.get('gdrive_scan_rclone', {}).get('config', arg.get('gdrive_scan_rclone', {}).get('error', '')) }}</code></span>
+    </div>
+    <div class="alert alert-info">
+      <strong>설정 요약.</strong>
+      직접 경로 두 값을 함께 입력하면 FF 설정보다 우선합니다. 둘 다 비우면 FF rclone 설정을 사용합니다. FF rclone 플러그인은 선택 사항이지만 rclone 실행 파일은 필요합니다. rclone.conf는 영구 저장되고 쓰기 가능한 디렉터리에 두세요.
     </div>
     <div class="alert alert-warning">
       <strong>rclone.conf 권한 범위.</strong>
@@ -68,7 +86,7 @@
       <strong>체크포인트란.</strong> 마지막으로 확인한 위치를 뜻합니다. 초기화하면 저장된 Changes API 토큰과 파일 경로 캐시를 지우고 현재 시점부터 새 기준을 잡으므로 이전 변경은 다시 수집하지 않습니다.
     </div>
     <div class="doctor-toolbar gdrive-scan-builtin-actions">
-      <button type="button" class="btn btn-outline-primary" id="gdrive_scan_builtin_test">저장된 설정 연결 테스트</button>
+      <button type="button" class="btn btn-outline-primary" id="gdrive_scan_builtin_test">토큰 갱신 및 연결 테스트</button>
       <button type="button" class="btn btn-outline-danger" id="gdrive_scan_builtin_reset">체크포인트 초기화</button>
       <span id="gdrive_scan_builtin_status" class="doctor-query-status"></span>
     </div>
@@ -80,8 +98,8 @@
   {{ macros.setting_input_int('gdrive_scan_worker_interval', '작업자 확인 주기(초)', value=arg['gdrive_scan_worker_interval'], desc=['대기 이벤트를 확인하는 주기입니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_max_attempts', '최대 처리 횟수', value=arg['gdrive_scan_max_attempts'], desc=['실패 시 지수형 대기 후 재시도하며 마지막 실패는 변경 이벤트 메뉴에서 다시 실행할 수 있습니다.']) }}
   {{ macros.setting_input_text('gdrive_scan_extensions', '대상 파일 확장자', value=arg['gdrive_scan_extensions'], desc=['쉼표로 구분합니다.', '도서·오디오북·비디오북·자막과 메타데이터 보조 파일 확장자를 기본값으로 제공합니다.']) }}
-  {{ macros.setting_input_int('gdrive_scan_rc_timeout', 'rclone 명령 제한 시간(초)', value=arg['gdrive_scan_rc_timeout'], desc=['리모트 목록·연결 정보 확인 같은 rclone 명령에만 적용합니다. 1~300초, 기본값 30']) }}
-  {{ macros.setting_input_int('gdrive_scan_changes_timeout', 'Google Drive Changes API 제한 시간(초)', value=arg.get('gdrive_scan_changes_timeout', '60'), desc=['변경 내역 HTTP 조회에만 적용합니다. 1~300초, 기본값 60', '401은 rclone 토큰을 다시 읽어 1회, 읽기 제한 시간은 1초 뒤 1회 재시도합니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_rc_timeout', 'rclone 명령 제한 시간(초)', value=arg['gdrive_scan_rc_timeout'], desc=['리모트 목록·연결 정보 확인과 갱신 토큰 저장에 적용합니다. 1~300초, 기본값 30']) }}
+  {{ macros.setting_input_int('gdrive_scan_changes_timeout', 'Google Drive Changes API 제한 시간(초)', value=arg.get('gdrive_scan_changes_timeout', '60'), desc=['변경 내역 HTTP 조회와 OAuth 토큰 갱신에 적용합니다. 1~300초, 기본값 60', '401은 refresh_token으로 액세스 토큰을 갱신·저장한 뒤 1회, 읽기 제한 시간은 1초 뒤 1회 재시도합니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_path_timeout', '개별 경로 스캔 제한 시간(초)', value=arg.get('gdrive_scan_path_timeout', '120'), desc=['동기식 경로 스캔에만 적용합니다. 10~600초, 기본값 120']) }}
   {{ macros.setting_input_int('gdrive_scan_history_limit', '목록 페이지 크기 상한', value=arg['gdrive_scan_history_limit'], desc=['화면에서 한 페이지에 요청할 수 있는 최대 이벤트 수입니다. 10~1000건']) }}
   {{ macros.setting_input_int('gdrive_scan_retention_days', 'DB 삭제 기간(일)', value=arg.get('gdrive_scan_retention_days', '30'), desc=['완료와 최종 실패 이벤트만 지정 기간이 지나면 삭제합니다.', '대기·재시도·처리 중 이벤트는 삭제하지 않습니다.']) }}
@@ -315,6 +333,50 @@ $('#gdrive-scan-integration-tab').click(function(e) { e.preventDefault(); gdrive
 $('#gdrive_scan_input_mode').change(toggleGdriveInputMode);
 gdriveScanShowSettingTab('basic');
 
+function gdriveScanSelectFile(inputId, title) {
+  var input = $('#' + inputId);
+  globalSelectLocalFile(title, input.val().trim() || '/', function(result) {
+    if (typeof result === 'string' && result.trim()) input.val(result.trim());
+  });
+}
+$('body').on('click', '#select_gdrive_scan_rclone_path_btn', function(e) {
+  e.preventDefault();
+  gdriveScanSelectFile('gdrive_scan_rclone_path', 'rclone 실행 파일 선택');
+});
+$('body').on('click', '#select_gdrive_scan_rclone_config_path_btn', function(e) {
+  e.preventDefault();
+  gdriveScanSelectFile('gdrive_scan_rclone_config_path', 'rclone.conf 파일 선택');
+});
+$('body').on('click', '#gdrive_scan_rclone_version_btn', function(e) {
+  e.preventDefault();
+  var button = this;
+  button.disabled = true;
+  bookoasisMateAjax('gdrive_scan', 'rclone_version', {
+    rclone_path: $('#gdrive_scan_rclone_path').val()
+  }, function(ret) {
+    showModal(
+      '<pre class="doctor-gdrive-json">' + bookoasisMateEscape((ret.data || {}).output || '-') + '</pre>',
+      'Rclone 버전',
+      false
+    );
+  }, function() { button.disabled = false; }, {global:false});
+});
+$('body').on('click', '#gdrive_scan_rclone_config_btn', function(e) {
+  e.preventDefault();
+  var button = this;
+  button.disabled = true;
+  bookoasisMateAjax('gdrive_scan', 'rclone_config', {
+    rclone_path: $('#gdrive_scan_rclone_path').val(),
+    config_path: $('#gdrive_scan_rclone_config_path').val()
+  }, function(ret) {
+    showModal(
+      '<pre class="doctor-gdrive-json">' + bookoasisMateEscape((ret.data || {}).output || '-') + '</pre>',
+      'rclone.conf 설정',
+      false
+    );
+  }, function() { button.disabled = false; }, {global:false});
+});
+
 $('#setting_save_btn').click(function(e) {
   e.preventDefault();
   try {
@@ -336,9 +398,9 @@ $('#setting_save_btn').click(function(e) {
 
 $('#gdrive_scan_builtin_test').click(function() {
   var status = document.getElementById('gdrive_scan_builtin_status');
-  status.textContent = '연결 확인 중';
+  status.textContent = '토큰 갱신 및 연결 확인 중';
   bookoasisMateAjax('gdrive_scan', 'builtin_test', {}, function(ret) {
-    status.textContent = ret.msg || '연결 확인 완료';
+    status.textContent = ret.msg || '토큰 갱신 및 연결 확인 완료';
     gdriveScanRenderStates((ret.data || {}).roots || []);
   });
 });

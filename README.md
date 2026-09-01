@@ -9,7 +9,7 @@
 - 스캔 상태 및 주요 로그 실시간 확인.
 - 시리즈 누락, 표지 문제와 고아 표지파일 검사.
 - 안전한 읽기 전용 SQL 진단 도구와 운영 프리셋.
-- gd-poller CommandDispatcher·WebhookDispatcher 또는 FF rclone의 직접 Drive·Union upstream을 재사용하는 Mate 자체 변경 감지 기반 BookOasis 개별 경로 스캔.
+- gd-poller CommandDispatcher·WebhookDispatcher 또는 Mate에 직접 지정한 rclone 실행 파일·설정을 사용하는 Google Drive·Union upstream 변경 감지 기반 BookOasis 개별 경로 스캔.
 - BookOasis 일반·성인·오디오북·비디오 카테고리 내보내기·가져오기.
 - Kavita 및 BookOasis 공유 패키지 통DB 이관.
 - BookOasis 커스텀 폰트 업로드와 설치 상태 확인.
@@ -31,7 +31,7 @@ volumes:
 
 ## DB 엔진 설정
 
-- BookOasis Mate v1.9.8은 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
+- BookOasis Mate v1.9.9는 설정에서 `SQLite`, `MariaDB`, `자동 감지`를 선택할 수 있습니다.
 - MariaDB 모드는 `PyMySQL 1.1` 이상이 필요하며 호스트·포트·사용자·비밀번호·DB 접두어를 입력합니다.
 - 자동 감지는 FF의 `DB_ENGINE`, `DBMS` 환경변수와 MariaDB 설정을 확인합니다. 연결 실패 시 남아 있는 SQLite 파일로 자동 전환하지 않습니다.
 - 상태 요약, 문제 도서, 스캔 상태, 시리즈 누락, 표지 검사, 고아 표지 정리, Google Drive 연동과 읽기 전용 SQL은 두 엔진을 지원합니다.
@@ -41,6 +41,12 @@ volumes:
 - SQLite와 MariaDB 통DB 패키지는 서로 교차 복원할 수 없습니다.
 
 ## Changelog
+
+- v1.9.9 (2026-09-01)
+  - Mate 전용 rclone 실행 파일과 rclone.conf를 직접 지정하고, 두 값을 비우면 기존 FF rclone 설정을 사용하는 선택적 폴백을 지원.
+  - 선택한 rclone 버전과 rclone.conf 설정을 관리자 팝업에서 확인하고 설정 파일 경로·저장 제약을 연동 매뉴얼에 반영.
+  - Google Drive API 401 또는 만료 토큰 발생 시 OAuth 토큰을 실제 갱신해 rclone.conf에 저장한 뒤 한 번만 재시도하고, 재연동이 필요한 `invalid_grant`를 구분해 안내.
+  - rclone 실행 파일 행의 작업 버튼을 `파일 선택`, `버전 확인` 순서로 정렬.
 
 - v1.9.8 (2026-08-29)
   - Kavita에서 여러 보관함에 같은 최종 경로로 등록된 도서를 BookOasis 도서 1권으로 안전하게 병합하고, 보관함 선택 근거와 중복 분석을 미리보기·결과에 표시.

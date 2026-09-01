@@ -4,12 +4,15 @@ import posixpath
 import shlex
 import subprocess
 import time
+from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
 DRIVE_API = "https://www.googleapis.com/drive/v3"
+GOOGLE_OAUTH_TOKEN = "https://oauth2.googleapis.com/token"
+RCLONE_INSPECT_MAX_OUTPUT = 512 * 1024
 GOOGLE_DRIVE_FOLDER_MIME = "application/vnd.google-apps.folder"
 
 
@@ -33,7 +36,13 @@ class GoogleDriveApiError(RuntimeError):
         )
 
 
-def resolve_ff_rclone_settings(plugin_manager):
+def resolve_ff_rclone_settings(plugin_manager, rclone_path=None, config_path=None):
+    direct_binary = str(rclone_path or "").strip()
+    direct_config = str(config_path or "").strip()
+    if direct_binary or direct_config:
+        if not direct_binary or not direct_config:
+            raise ValueError("Mate rclone 실행 파일과 설정 파일 경로를 함께 입력해 주세요.")
+        return direct_binary, direct_config
     plugin = plugin_manager.get_plugin_instance("rclone") if plugin_manager else None
     model = getattr(plugin, "ModelSetting", None)
     if model is None:
@@ -43,6 +52,19 @@ def resolve_ff_rclone_settings(plugin_manager):
     if not config:
         raise RuntimeError("FF rclone 설정 파일 경로가 비어 있습니다.")
     return binary, config
+
+
+def _token_is_expired(token):
+    expiry = str((token or {}).get("expiry") or "").strip()
+    if not expiry:
+        return False
+    try:
+        value = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value <= datetime.now(timezone.utc)
 
 
 def _rclone_config_dump(rclone_path, config_path, timeout=30, runner=None):
@@ -56,6 +78,38 @@ def _rclone_config_dump(rclone_path, config_path, timeout=30, runner=None):
         check=True,
     )
     return json.loads(result.stdout or "{}")
+
+
+def rclone_version_output(rclone_path, timeout=30, runner=None):
+    binary = str(rclone_path or "").strip()
+    if not binary:
+        raise ValueError("확인할 rclone 실행 파일 경로를 입력해 주세요.")
+    runner = runner or subprocess.run
+    result = runner(
+        [binary, "version"],
+        capture_output=True,
+        text=True,
+        timeout=max(5, min(int(timeout or 30), 300)),
+        check=True,
+    )
+    output = "\n".join(
+        value.strip() for value in (result.stdout, result.stderr) if value and value.strip()
+    )
+    if not output:
+        raise RuntimeError("rclone 버전 출력이 비어 있습니다.")
+    if len(output) > RCLONE_INSPECT_MAX_OUTPUT:
+        raise RuntimeError("rclone 확인 결과가 너무 큽니다.")
+    return output
+
+
+def rclone_config_output(rclone_path, config_path, timeout=30, runner=None):
+    payload = _rclone_config_dump(
+        rclone_path, config_path, timeout=timeout, runner=runner
+    )
+    output = json.dumps(payload, ensure_ascii=False, indent=2)
+    if len(output) > RCLONE_INSPECT_MAX_OUTPUT:
+        raise RuntimeError("rclone 확인 결과가 너무 큽니다.")
+    return output
 
 
 def list_google_drive_remotes(rclone_path, config_path, timeout=30, runner=None):
@@ -220,6 +274,86 @@ class GoogleDriveChangesClient:
         access_token = str(token.get("access_token") or "").strip()
         if not access_token:
             raise RuntimeError("rclone Google Drive 액세스 토큰을 읽을 수 없습니다.")
+        if _token_is_expired(token):
+            return self._refresh_access_token(remote, token)
+        self._credentials = (access_token, str(remote.get("team_drive") or "").strip())
+        return self._credentials
+
+    def _refresh_access_token(self, remote=None, token=None):
+        remote = remote or (self._run_json("config", "dump").get(self.source_remote) or {})
+        try:
+            token = token or json.loads(remote.get("token") or "{}")
+        except (TypeError, ValueError):
+            token = {}
+        client_id = str(remote.get("client_id") or "").strip()
+        refresh_token = str(token.get("refresh_token") or "").strip()
+        if not client_id or not refresh_token:
+            raise RuntimeError(
+                "Google OAuth 토큰을 갱신할 client_id 또는 refresh_token이 없습니다. "
+                "해당 rclone 리모트를 다시 연결해 주세요."
+            )
+
+        form = {
+            "client_id": client_id,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        }
+        client_secret = str(remote.get("client_secret") or "").strip()
+        if client_secret:
+            form["client_secret"] = client_secret
+        request = Request(
+            GOOGLE_OAUTH_TOKEN,
+            data=urlencode(form).encode("utf-8"),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        try:
+            with self.opener(request, timeout=self.api_timeout) as response:
+                refreshed = json.loads(response.read().decode("utf-8") or "{}")
+        except HTTPError as error:
+            try:
+                payload = json.loads(error.read().decode("utf-8") or "{}")
+            except (AttributeError, UnicodeDecodeError, ValueError):
+                payload = {}
+            finally:
+                error.close()
+            reason = str(payload.get("error") or "unknown")
+            message = (
+                "Google OAuth 갱신 토큰이 만료되었거나 취소되었습니다. "
+                "해당 rclone 리모트를 다시 연결해 주세요."
+                if reason == "invalid_grant"
+                else f"Google OAuth 토큰 갱신 실패 ({reason})."
+            )
+            raise RuntimeError(message) from None
+        except (TimeoutError, URLError):
+            raise RuntimeError("Google OAuth 토큰 갱신 요청에 실패했습니다.") from None
+
+        access_token = str(refreshed.get("access_token") or "").strip()
+        if not access_token:
+            raise RuntimeError("Google OAuth 토큰 갱신 응답에 액세스 토큰이 없습니다.")
+        try:
+            expires_in = max(0, int(refreshed.get("expires_in") or 3600))
+        except (TypeError, ValueError):
+            expires_in = 3600
+        updated = dict(token)
+        updated.update(
+            access_token=access_token,
+            token_type=str(refreshed.get("token_type") or token.get("token_type") or "Bearer"),
+            expiry=(datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat(),
+        )
+        if refreshed.get("refresh_token"):
+            updated["refresh_token"] = refreshed["refresh_token"]
+        encoded = json.dumps(updated, ensure_ascii=False, separators=(",", ":"))
+        try:
+            self._run_json(
+                "config", "update", self.source_remote, "token", encoded,
+                "config_refresh_token=false", "--no-output",
+            )
+        except (OSError, subprocess.SubprocessError, ValueError):
+            raise RuntimeError(
+                "갱신된 Google OAuth 토큰을 rclone.conf에 저장하지 못했습니다. "
+                "설정 파일과 부모 디렉터리의 쓰기·rename 권한을 확인해 주세요."
+            ) from None
         self._credentials = (access_token, str(remote.get("team_drive") or "").strip())
         return self._credentials
 
@@ -261,6 +395,7 @@ class GoogleDriveChangesClient:
                 )
                 if api_error.status_code == 401 and attempt == 0:
                     self._credentials = None
+                    self._refresh_access_token()
                     continue
                 raise api_error from None
             except TimeoutError:
