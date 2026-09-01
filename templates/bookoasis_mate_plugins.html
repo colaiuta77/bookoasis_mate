@@ -32,8 +32,7 @@
 
 <ul class="nav nav-tabs doctor-setting-tabs doctor-plugin-tabs" role="tablist">
   <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_settings_tab" role="tab">설정</a></li>
-  <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#plugin_catalog_tab" role="tab">카탈로그</a></li>
-  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_installed_tab" role="tab">설치 플러그인</a></li>
+  <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#plugin_overview_tab" role="tab">플러그인</a></li>
   <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_github_tab" role="tab">저장소 설치</a></li>
   <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_zip_tab" role="tab">ZIP 설치</a></li>
   <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_history_tab" role="tab">작업 이력</a></li>
@@ -74,12 +73,6 @@
         <div><strong>적용 작업 경로</strong><span id="plugin_effective_work" class="doctor-path">{{ arg.get('effective_paths', {}).get('work_dir', '') or '미설정' }}</span></div>
       </div>
     </div>
-  </div>
-  <div id="plugin_catalog_tab" class="tab-pane fade show active" role="tabpanel">
-    <div class="doctor-plugin-toolbar">
-      <p class="doctor-muted mb-0">검증·사용자 카탈로그와 GitHub·Gitea Topic에서 찾은 미설치 플러그인을 같은 목록으로 표시합니다.</p>
-      <button id="plugin_discovery_refresh" type="button" class="btn btn-sm btn-outline-primary">Topic 새로고침</button>
-    </div>
     <details id="plugin_custom_catalog_editor" class="doctor-card doctor-plugin-catalog-editor">
       <summary>사용자 저장소 플러그인 추가</summary>
       <p class="doctor-muted">GitHub 또는 설정한 비공개 Gitea 저장소를 카탈로그에서 계속 관리합니다. 사용자 항목은 반드시 패키지 검사 후 설치합니다.</p>
@@ -107,20 +100,34 @@
       </div>
       <button id="plugin_custom_save" type="button" class="btn btn-primary">카탈로그에 추가</button>
     </details>
-    <div id="plugin_catalog_status" class="doctor-query-status"></div>
-    <div id="plugin_catalog" class="doctor-plugin-grid"></div>
   </div>
 
-  <div id="plugin_installed_tab" class="tab-pane fade" role="tabpanel">
+  <div id="plugin_overview_tab" class="tab-pane fade show active" role="tabpanel">
     <div class="doctor-plugin-toolbar">
-      <p class="doctor-muted mb-0">설치 정보와 BookOasis 실행 상태를 결합하고, 저장소가 확인되는 플러그인의 업데이트를 검사합니다.</p>
+      <p class="doctor-muted mb-0">설치된 플러그인과 설치 가능한 카탈로그를 한 화면에서 확인합니다.</p>
       <div class="doctor-cleanup-actions">
         <button id="plugin_installed_update_refresh" type="button" class="btn btn-sm btn-outline-success">업데이트 확인</button>
-        <button id="plugin_installed_refresh" type="button" class="btn btn-sm btn-outline-primary">새로고침</button>
+        <button id="plugin_discovery_refresh" type="button" class="btn btn-sm btn-outline-primary">Topic 새로고침</button>
+        <button id="plugin_installed_refresh" type="button" class="btn btn-sm btn-outline-primary">전체 새로고침</button>
       </div>
     </div>
+    <div class="doctor-plugin-overview-summary" role="group" aria-label="플러그인 현황 필터">
+      <button type="button" class="doctor-plugin-summary-filter active" data-plugin-filter="all" aria-pressed="true"><span>전체</span><strong id="plugin_overview_all_count">0</strong></button>
+      <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="enabled" aria-pressed="false"><span>활성화</span><strong id="plugin_overview_enabled_count">0</strong></button>
+      <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="disabled" aria-pressed="false"><span>비활성화</span><strong id="plugin_overview_disabled_count">0</strong></button>
+      <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="installed" aria-pressed="false"><span>설치됨</span><strong id="plugin_overview_installed_count">0</strong></button>
+      <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="uninstalled" aria-pressed="false"><span>미설치</span><strong id="plugin_overview_uninstalled_count">0</strong></button>
+    </div>
     <div id="plugin_installed_status" class="doctor-query-status"></div>
-    <div id="plugin_installed" class="doctor-plugin-grid"></div>
+    <div id="plugin_catalog_status" class="doctor-query-status"></div>
+    <section id="plugin_installed_section" class="doctor-plugin-overview-section">
+      <div class="doctor-plugin-overview-heading"><h4>설치된 플러그인</h4><span id="plugin_installed_visible_count" class="doctor-muted"></span></div>
+      <div id="plugin_installed" class="doctor-plugin-grid"></div>
+    </section>
+    <section id="plugin_catalog_section" class="doctor-plugin-overview-section">
+      <div class="doctor-plugin-overview-heading"><h4>미설치 플러그인</h4><span id="plugin_catalog_visible_count" class="doctor-muted"></span></div>
+      <div id="plugin_catalog" class="doctor-plugin-grid"></div>
+    </section>
   </div>
 
   <div id="plugin_github_tab" class="tab-pane fade" role="tabpanel">
@@ -176,6 +183,9 @@ var pluginInstalledUpdatePollFailures = 0;
 var pluginRuntimeItems = {};
 var pluginRuntimeConfigId = '';
 var pluginGiteaServers = [];
+var pluginCatalogItems = [];
+var pluginInstalledItems = [];
+var pluginOverviewFilter = 'all';
 var pluginManagerRepositoryIcons = {
   github: "{{ url_for('bookoasis_mate.static', filename='img/github-mark.svg') }}",
   gitea: "{{ url_for('bookoasis_mate.static', filename='img/gitea-logo.svg') }}"
@@ -262,8 +272,18 @@ function pluginManagerBadge(value, className) {
   return pluginManagerText('span', 'doctor-plugin-badge ' + (className || ''), value);
 }
 
-function pluginManagerRenderCards(targetId, items, catalogMode) {
-  var target = document.getElementById(targetId);
+function pluginManagerCardHeader(item, version) {
+  var header = pluginManagerText('div', 'doctor-plugin-card-head', '');
+  var titleBox = pluginManagerText('div', 'doctor-plugin-card-title', '');
+  titleBox.appendChild(pluginManagerText('h4', '', item.name || item.id));
+  titleBox.appendChild(pluginManagerText('code', 'doctor-plugin-id', item.id));
+  header.appendChild(titleBox);
+  header.appendChild(pluginManagerBadge(version ? 'v' + version : '버전 미상', 'doctor-plugin-current-version'));
+  return header;
+}
+
+function pluginManagerRenderCatalogCards(items) {
+  var target = document.getElementById('plugin_catalog');
   bookoasisMateClear(target);
   if (!items || !items.length) {
     target.appendChild(pluginManagerText('div', 'doctor-empty', '표시할 플러그인이 없습니다. 경로 설정과 접근 권한을 확인해 주세요.'));
@@ -271,14 +291,8 @@ function pluginManagerRenderCards(targetId, items, catalogMode) {
   }
   items.forEach(function(item) {
     var card = pluginManagerText('article', 'doctor-card doctor-plugin-card', '');
-    var header = pluginManagerText('div', 'doctor-plugin-card-head', '');
-    header.appendChild(pluginManagerText('div', 'doctor-plugin-icon', '🧩'));
-    var titleBox = pluginManagerText('div', 'doctor-plugin-card-title', '');
-    titleBox.appendChild(pluginManagerText('h4', '', item.name || item.id));
-    titleBox.appendChild(pluginManagerText('code', 'doctor-plugin-id', item.id));
-    header.appendChild(titleBox);
-    card.appendChild(header);
-    card.appendChild(pluginManagerText('p', 'doctor-plugin-description', item.description || '설명 정보가 없습니다.'));
+    var version = item.latest_version || item.catalog_version || item.version;
+    card.appendChild(pluginManagerCardHeader(item, version));
     var badges = pluginManagerText('div', 'doctor-plugin-badges', '');
     badges.appendChild(pluginManagerBadge(item.trusted ? '검증 카탈로그' : (item.discovered ? (item.validation_status === 'validated' ? 'Topic 구조 확인' : 'Topic 후보') : (item.custom ? '사용자 카탈로그' : (item.managed ? '자동 업데이트 지원' : '업데이트 관리 안 됨'))), item.trusted ? 'doctor-plugin-badge-trusted' : ''));
     if (item.installed) badges.appendChild(pluginManagerBadge('설치됨 ' + (item.installed_version || '버전 미상'), 'doctor-plugin-badge-installed'));
@@ -287,31 +301,96 @@ function pluginManagerRenderCards(targetId, items, catalogMode) {
     if (item.validation_error) badges.appendChild(pluginManagerBadge('구조 확인 필요', 'doctor-plugin-badge-warning'));
     (item.dependencies || []).forEach(function(value) { badges.appendChild(pluginManagerBadge('필수 ' + value, '')); });
     card.appendChild(badges);
+    card.appendChild(pluginManagerText('p', 'doctor-plugin-description', item.description || '설명 정보가 없습니다.'));
     var footer = pluginManagerText('div', 'doctor-plugin-card-footer', '');
     if (item.repository_url) {
       footer.appendChild(pluginManagerRepositoryLink(item.source, item.repository_url));
     }
-    if (catalogMode) {
-      var button = pluginManagerText('button', 'btn btn-sm btn-primary', '설치');
-      button.type = 'button'; button.dataset.pluginId = item.id; button.dataset.pluginName = item.name || item.id;
-      button.dataset.repository = item.repository || ''; button.dataset.ref = item.ref || 'main';
-      button.addEventListener('click', pluginManagerInstallCatalog);
-      footer.appendChild(button);
-      if (item.custom && !item.discovered) {
-        var removeButton = pluginManagerText('button', 'btn btn-sm btn-outline-danger', '목록 삭제');
-        removeButton.type = 'button'; removeButton.dataset.pluginId = item.id; removeButton.dataset.pluginName = item.name || item.id;
-        removeButton.addEventListener('click', pluginManagerDeleteCustomCatalog);
-        footer.appendChild(removeButton);
-      }
-    } else if (item.installed) {
-      var deleteButton = pluginManagerText('button', 'btn btn-sm btn-outline-danger', '플러그인 삭제');
-      deleteButton.type = 'button'; deleteButton.dataset.pluginId = item.id; deleteButton.dataset.pluginName = item.name || item.id;
-      deleteButton.addEventListener('click', pluginManagerDeleteInstalled);
-      footer.appendChild(deleteButton);
+    var button = pluginManagerText('button', 'btn btn-sm btn-primary', '설치');
+    button.type = 'button'; button.dataset.pluginId = item.id; button.dataset.pluginName = item.name || item.id;
+    button.dataset.repository = item.repository || ''; button.dataset.ref = item.ref || 'main';
+    button.addEventListener('click', pluginManagerInstallCatalog);
+    footer.appendChild(button);
+    if (item.custom && !item.discovered) {
+      var removeButton = pluginManagerText('button', 'btn btn-sm btn-outline-danger', '목록 삭제');
+      removeButton.type = 'button'; removeButton.dataset.pluginId = item.id; removeButton.dataset.pluginName = item.name || item.id;
+      removeButton.addEventListener('click', pluginManagerDeleteCustomCatalog);
+      footer.appendChild(removeButton);
     }
     card.appendChild(footer);
     target.appendChild(card);
   });
+}
+
+function pluginManagerRenderInstalledCards(items) {
+  var target = document.getElementById('plugin_installed');
+  bookoasisMateClear(target);
+  if (!items.length) {
+    target.appendChild(pluginManagerText('div', 'doctor-empty', '선택한 상태의 설치 플러그인이 없습니다.'));
+    return;
+  }
+  items.forEach(function(item) {
+    var card = pluginManagerText('article', 'doctor-card doctor-plugin-card', '');
+    card.appendChild(pluginManagerCardHeader(item, item.installed_version));
+    var badges = pluginManagerText('div', 'doctor-plugin-badges', '');
+    if (item.runtime_available) {
+      badges.appendChild(pluginManagerBadge(item.enabled ? '활성화' : '비활성화', item.enabled ? 'doctor-plugin-badge-installed' : 'doctor-plugin-badge-warning'));
+      var loaded = item.load_status === 'success' || item.load_status === 'loaded';
+      badges.appendChild(pluginManagerBadge(loaded ? '로드 성공' : (item.load_status === 'unknown' ? '로드 상태 미확인' : '로드 실패'), loaded ? 'doctor-plugin-badge-installed' : 'doctor-plugin-badge-warning'));
+    } else {
+      badges.appendChild(pluginManagerBadge('실행 상태 미확인', 'doctor-plugin-badge-warning'));
+    }
+    if (item.update_available) badges.appendChild(pluginManagerBadge('업데이트 가능 ' + item.latest_version, 'doctor-plugin-badge-update'));
+    if (item.version_error) badges.appendChild(pluginManagerBadge('업데이트 확인 실패', 'doctor-plugin-badge-warning'));
+    card.appendChild(badges);
+    card.appendChild(pluginManagerText('p', 'doctor-plugin-description', item.load_message || item.description || '설치된 BookOasis 플러그인입니다.'));
+    var footer = pluginManagerText('div', 'doctor-plugin-card-footer', '');
+    var repositoryLink = pluginManagerInstalledRepositoryLink(item);
+    if (repositoryLink) footer.appendChild(repositoryLink);
+    if (item.runtime_available) {
+      var switchLabel = pluginManagerText('label', 'doctor-plugin-switch', ''); var toggle = document.createElement('input'); toggle.type='checkbox'; toggle.checked=!!item.enabled; toggle.dataset.pluginId=item.id; toggle.addEventListener('change', pluginRuntimeToggle); switchLabel.appendChild(toggle); switchLabel.appendChild(pluginManagerText('span', 'doctor-plugin-switch-track', '')); switchLabel.appendChild(pluginManagerText('span', 'doctor-plugin-switch-text', item.enabled ? '사용 중' : '사용 안 함')); footer.appendChild(switchLabel);
+      if ((item.config_fields || []).length) { var config = pluginManagerText('button', 'btn btn-sm btn-outline-secondary', '설정'); config.type='button'; config.dataset.pluginId=item.id; config.addEventListener('click', pluginRuntimeOpenConfig); footer.appendChild(config); }
+    }
+    if (item.update_available) {
+      var update = pluginManagerText('button', 'btn btn-sm btn-success doctor-plugin-update-action', '업데이트'); update.type='button'; update.dataset.pluginId=item.id; update.dataset.pluginName=item.name||item.id;
+      update.addEventListener('click', item.native_update_preferred ? pluginRuntimeUpdate : pluginManagerInstallCatalog); footer.appendChild(update);
+    }
+    var remove = pluginManagerText('button', 'btn btn-sm btn-outline-danger', '삭제'); remove.type='button'; remove.dataset.pluginId=item.id; remove.dataset.pluginName=item.name||item.id; remove.addEventListener('click', pluginManagerDeleteInstalled); footer.appendChild(remove);
+    card.appendChild(footer); target.appendChild(card);
+  });
+}
+
+function pluginManagerRenderOverview() {
+  var enabled = pluginInstalledItems.filter(function(item) { return item.enabled === true; });
+  var disabled = pluginInstalledItems.filter(function(item) { return item.enabled === false; });
+  var installed = pluginInstalledItems;
+  var uninstalled = pluginCatalogItems;
+  var installedVisible = installed;
+  if (pluginOverviewFilter === 'enabled') installedVisible = enabled;
+  else if (pluginOverviewFilter === 'disabled') installedVisible = disabled;
+  var showInstalled = pluginOverviewFilter !== 'uninstalled';
+  var showCatalog = pluginOverviewFilter === 'all' || pluginOverviewFilter === 'uninstalled';
+
+  $('#plugin_overview_all_count').text((installed.length + uninstalled.length).toLocaleString());
+  $('#plugin_overview_enabled_count').text(enabled.length.toLocaleString());
+  $('#plugin_overview_disabled_count').text(disabled.length.toLocaleString());
+  $('#plugin_overview_installed_count').text(installed.length.toLocaleString());
+  $('#plugin_overview_uninstalled_count').text(uninstalled.length.toLocaleString());
+  $('.doctor-plugin-summary-filter').each(function() {
+    var selected = this.dataset.pluginFilter === pluginOverviewFilter;
+    $(this).toggleClass('active', selected).attr('aria-pressed', selected ? 'true' : 'false');
+  });
+
+  $('#plugin_installed_section').toggle(showInstalled);
+  $('#plugin_catalog_section').toggle(showCatalog);
+  if (showInstalled) {
+    pluginManagerRenderInstalledCards(installedVisible);
+    $('#plugin_installed_visible_count').text(installedVisible.length.toLocaleString() + '개');
+  }
+  if (showCatalog) {
+    pluginManagerRenderCatalogCards(uninstalled);
+    $('#plugin_catalog_visible_count').text(uninstalled.length.toLocaleString() + '개');
+  }
 }
 
 function pluginManagerLoadCatalog(traceId) {
@@ -319,7 +398,8 @@ function pluginManagerLoadCatalog(traceId) {
   $('#plugin_catalog_status').addClass('doctor-query-status-active').text('카탈로그 불러오는 중');
   bookoasisMateAjax('plugins', 'catalog', {refresh_remote:'false', trace_id:traceId}, function(ret) {
     var payload = ret.data || {};
-    pluginManagerRenderCards('plugin_catalog', payload.items || [], true);
+    pluginCatalogItems = payload.items || [];
+    pluginManagerRenderOverview();
     var message = '미설치 플러그인 ' + Number((payload.items || []).length).toLocaleString() + '개';
     if (payload.topic_count) message += ' · Topic 신규 ' + Number(payload.topic_count).toLocaleString() + '개';
     if (payload.fetched_at) message += ' · Topic 캐시 ' + payload.fetched_at;
@@ -388,7 +468,9 @@ function pluginManagerStartDiscoveryRefresh() {
 function pluginManagerRenderInstalled(payload) {
   payload = payload || {};
   var items = payload.plugins || [];
-  var target = document.getElementById('plugin_installed'); bookoasisMateClear(target); pluginRuntimeItems = {};
+  pluginInstalledItems = items;
+  pluginRuntimeItems = {};
+  items.forEach(function(item) { pluginRuntimeItems[item.id] = item; });
   var updateCheck = payload.update_check || {};
   var status = payload.runtime_available ? (payload.load_status_supported ? '' : '로드 이력 API를 사용할 수 없어 활성화 상태만 표시합니다.') : (payload.runtime_message || 'BookOasis 실행 상태를 조회하지 못해 로컬 설치 정보만 표시합니다.');
   if (updateCheck.status === 'running') status = (status ? status + ' · ' : '') + (updateCheck.message || '업데이트 확인 중');
@@ -397,41 +479,7 @@ function pluginManagerRenderInstalled(payload) {
   $('#plugin_installed_status').removeClass('doctor-query-status-active').text(status);
   if (updateCheck.status === 'running') pluginManagerStartInstalledUpdatePolling();
   else pluginManagerStopInstalledUpdatePolling();
-  if (!items.length) { target.appendChild(pluginManagerText('div', 'doctor-empty', '설치된 플러그인이 없습니다. 경로 설정과 접근 권한을 확인해 주세요.')); return; }
-  items.forEach(function(item) {
-    pluginRuntimeItems[item.id] = item;
-    var card = pluginManagerText('article', 'doctor-card doctor-plugin-card', '');
-    var header = pluginManagerText('div', 'doctor-plugin-card-head', '');
-    header.appendChild(pluginManagerText('div', 'doctor-plugin-icon', '🧩'));
-    var title = pluginManagerText('div', 'doctor-plugin-card-title', ''); title.appendChild(pluginManagerText('h4', '', item.name || item.id)); title.appendChild(pluginManagerText('code', 'doctor-plugin-id', item.id)); header.appendChild(title);
-    header.appendChild(pluginManagerBadge(item.installed_version ? 'v' + item.installed_version : '버전 미상', 'doctor-plugin-current-version'));
-    card.appendChild(header);
-    var badges = pluginManagerText('div', 'doctor-plugin-badges', '');
-    if (item.runtime_available) {
-      badges.appendChild(pluginManagerBadge(item.enabled ? '활성화' : '비활성화', item.enabled ? 'doctor-plugin-badge-installed' : 'doctor-plugin-badge-warning'));
-      var loaded = item.load_status === 'success' || item.load_status === 'loaded';
-      badges.appendChild(pluginManagerBadge(loaded ? '로드 성공' : (item.load_status === 'unknown' ? '로드 상태 미확인' : '로드 실패'), loaded ? 'doctor-plugin-badge-installed' : 'doctor-plugin-badge-warning'));
-    } else {
-      badges.appendChild(pluginManagerBadge('실행 상태 미확인', 'doctor-plugin-badge-warning'));
-    }
-    if (item.update_available) badges.appendChild(pluginManagerBadge('업데이트 가능 ' + item.latest_version, 'doctor-plugin-badge-update'));
-    if (item.version_error) badges.appendChild(pluginManagerBadge('업데이트 확인 실패', 'doctor-plugin-badge-warning'));
-    card.appendChild(badges);
-    card.appendChild(pluginManagerText('p', 'doctor-plugin-description', item.load_message || item.description || '설치된 BookOasis 플러그인입니다.'));
-    var footer = pluginManagerText('div', 'doctor-plugin-card-footer', '');
-    var repositoryLink = pluginManagerInstalledRepositoryLink(item);
-    if (repositoryLink) footer.appendChild(repositoryLink);
-    if (item.runtime_available) {
-      var switchLabel = pluginManagerText('label', 'doctor-plugin-switch', ''); var toggle = document.createElement('input'); toggle.type='checkbox'; toggle.checked=!!item.enabled; toggle.dataset.pluginId=item.id; toggle.addEventListener('change', pluginRuntimeToggle); switchLabel.appendChild(toggle); switchLabel.appendChild(pluginManagerText('span', 'doctor-plugin-switch-track', '')); switchLabel.appendChild(pluginManagerText('span', 'doctor-plugin-switch-text', item.enabled ? '사용 중' : '사용 안 함')); footer.appendChild(switchLabel);
-      if ((item.config_fields || []).length) { var config = pluginManagerText('button', 'btn btn-sm btn-outline-secondary', '설정'); config.type='button'; config.dataset.pluginId=item.id; config.addEventListener('click', pluginRuntimeOpenConfig); footer.appendChild(config); }
-    }
-    if (item.update_available) {
-      var update = pluginManagerText('button', 'btn btn-sm btn-success doctor-plugin-update-action', '업데이트'); update.type='button'; update.dataset.pluginId=item.id; update.dataset.pluginName=item.name||item.id;
-      update.addEventListener('click', item.native_update_preferred ? pluginRuntimeUpdate : pluginManagerInstallCatalog); footer.appendChild(update);
-    }
-    var remove = pluginManagerText('button', 'btn btn-sm btn-outline-danger', '삭제'); remove.type='button'; remove.dataset.pluginId=item.id; remove.dataset.pluginName=item.name||item.id; remove.addEventListener('click', pluginManagerDeleteInstalled); footer.appendChild(remove);
-    card.appendChild(footer); target.appendChild(card);
-  });
+  pluginManagerRenderOverview();
 }
 
 function pluginManagerInstalledRepositoryLink(item) {
@@ -569,10 +617,11 @@ function pluginManagerScheduleJobHide() {
   }, 5000);
 }
 
-function pluginManagerRenderJob(job, focus) {
+function pluginManagerRenderJob(job, focus, initial) {
   job = job || {};
   pluginManagerClearJobHideTimer();
   var active = ['ready','running','stopping'].indexOf(job.status) >= 0;
+  var completedInstall = job.status === 'completed' && job.operation === 'install';
   var percent = Math.max(0, Math.min(100, Number(job.percent || 0)));
   $('#plugin_job_message').text((job.status_label || '대기') + ' · ' + (job.message || ''));
   $('.doctor-plugin-job').removeClass('doctor-plugin-job-completed doctor-plugin-job-failed').addClass(job.status === 'completed' ? 'doctor-plugin-job-completed' : (job.status === 'failed' ? 'doctor-plugin-job-failed' : ''));
@@ -591,13 +640,13 @@ function pluginManagerRenderJob(job, focus) {
     row.appendChild(pluginManagerText('span', '', item.message || ''));
     logs.appendChild(row);
   });
-  if (job.status === 'idle') {
+  if (job.status === 'idle' || (initial && completedInstall)) {
     $('.doctor-plugin-job').hide();
   } else {
     pluginManagerShowJob(!!focus);
     if (job.can_install || job.status === 'failed' || job.status === 'stopped') {
       pluginManagerClearJobHideTimer();
-    } else if (job.status === 'completed' && job.operation === 'install') {
+    } else if (completedInstall) {
       pluginManagerScheduleJobHide();
     }
   }
@@ -605,8 +654,8 @@ function pluginManagerRenderJob(job, focus) {
   else { pluginManagerStopPolling(); if (job.status && job.status !== 'idle') { pluginManagerLoadCatalog(); pluginManagerLoadInstalled(false); pluginManagerLoadHistory(); } }
 }
 
-function pluginManagerRequestStatus() {
-  bookoasisMateAjax('plugins', 'status', {}, function(ret) { pluginManagerRenderJob(ret.data || {}); }, null, {global:false, silent:true});
+function pluginManagerRequestStatus(initial) {
+  bookoasisMateAjax('plugins', 'status', {}, function(ret) { pluginManagerRenderJob(ret.data || {}, false, !!initial); }, null, {global:false, silent:true});
 }
 function pluginManagerStartPolling() { if (!pluginManagerPollTimer) pluginManagerPollTimer = setInterval(pluginManagerRequestStatus, 1000); }
 function pluginManagerStopPolling() { if (pluginManagerPollTimer) { clearInterval(pluginManagerPollTimer); pluginManagerPollTimer = null; } }
@@ -682,9 +731,9 @@ $('#plugin_custom_save').click(function() {
     pluginManagerLoadCatalog();
   });
 });
-$('#plugin_installed_refresh').click(function() { pluginManagerLoadInstalled(false); });
+$('.doctor-plugin-summary-filter').click(function() { pluginOverviewFilter = this.dataset.pluginFilter || 'all'; pluginManagerRenderOverview(); });
+$('#plugin_installed_refresh').click(function() { pluginManagerLoadInstalled(false); pluginManagerLoadCatalog(); });
 $('#plugin_installed_update_refresh').click(pluginManagerStartInstalledUpdateRefresh);
-$('a[href="#plugin_installed_tab"]').on('shown.bs.tab', function() { pluginManagerLoadInstalled(true); });
 $('#plugin_history_refresh').click(pluginManagerLoadHistory);
 
 $('#plugin_github_inspect').click(function() {
@@ -718,9 +767,9 @@ $(function() {
   pluginManagerLoadGiteaServers();
   pluginManagerUpdateRepositoryPlaceholder();
   pluginManagerLoadCatalog();
-  pluginManagerLoadInstalled(false);
+  pluginManagerLoadInstalled(true);
   pluginManagerLoadHistory();
-  pluginManagerRequestStatus();
+  pluginManagerRequestStatus(true);
 });
 </script>
 {% endblock %}

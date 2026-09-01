@@ -442,13 +442,21 @@
 .doctor-plugin-catalog-editor { margin-bottom:14px; padding:16px 18px; }
 .doctor-plugin-catalog-editor summary { cursor:pointer; font-weight:700; }
 .doctor-plugin-catalog-editor[open] summary { margin-bottom:12px; }
+.doctor-plugin-overview-summary { display:grid; grid-template-columns:repeat(5,minmax(100px,1fr)); gap:9px; margin:4px 0 10px; }
+.doctor-plugin-summary-filter { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:54px; padding:9px 12px; border:1px solid #dee2e6; border-radius:8px; background:#fff; color:#495057; text-align:left; cursor:pointer; }
+.doctor-plugin-summary-filter:hover, .doctor-plugin-summary-filter:focus { border-color:#8b5cf6; outline:none; box-shadow:0 0 0 2px rgba(111,66,193,.12); }
+.doctor-plugin-summary-filter.active { border-color:#6f42c1; background:rgba(111,66,193,.08); color:#59359b; }
+.doctor-plugin-summary-filter span { font-size:.8rem; font-weight:600; }
+.doctor-plugin-summary-filter strong { font-size:1.05rem; }
+.doctor-plugin-overview-section { margin-top:18px; }
+.doctor-plugin-overview-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid #dee2e6; }
+.doctor-plugin-overview-heading h4 { margin:0; font-size:1rem; }
 .doctor-plugin-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px; }
 .doctor-plugin-card { display:flex; flex-direction:column; min-height:230px; padding:18px; }
 .doctor-plugin-card-head { display:flex; align-items:center; gap:12px; }
 .doctor-plugin-card-head h4 { margin:0 0 2px; font-size:1.05rem; }
 .doctor-plugin-card-title { min-width:0; }
 .doctor-plugin-current-version { flex:none; margin-left:auto; color:#4338ca; background:#eef2ff; }
-.doctor-plugin-icon { display:flex; align-items:center; justify-content:center; width:42px; height:42px; border-radius:12px; background:rgba(111,66,193,.12); font-size:1.3rem; }
 .doctor-plugin-id { color:#6c757d; background:transparent; padding:0; }
 .doctor-plugin-description { flex:1; margin:14px 0 10px; color:#495057; line-height:1.55; }
 .doctor-plugin-badges { display:flex; flex-wrap:wrap; gap:5px; min-height:27px; }
@@ -488,6 +496,7 @@
   .doctor-plugin-server-row { align-items:stretch; flex-wrap:wrap; }
   .doctor-plugin-server-info { flex-basis:calc(100% - 30px); }
   .doctor-plugin-effective-paths, .doctor-plugin-source-row { grid-template-columns:1fr; }
+  .doctor-plugin-overview-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 
 /* Mate 버전·업데이트 상태와 매뉴얼 Changelog */
