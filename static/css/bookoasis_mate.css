@@ -471,7 +471,7 @@
 .doctor-plugin-update-action { box-shadow:0 2px 8px rgba(40,167,69,.25); font-weight:700; }
 .doctor-plugin-source-card { max-width:900px; padding:20px; }
 .doctor-plugin-source-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-.doctor-plugin-job { margin-top:8px; padding:20px; }
+.doctor-plugin-job { margin:0 0 16px; padding:20px; }
 .doctor-plugin-job-completed { border-color:#86d49a; background:#f4fff7; }
 .doctor-plugin-job-failed { border-color:#f2a7ad; background:#fff7f8; }
 .doctor-plugin-progress { height:18px; margin:14px 0; }

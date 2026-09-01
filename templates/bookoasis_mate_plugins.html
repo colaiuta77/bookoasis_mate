@@ -15,6 +15,21 @@
   <strong>보안 주의.</strong> BookOasis 플러그인은 서버에서 실행되는 Python 코드입니다. GitHub·ZIP 직접 설치는 소유자와 소스를 신뢰할 수 있을 때만 진행하세요. 설치 후 BookOasis 재시작을 권장합니다.
 </div>
 
+<section class="doctor-card doctor-plugin-job" style="display:none">
+  <div class="doctor-section-heading">
+    <div><h4>설치 작업</h4><div id="plugin_job_message" class="doctor-muted" aria-live="polite">실행 중인 플러그인 작업이 없습니다.</div></div>
+    <div class="doctor-cleanup-actions">
+      <button id="plugin_prepared_install" type="button" class="btn btn-sm btn-primary" style="display:none">검사 결과 설치</button>
+      <button id="plugin_job_stop" type="button" class="btn btn-sm btn-outline-danger" style="display:none" disabled>중지</button>
+      <button id="plugin_job_close" type="button" class="btn btn-sm btn-outline-secondary" style="display:none">닫기</button>
+    </div>
+  </div>
+  <div class="progress doctor-plugin-progress"><div id="plugin_job_progress" class="progress-bar progress-bar-striped" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="width:0%">0%</div></div>
+  <div id="plugin_job_error" class="doctor-error"></div>
+  <div id="plugin_job_result"></div>
+  <div id="plugin_job_logs" class="doctor-plugin-logs"></div>
+</section>
+
 <ul class="nav nav-tabs doctor-setting-tabs doctor-plugin-tabs" role="tablist">
   <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_settings_tab" role="tab">설정</a></li>
   <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#plugin_catalog_tab" role="tab">카탈로그</a></li>
@@ -142,20 +157,6 @@
   </div>
 </div>
 
-<section class="doctor-card doctor-plugin-job">
-  <div class="doctor-section-heading">
-    <div><h4>설치 작업</h4><div id="plugin_job_message" class="doctor-muted">실행 중인 플러그인 작업이 없습니다.</div></div>
-    <div class="doctor-cleanup-actions">
-      <button id="plugin_prepared_install" type="button" class="btn btn-sm btn-primary" style="display:none">검사 결과 설치</button>
-      <button id="plugin_job_stop" type="button" class="btn btn-sm btn-outline-danger" disabled>중지</button>
-    </div>
-  </div>
-  <div class="progress doctor-plugin-progress"><div id="plugin_job_progress" class="progress-bar progress-bar-striped" role="progressbar" style="width:0%">0%</div></div>
-  <div id="plugin_job_error" class="doctor-error"></div>
-  <div id="plugin_job_result"></div>
-  <div id="plugin_job_logs" class="doctor-plugin-logs"></div>
-</section>
-
 <div class="modal fade" id="plugin_config_modal" tabindex="-1" role="dialog" aria-hidden="true">
   <div class="modal-dialog modal-lg" role="document"><div class="modal-content">
     <div class="modal-header"><h5 id="plugin_config_title" class="modal-title">플러그인 설정</h5><button type="button" class="close" data-dismiss="modal" aria-label="닫기"><span aria-hidden="true">&times;</span></button></div>
@@ -166,6 +167,7 @@
 
 <script>
 var pluginManagerPollTimer = null;
+var pluginManagerJobHideTimer = null;
 var pluginManagerInspectJobId = '';
 var pluginDiscoveryPollTimer = null;
 var pluginDiscoveryTraceId = '';
@@ -507,7 +509,7 @@ function pluginManagerInstallCatalog(event) {
   var name = button.dataset.pluginName || button.dataset.pluginId;
   if (!confirm(name + ' 플러그인을 설치하거나 업데이트할까요? 이 Python 코드에 BookOasis 서버 실행 권한을 부여합니다.')) return;
   bookoasisMateAjax('plugins', 'catalog_install', {plugin_id:button.dataset.pluginId, confirm_install:'true'}, function(ret) {
-    pluginManagerRenderJob(ret.data || {}); pluginManagerStartPolling();
+    pluginManagerRenderJob(ret.data || {}, true); pluginManagerStartPolling();
   });
 }
 
@@ -549,14 +551,34 @@ function pluginManagerRenderManifest(result) {
   return box;
 }
 
-function pluginManagerRenderJob(job) {
+function pluginManagerClearJobHideTimer() {
+  if (pluginManagerJobHideTimer) { clearTimeout(pluginManagerJobHideTimer); pluginManagerJobHideTimer = null; }
+}
+
+function pluginManagerShowJob(focus) {
+  var panel = $('.doctor-plugin-job');
+  if (!panel.is(':visible')) panel.stop(true, true).slideDown(150);
+  if (focus && panel.length) panel[0].scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function pluginManagerScheduleJobHide() {
+  pluginManagerClearJobHideTimer();
+  pluginManagerJobHideTimer = setTimeout(function() {
+    $('.doctor-plugin-job').stop(true, true).slideUp(150);
+    pluginManagerJobHideTimer = null;
+  }, 5000);
+}
+
+function pluginManagerRenderJob(job, focus) {
   job = job || {};
+  pluginManagerClearJobHideTimer();
   var active = ['ready','running','stopping'].indexOf(job.status) >= 0;
   var percent = Math.max(0, Math.min(100, Number(job.percent || 0)));
   $('#plugin_job_message').text((job.status_label || '대기') + ' · ' + (job.message || ''));
   $('.doctor-plugin-job').removeClass('doctor-plugin-job-completed doctor-plugin-job-failed').addClass(job.status === 'completed' ? 'doctor-plugin-job-completed' : (job.status === 'failed' ? 'doctor-plugin-job-failed' : ''));
-  $('#plugin_job_progress').css('width', percent + '%').text(percent + '%').toggleClass('progress-bar-animated', active);
-  $('#plugin_job_stop').prop('disabled', !active);
+  $('#plugin_job_progress').css('width', percent + '%').text(percent + '%').attr('aria-valuenow', percent).toggleClass('progress-bar-animated', active);
+  $('#plugin_job_stop').toggle(active).prop('disabled', !active);
+  $('#plugin_job_close').toggle(job.status === 'failed' || job.status === 'stopped');
   $('#plugin_job_error').text(job.error || '');
   var resultBox = document.getElementById('plugin_job_result'); bookoasisMateClear(resultBox);
   if (job.result) resultBox.appendChild(pluginManagerRenderManifest(job.result));
@@ -569,6 +591,16 @@ function pluginManagerRenderJob(job) {
     row.appendChild(pluginManagerText('span', '', item.message || ''));
     logs.appendChild(row);
   });
+  if (job.status === 'idle') {
+    $('.doctor-plugin-job').hide();
+  } else {
+    pluginManagerShowJob(!!focus);
+    if (job.can_install || job.status === 'failed' || job.status === 'stopped') {
+      pluginManagerClearJobHideTimer();
+    } else if (job.status === 'completed' && job.operation === 'install') {
+      pluginManagerScheduleJobHide();
+    }
+  }
   if (active) pluginManagerStartPolling();
   else { pluginManagerStopPolling(); if (job.status && job.status !== 'idle') { pluginManagerLoadCatalog(); pluginManagerLoadInstalled(false); pluginManagerLoadHistory(); } }
 }
@@ -658,7 +690,7 @@ $('#plugin_history_refresh').click(pluginManagerLoadHistory);
 $('#plugin_github_inspect').click(function() {
   var command = $('#plugin_repository_source').val() === 'gitea' ? 'gitea_inspect' : 'github_inspect';
   bookoasisMateAjax('plugins', command, {repository:$('#plugin_github_repository').val(), ref:$('#plugin_github_ref').val(), plugin_id:$('#plugin_github_id').val(), gitea_server_id:$('#plugin_repository_gitea_server').val()}, function(ret) {
-    pluginManagerRenderJob(ret.data || {}); pluginManagerStartPolling();
+    pluginManagerRenderJob(ret.data || {}, true); pluginManagerStartPolling();
   });
 });
 
@@ -668,7 +700,7 @@ $('#plugin_zip_inspect').click(function() {
   var data = new FormData(); data.append('archive', input.files[0]); data.append('plugin_id', $('#plugin_zip_id').val());
   $.ajax({
     url:'/' + PACKAGE_NAME + '/ajax/plugins/zip_inspect', type:'POST', data:data, dataType:'json', processData:false, contentType:false, global:false,
-    success:function(ret) { if (ret.msg) notify(ret.msg, ret.ret || 'info'); pluginManagerRenderJob(ret.data || {}); pluginManagerStartPolling(); },
+    success:function(ret) { if (ret.msg) notify(ret.msg, ret.ret || 'info'); pluginManagerRenderJob(ret.data || {}, true); pluginManagerStartPolling(); },
     error:function(xhr) { notify((xhr.responseJSON || {}).msg || 'ZIP 업로드 요청에 실패했습니다.', 'danger'); }
   });
 });
@@ -676,10 +708,11 @@ $('#plugin_zip_inspect').click(function() {
 $('#plugin_prepared_install').click(function() {
   if (!pluginManagerInspectJobId || !confirm('검사한 미검증 플러그인을 설치할까요? 이 Python 코드에 BookOasis 서버 실행 권한을 부여합니다.')) return;
   bookoasisMateAjax('plugins', 'prepared_install', {inspect_job_id:pluginManagerInspectJobId, confirm_install:'true'}, function(ret) {
-    pluginManagerRenderJob(ret.data || {}); pluginManagerStartPolling();
+    pluginManagerRenderJob(ret.data || {}, true); pluginManagerStartPolling();
   });
 });
 $('#plugin_job_stop').click(function() { bookoasisMateAjax('plugins', 'stop', {}, function() { pluginManagerRequestStatus(); }); });
+$('#plugin_job_close').click(function() { pluginManagerClearJobHideTimer(); $('.doctor-plugin-job').stop(true, true).slideUp(150); });
 
 $(function() {
   pluginManagerLoadGiteaServers();
