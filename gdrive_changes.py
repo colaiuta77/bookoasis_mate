@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 
 DRIVE_API = "https://www.googleapis.com/drive/v3"
+RCLONE_INSPECT_MAX_OUTPUT = 512 * 1024
 GOOGLE_DRIVE_FOLDER_MIME = "application/vnd.google-apps.folder"
 
 
@@ -76,6 +77,38 @@ def _rclone_config_dump(rclone_path, config_path, timeout=30, runner=None):
         check=True,
     )
     return json.loads(result.stdout or "{}")
+
+
+def rclone_version_output(rclone_path, timeout=30, runner=None):
+    binary = str(rclone_path or "").strip()
+    if not binary:
+        raise ValueError("확인할 rclone 실행 파일 경로를 입력해 주세요.")
+    runner = runner or subprocess.run
+    result = runner(
+        [binary, "version"],
+        capture_output=True,
+        text=True,
+        timeout=max(5, min(int(timeout or 30), 300)),
+        check=True,
+    )
+    output = "\n".join(
+        value.strip() for value in (result.stdout, result.stderr) if value and value.strip()
+    )
+    if not output:
+        raise RuntimeError("rclone 버전 출력이 비어 있습니다.")
+    if len(output) > RCLONE_INSPECT_MAX_OUTPUT:
+        raise RuntimeError("rclone 확인 결과가 너무 큽니다.")
+    return output
+
+
+def rclone_config_output(rclone_path, config_path, timeout=30, runner=None):
+    payload = _rclone_config_dump(
+        rclone_path, config_path, timeout=timeout, runner=runner
+    )
+    output = json.dumps(payload, ensure_ascii=False, indent=2)
+    if len(output) > RCLONE_INSPECT_MAX_OUTPUT:
+        raise RuntimeError("rclone 확인 결과가 너무 큽니다.")
+    return output
 
 
 def list_google_drive_remotes(rclone_path, config_path, timeout=30, runner=None):

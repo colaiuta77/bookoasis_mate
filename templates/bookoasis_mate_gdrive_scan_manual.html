@@ -103,16 +103,16 @@
   </ol>
   <div class="alert alert-warning">
     <strong>rclone.conf 저장 제약.</strong>
-    설정 파일은 재시작 후에도 유지되고 rclone이 임시 파일을 만든 뒤 교체할 수 있는 쓰기 가능한 디렉터리에 두어야 합니다. 파일 하나만 bind mount하지 말고 부모 디렉터리 전체를 마운트하세요. 예를 들어 호스트의 <code>/volume1/docker/flaskfarm/data/bookoasis_mate/rclone.conf</code>가 FlaskFarm의 <code>/data/bookoasis_mate/rclone.conf</code>로 보이도록 <code>data</code> 디렉터리 전체를 영구 마운트한 구성은 사용할 수 있습니다. Mate 설정에는 항상 컨테이너 경로를 입력합니다.
+    설정 파일은 재시작 후에도 유지되고 rclone이 임시 파일을 만든 뒤 교체할 수 있는 쓰기 가능한 디렉터리에 두어야 합니다. 파일 하나만 bind mount하지 말고 부모 디렉터리 전체를 마운트하세요. 예를 들어 호스트의 <code>/volume1/docker/flaskfarm/data/rclone.conf</code>가 FlaskFarm의 <code>/data/rclone.conf</code>로 보이도록 <code>data</code> 디렉터리 전체를 영구 마운트한 구성은 사용할 수 있습니다. Mate 설정에는 항상 컨테이너 경로를 입력합니다.
   </div>
   <div class="alert alert-info">
     <strong>토큰 갱신 방식.</strong>
-    Mate는 자체 OAuth 코드를 따로 구현하지 않습니다. 변경 확인과 연결 테스트 때 지정된 rclone의 <code>about</code> 명령을 실행해 rclone이 만료된 액세스 토큰을 갱신하고 rclone.conf에 저장하게 한 뒤, 저장된 토큰을 다시 읽어 Changes API에 사용합니다. 갱신 후에도 설정 파일에 만료 토큰이 남아 있으면 쓰기·rename 권한 또는 마운트 문제로 판단해 오류를 표시합니다. 액세스 토큰은 Mate DB와 로그에 저장하지 않습니다.
+    Mate는 자체 OAuth 코드를 따로 구현하지 않습니다. 변경 확인과 연결 테스트 때 지정된 rclone의 <code>about</code> 명령을 실행해 rclone이 만료된 액세스 토큰을 갱신하고 rclone.conf에 저장하게 한 뒤, 저장된 토큰을 다시 읽어 Changes API에 사용합니다. 갱신 후에도 설정 파일에 만료 토큰이 남아 있으면 쓰기·rename 권한 또는 마운트 문제로 판단해 오류를 표시합니다. 액세스 토큰은 Mate DB와 로그에 저장하지 않지만, 관리자용 <strong>설정 확인</strong> 팝업에는 rclone.conf의 token·client_secret이 원문으로 표시되므로 화면을 외부에 공유하지 마세요.
   </div>
   <div class="doctor-code-window">
     <div class="doctor-code-window-header">rclone 재인증 예시</div>
     <pre><code>docker exec -it flaskfarm /usr/bin/rclone \
-  --config /data/bookoasis_mate/rclone.conf \
+  --config /data/rclone.conf \
   config reconnect gds2:</code></pre>
   </div>
   <div class="alert alert-info">

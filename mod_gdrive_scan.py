@@ -14,6 +14,8 @@ from .gdrive_changes import (
     google_drive_state_remote,
     list_google_drive_sources,
     parse_builtin_roots,
+    rclone_config_output,
+    rclone_version_output,
     resolve_google_drive_source,
     resolve_ff_rclone_settings,
 )
@@ -322,6 +324,40 @@ class ModuleGDriveScan(PluginModuleBase):
 
     def process_ajax(self, command, req):
         try:
+            if command == "rclone_version":
+                settings = self._settings()
+                rclone_path = str(req.form.get("rclone_path") or "").strip()
+                if not rclone_path:
+                    rclone_path, _ = resolve_ff_rclone_settings(
+                        getattr(F, "PluginManager", None),
+                        settings["gdrive_scan_rclone_path"],
+                        settings["gdrive_scan_rclone_config_path"],
+                    )
+                output = rclone_version_output(
+                    rclone_path, timeout=settings["gdrive_scan_rc_timeout"]
+                )
+                return jsonify({
+                    "ret": "success",
+                    "msg": "rclone 버전을 확인했습니다.",
+                    "data": {"output": output},
+                })
+            if command == "rclone_config":
+                settings = self._settings()
+                rclone_path, config_path = resolve_ff_rclone_settings(
+                    getattr(F, "PluginManager", None),
+                    req.form.get("rclone_path"),
+                    req.form.get("config_path"),
+                )
+                output = rclone_config_output(
+                    rclone_path,
+                    config_path,
+                    timeout=settings["gdrive_scan_rc_timeout"],
+                )
+                return jsonify({
+                    "ret": "success",
+                    "msg": "rclone.conf 설정을 확인했습니다.",
+                    "data": {"output": output},
+                })
             if command == "discord_webhook_save":
                 webhook_url = str(req.form.get("webhook_url") or "").strip()
                 DiscordWebhookNotifier(webhook_url)

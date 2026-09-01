@@ -41,16 +41,16 @@
     {{ macros.setting_input_text_and_buttons(
       'gdrive_scan_rclone_path',
       'rclone 실행 파일',
-      [['select_gdrive_scan_rclone_path_btn', '파일 선택']],
+      [['gdrive_scan_rclone_version_btn', '버전 확인'], ['select_gdrive_scan_rclone_path_btn', '파일 선택']],
       value=arg.get('gdrive_scan_rclone_path', ''),
       desc=['FlaskFarm 컨테이너에서 실행 가능한 rclone 파일입니다.', '직접 설정을 사용하지 않으면 rclone.conf 경로와 함께 비워 둡니다.']
     ) }}
     {{ macros.setting_input_text_and_buttons(
       'gdrive_scan_rclone_config_path',
       'rclone.conf 파일',
-      [['select_gdrive_scan_rclone_config_path_btn', '파일 선택']],
+      [['select_gdrive_scan_rclone_config_path_btn', '파일 선택'], ['gdrive_scan_rclone_config_btn', '설정 확인']],
       value=arg.get('gdrive_scan_rclone_config_path', ''),
-      desc=['FlaskFarm 컨테이너에서 보이고 쓰기 가능한 설정 파일입니다.', '예: /data/bookoasis_mate/rclone.conf']
+      desc=['FlaskFarm 컨테이너에서 보이고 쓰기 가능한 설정 파일입니다.', '예: /data/rclone.conf', '설정 확인 팝업에는 OAuth 토큰과 client_secret도 원문으로 표시됩니다.']
     ) }}
     <div class="alert alert-info gdrive-scan-rclone-status">
       <strong>{{ arg.get('gdrive_scan_rclone', {}).get('source', 'rclone 연결 정보') }}</strong>
@@ -346,6 +346,35 @@ $('body').on('click', '#select_gdrive_scan_rclone_path_btn', function(e) {
 $('body').on('click', '#select_gdrive_scan_rclone_config_path_btn', function(e) {
   e.preventDefault();
   gdriveScanSelectFile('gdrive_scan_rclone_config_path', 'rclone.conf 파일 선택');
+});
+$('body').on('click', '#gdrive_scan_rclone_version_btn', function(e) {
+  e.preventDefault();
+  var button = this;
+  button.disabled = true;
+  bookoasisMateAjax('gdrive_scan', 'rclone_version', {
+    rclone_path: $('#gdrive_scan_rclone_path').val()
+  }, function(ret) {
+    showModal(
+      '<pre class="doctor-gdrive-json">' + bookoasisMateEscape((ret.data || {}).output || '-') + '</pre>',
+      'Rclone 버전',
+      false
+    );
+  }, function() { button.disabled = false; }, {global:false});
+});
+$('body').on('click', '#gdrive_scan_rclone_config_btn', function(e) {
+  e.preventDefault();
+  var button = this;
+  button.disabled = true;
+  bookoasisMateAjax('gdrive_scan', 'rclone_config', {
+    rclone_path: $('#gdrive_scan_rclone_path').val(),
+    config_path: $('#gdrive_scan_rclone_config_path').val()
+  }, function(ret) {
+    showModal(
+      '<pre class="doctor-gdrive-json">' + bookoasisMateEscape((ret.data || {}).output || '-') + '</pre>',
+      'rclone.conf 설정',
+      false
+    );
+  }, function() { button.disabled = false; }, {global:false});
 });
 
 $('#setting_save_btn').click(function(e) {
