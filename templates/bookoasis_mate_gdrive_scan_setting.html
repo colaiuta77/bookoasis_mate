@@ -98,8 +98,8 @@
   {{ macros.setting_input_int('gdrive_scan_worker_interval', '작업자 확인 주기(초)', value=arg['gdrive_scan_worker_interval'], desc=['대기 이벤트를 확인하는 주기입니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_max_attempts', '최대 처리 횟수', value=arg['gdrive_scan_max_attempts'], desc=['실패 시 지수형 대기 후 재시도하며 마지막 실패는 변경 이벤트 메뉴에서 다시 실행할 수 있습니다.']) }}
   {{ macros.setting_input_text('gdrive_scan_extensions', '대상 파일 확장자', value=arg['gdrive_scan_extensions'], desc=['쉼표로 구분합니다.', '도서·오디오북·비디오북·자막과 메타데이터 보조 파일 확장자를 기본값으로 제공합니다.']) }}
-  {{ macros.setting_input_int('gdrive_scan_rc_timeout', 'rclone 명령 제한 시간(초)', value=arg['gdrive_scan_rc_timeout'], desc=['리모트 목록·연결 정보 확인 같은 rclone 명령에만 적용합니다. 1~300초, 기본값 30']) }}
-  {{ macros.setting_input_int('gdrive_scan_changes_timeout', 'Google Drive Changes API 제한 시간(초)', value=arg.get('gdrive_scan_changes_timeout', '60'), desc=['변경 내역 HTTP 조회에만 적용합니다. 1~300초, 기본값 60', '401은 rclone 토큰을 다시 읽어 1회, 읽기 제한 시간은 1초 뒤 1회 재시도합니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_rc_timeout', 'rclone 명령 제한 시간(초)', value=arg['gdrive_scan_rc_timeout'], desc=['리모트 목록·연결 정보 확인과 갱신 토큰 저장에 적용합니다. 1~300초, 기본값 30']) }}
+  {{ macros.setting_input_int('gdrive_scan_changes_timeout', 'Google Drive Changes API 제한 시간(초)', value=arg.get('gdrive_scan_changes_timeout', '60'), desc=['변경 내역 HTTP 조회와 OAuth 토큰 갱신에 적용합니다. 1~300초, 기본값 60', '401은 refresh_token으로 액세스 토큰을 갱신·저장한 뒤 1회, 읽기 제한 시간은 1초 뒤 1회 재시도합니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_path_timeout', '개별 경로 스캔 제한 시간(초)', value=arg.get('gdrive_scan_path_timeout', '120'), desc=['동기식 경로 스캔에만 적용합니다. 10~600초, 기본값 120']) }}
   {{ macros.setting_input_int('gdrive_scan_history_limit', '목록 페이지 크기 상한', value=arg['gdrive_scan_history_limit'], desc=['화면에서 한 페이지에 요청할 수 있는 최대 이벤트 수입니다. 10~1000건']) }}
   {{ macros.setting_input_int('gdrive_scan_retention_days', 'DB 삭제 기간(일)', value=arg.get('gdrive_scan_retention_days', '30'), desc=['완료와 최종 실패 이벤트만 지정 기간이 지나면 삭제합니다.', '대기·재시도·처리 중 이벤트는 삭제하지 않습니다.']) }}

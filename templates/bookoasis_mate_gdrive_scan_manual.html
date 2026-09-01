@@ -98,7 +98,7 @@
     <li>Union을 선택하면 <strong>실제 감시 Drive upstream</strong>에서 변경을 읽을 직접 Google Drive 리모트를 고릅니다. Union 자체에는 Google Changes API 인증이 없으므로 선택한 upstream의 OAuth와 체크포인트를 사용합니다.</li>
     <li>서로 겹치지 않는 감시 경로를 최대 10개까지 등록할 수 있습니다. <code>rclone 감시 경로</code>에는 <code>GDRIVE/READING</code>처럼 리모트 기준 상대 경로를 입력하고 <code>/mnt/...</code> 경로를 넣지 않습니다.</li>
     <li>설정을 저장한 뒤 <strong>토큰 갱신 및 연결 테스트</strong>로 모든 감시 경로의 rclone OAuth 토큰과 Google Drive Changes API 연결을 확인합니다.</li>
-    <li><strong>rclone 명령 제한 시간</strong>은 리모트·설정 확인에, <strong>Google Drive Changes API 제한 시간</strong>은 변경 내역 HTTP 조회에만 적용합니다. API 401은 rclone 토큰을 다시 읽어 한 번, 읽기 제한 시간은 1초 뒤 한 번 재시도합니다.</li>
+    <li><strong>rclone 명령 제한 시간</strong>은 리모트·설정 확인과 갱신 토큰 저장에, <strong>Google Drive Changes API 제한 시간</strong>은 변경 내역 HTTP 조회와 OAuth 토큰 갱신에 적용합니다. API 401은 액세스 토큰을 갱신·저장한 뒤 한 번, 읽기 제한 시간은 1초 뒤 한 번 재시도합니다.</li>
     <li>첫 실행은 전체 재귀 목록 조회를 실행하지 않고 현재 시점의 시작 토큰만 저장합니다. 따라서 대규모 드라이브도 초기 <code>lsjson --recursive</code> 지연 없이 이후 변경부터 감지합니다.</li>
   </ol>
   <div class="alert alert-warning">
@@ -107,7 +107,7 @@
   </div>
   <div class="alert alert-info">
     <strong>토큰 갱신 방식.</strong>
-    Mate는 자체 OAuth 코드를 따로 구현하지 않습니다. 변경 확인과 연결 테스트 때 지정된 rclone의 <code>about</code> 명령을 실행해 rclone이 만료된 액세스 토큰을 갱신하고 rclone.conf에 저장하게 한 뒤, 저장된 토큰을 다시 읽어 Changes API에 사용합니다. 갱신 후에도 설정 파일에 만료 토큰이 남아 있으면 쓰기·rename 권한 또는 마운트 문제로 판단해 오류를 표시합니다. 액세스 토큰은 Mate DB와 로그에 저장하지 않지만, 관리자용 <strong>설정 확인</strong> 팝업에는 rclone.conf의 token·client_secret이 원문으로 표시되므로 화면을 외부에 공유하지 마세요.
+    Mate는 먼저 지정된 rclone으로 연결을 확인하고 rclone.conf의 OAuth 정보를 읽습니다. 저장된 액세스 토큰이 만료됐거나 Google API가 401을 반환하면 <code>client_id</code>와 <code>refresh_token</code>으로 새 액세스 토큰을 발급받아 rclone.conf에 저장한 뒤 요청을 한 번만 재시도합니다. <code>invalid_grant</code>는 갱신 토큰이 만료 또는 취소된 상태이므로 해당 리모트를 다시 연결해야 합니다. 액세스 토큰은 Mate DB와 로그에 저장하지 않지만, 관리자용 <strong>설정 확인</strong> 팝업에는 rclone.conf의 token·client_secret이 원문으로 표시되므로 화면을 외부에 공유하지 마세요.
   </div>
   <div class="doctor-code-window">
     <div class="doctor-code-window-header">rclone 재인증 예시</div>
