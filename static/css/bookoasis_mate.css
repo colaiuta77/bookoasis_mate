@@ -486,7 +486,7 @@
 .doctor-plugin-config-checkbox { min-height:36px; margin:0; }
 .doctor-plugin-secret-clear { display:block; margin:7px 0 0; color:#6c757d; font-size:.82rem; }
 .doctor-plugin-update-action { box-shadow:0 2px 8px rgba(40,167,69,.25); font-weight:700; }
-.doctor-plugin-source-card { max-width:900px; padding:20px; }
+.doctor-plugin-source-card { padding:20px; }
 .doctor-plugin-source-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .doctor-plugin-job { margin:0 0 16px; padding:20px; }
 .doctor-plugin-job-completed { border-color:#86d49a; background:#f4fff7; }

@@ -2277,7 +2277,7 @@ class BookOasisPluginManager:
                 {
                     key: value
                     for key, value in prepared["manifest"].items()
-                    if key not in {"files", "file_count", "total_bytes", "requirements"}
+                    if key not in {"files", "file_count", "total_bytes", "requirements", "inspect_job_id"}
                 }
             )
             self._check_stop()
