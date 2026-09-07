@@ -67,6 +67,7 @@ class ModuleGDriveScan(PluginModuleBase):
         self._wake_event = threading.Event()
         self._worker_thread = None
         self._worker_lock = threading.RLock()
+        self._queue_maintenance_lock = threading.Lock()
         self._last_cleanup_monotonic = 0.0
         self._last_builtin_poll_monotonic = 0.0
         self._builtin_retry = {}
@@ -608,6 +609,12 @@ class ModuleGDriveScan(PluginModuleBase):
                         else "완료 또는 최종 실패 이벤트만 삭제할 수 있습니다.",
                     }
                 )
+            if command == "clear_pending":
+                if req.form.get("confirm") != "clear_pending":
+                    raise ValueError("대기·재시도 이벤트 전체 삭제를 확인해 주세요.")
+                deleted = self._clear_pending_events()
+                P.logger.info(f"[BookOasisMate] 대기·재시도 이벤트 {deleted}건을 사용자가 삭제했습니다.")
+                return jsonify({"ret": "success", "msg": f"대기·재시도 이벤트 {deleted}건을 삭제했습니다.", "deleted": deleted})
             if command in {"cleanup", "clear"}:
                 settings = self._settings()
                 deleted = self.model.cleanup_terminal(
@@ -935,7 +942,8 @@ class ModuleGDriveScan(PluginModuleBase):
     def _worker_loop(self):
         if self.model is not None:
             try:
-                recovered = self.model.recover_processing()
+                with self._queue_maintenance_lock:
+                    recovered = self.model.recover_processing()
                 if recovered:
                     P.logger.warning(
                         f"[BookOasisMate] 중단된 변경 이벤트 {recovered}건을 복구했습니다."
@@ -948,8 +956,9 @@ class ModuleGDriveScan(PluginModuleBase):
             interval = settings["gdrive_scan_worker_interval"]
             try:
                 self._cleanup_if_due(settings)
-                self._poll_builtin_if_due(settings)
-                processed = self._process_once()
+                with self._queue_maintenance_lock:
+                    self._poll_builtin_if_due(self._settings())
+                    processed = self._process_once()
                 if processed:
                     continue
             except Exception as error:
@@ -959,6 +968,18 @@ class ModuleGDriveScan(PluginModuleBase):
                 P.logger.error(traceback.format_exc())
             self._wake_event.wait(interval)
             self._wake_event.clear()
+
+    def _clear_pending_events(self):
+        if self._settings()["gdrive_scan_enabled"]:
+            raise ValueError("먼저 연동 설정에서 '연동 사용'을 끄고 저장해 주세요.")
+        if not self._queue_maintenance_lock.acquire(blocking=False):
+            raise ValueError("변경 수집 또는 스캔 배치가 실행 중입니다. 현재 작업이 끝난 뒤 다시 시도해 주세요.")
+        try:
+            if self._settings()["gdrive_scan_enabled"]:
+                raise ValueError("연동 사용이 켜져 있어 삭제할 수 없습니다.")
+            return self.model.clear_pending()
+        finally:
+            self._queue_maintenance_lock.release()
 
     def _cleanup_if_due(self, settings):
         if self.model is None or not settings["gdrive_scan_auto_cleanup"]:

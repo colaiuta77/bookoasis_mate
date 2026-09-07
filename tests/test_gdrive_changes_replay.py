@@ -148,6 +148,28 @@ class ChangesReplayTest(unittest.TestCase):
         self.assertEqual(7, saved["library_id"])
         self.assertTrue(saved["result"]["outcome_unknown"])
 
+    def test_clear_pending_preserves_terminal_history_and_checkpoint(self):
+        for status in ("queued", "retry", "completed", "failed"):
+            row = self.events._new_entity({"action": "edit", "item_type": "file", "path": "/books/book.cbz"})
+            row.status = status
+            self.session.add(row)
+        self.session.commit()
+        self.items.upsert("drive:root", {"file_id": "book", "path": "/books/book.cbz"})
+        self.assertEqual(2, self.events.clear_pending())
+        self.assertEqual(["completed", "failed"], [row.status for row in self.session.query(self.events).order_by(self.events.id)])
+        self.assertEqual("page-1", self.states.get("drive", "root")["page_token"])
+        self.assertIsNotNone(self.items.get("drive:root", "book"))
+
+    def test_clear_pending_refuses_processing_without_deleting_anything(self):
+        for status in ("queued", "processing", "retry"):
+            row = self.events._new_entity({"action": "edit", "item_type": "file", "path": "/books/book.cbz"})
+            row.status = status
+            self.session.add(row)
+        self.session.commit()
+        with self.assertRaisesRegex(ValueError, "처리 중"):
+            self.events.clear_pending()
+        self.assertEqual(3, self.session.query(self.events).count())
+
 
 if __name__ == "__main__":
     unittest.main()

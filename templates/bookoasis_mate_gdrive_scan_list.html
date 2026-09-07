@@ -61,11 +61,13 @@
 
 <div class="doctor-section doctor-card">
   <h4>변경 이벤트 DB 정리</h4>
-  <p class="doctor-muted">설정의 보존기간을 적용합니다. 완료와 최종 실패 이벤트만 삭제하며 대기·재시도·처리 중인 작업은 보호합니다.</p>
+  <p class="doctor-muted">기간 적용 삭제와 종료 이력 전체 삭제는 완료·최종 실패 이력만 정리합니다. 기간 적용 삭제에는 설정의 보존기간을 사용합니다.</p>
   <div class="doctor-cleanup-actions">
     <button id="gdrive_cleanup_period" class="btn btn-sm btn-outline-warning">기간 적용 삭제</button>
     <button id="gdrive_cleanup_all" class="btn btn-sm btn-outline-danger">종료 이력 전체 삭제</button>
+    <button id="gdrive_cleanup_pending" type="button" class="btn btn-sm btn-danger">대기·재시도 이벤트 일괄 삭제</button>
   </div>
+  <p class="doctor-muted mt-2">대기열 삭제는 연동 사용을 끄고 현재 수집·스캔 배치가 끝난 뒤 가능합니다. 검색 조건과 관계없이 모든 대기·재시도 이벤트를 삭제합니다. 처리 중·완료·실패 이력, 체크포인트와 파일 비교 상태는 유지하며 이미 BookOasis에 전달된 스캔은 취소하지 않습니다.</p>
 </div>
 
 <div id="gdrive_event_modal" class="doctor-action-modal" aria-hidden="true">
@@ -457,6 +459,14 @@ $('#gdrive_cleanup_all').click(function(e) {
   });
 });
 $('#gdrive_event_modal_close').click(closeGdriveEventDetail);
+$('#gdrive_cleanup_pending').click(function(e) {
+  e.preventDefault();
+  if (!confirm('검색 조건과 관계없이 대기·재시도 이벤트를 모두 삭제합니다. 복구할 수 없습니다.\n연동 사용을 끄고 현재 배치가 끝났는지 확인해 주세요.\n체크포인트는 유지되며 이미 BookOasis에 전달한 스캔은 취소되지 않습니다.\n계속하시겠습니까?')) return;
+  bookoasisMateAjax('gdrive_scan', 'clear_pending', {confirm:'clear_pending'}, function() {
+    gdriveEventPage = 1;
+    loadGdriveEvents(false);
+  });
+});
 $('#gdrive_event_modal').click(function(e) {
   if (e.target === this) closeGdriveEventDetail();
 });

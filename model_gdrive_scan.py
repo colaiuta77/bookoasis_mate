@@ -466,6 +466,21 @@ class ModelGDriveScanEvent(ModelBase):
             return int(count or 0)
 
     @classmethod
+    def clear_pending(cls):
+        with F.app.app_context():
+            try:
+                if F.db.session.query(cls.id).filter(cls.status == "processing").first():
+                    raise ValueError("처리 중인 이벤트가 있습니다. 현재 배치가 끝난 뒤 다시 시도해 주세요.")
+                count = F.db.session.query(cls).filter(
+                    cls.status.in_(("queued", "retry"))
+                ).delete(synchronize_session=False)
+                F.db.session.commit()
+                return int(count or 0)
+            except Exception:
+                F.db.session.rollback()
+                raise
+
+    @classmethod
     def counts(cls):
         statuses = ("queued", "retry", "processing", "completed", "failed")
         with F.app.app_context():
