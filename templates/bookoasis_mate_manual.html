@@ -17,6 +17,14 @@
 <div class="tab-content doctor-manual-tab-content">
 <div class="tab-pane fade show active" id="manual-guide-pane" role="tabpanel" aria-labelledby="manual-guide-tab">
 <div class="doctor-section doctor-card">
+  <h4>원격 설정 확인과 운영 진단</h4>
+  <p>연결 테스트는 웹훅 토큰으로 실제 DB 엔진을 확인합니다. 엔진 불일치 시 카테고리·통DB 이관과 고아 표지 정리를 차단합니다. 엔진 일치는 같은 DB 서버나 계정에 연결됐다는 보장이 아닙니다. 서버 중지·구버전·인증 실패는 확인 불가로 구분하며, 오프라인 이관을 위해 경고 후 기존 수동 확인 절차를 유지합니다.</p>
+  <p>BookOasis의 COVER_STORAGE_ROOT와 커버 이동 상태를 관리자 API로 확인합니다. 원격 커버 경로와 Mate 표지 디렉터리가 다르면 같은 저장소의 마운트인지 직접 확인하고 설정의 ‘원격 커버 경로 확인값’에 원격 경로를 입력하세요. 기본 경로의 확인값은 &lt;default&gt;입니다. Mate 경로는 자동 변경하지 않습니다. 이동 중 또는 확인값 변경 시 커버 검사·정리·이관을 차단합니다. 검사 시작 후 원격 설정을 변경하지 마세요. 서버의 일시적인 기본 경로 폴백이나 실제 마운트 동일성까지 자동 검증하지는 않습니다.</p>
+  <p>MariaDB SQL 관리자 진단은 information_schema의 PROCESSLIST, TABLES, COLUMNS, STATISTICS, SCHEMATA, INNODB_TRX, INNODB_LOCKS, INNODB_LOCK_WAITS와 performance_schema의 threads, events_statements_current, events_statements_history, events_statements_summary_by_digest, table_io_waits_summary_by_table만 추가 허용합니다. mysql·sys와 비밀번호 해시·settings 조회, 파일 출력, 잠금 함수, 쓰기 및 다중 문장은 차단합니다.</p>
+  <p>일반 조회는 최대 500행·10초, 진단은 최대 5,000행·30초이며 기본 제한 시간은 3초입니다. 스트리밍으로 최대 결과+1행을 읽고 잘림 여부를 표시합니다. 실제 쿼리 전체 실행 비용은 행 제한만으로 줄지 않으며 DB 제한 시간이 적용됩니다. 서버 버전·PROCESS 권한·performance_schema 활성화 상태에 따라 조회가 실패하거나 일부 세션만 보일 수 있습니다. 실행 중 쿼리 본문에는 민감한 값이 포함될 수 있으므로 결과 공유에 주의하세요. MariaDB에서 문자열은 작은따옴표, 식별자는 백틱을 사용하고 역슬래시 이스케이프는 사용하지 마세요.</p>
+  <p>플러그인 전체 새로고침은 저장소 존재 확인과 Topic 재검색을 수행합니다. 저장소 API의 404는 삭제 또는 비공개 접근 불가를 뜻할 수 있어 미설치 목록에서 숨기지만 사용자 카탈로그 원본과 설치 파일은 삭제하지 않습니다. 401·403·네트워크 장애는 삭제로 판단하지 않습니다. VERSION 파일만 없는 경우에도 저장소 삭제로 판정하지 않습니다. Topic 검색 실패 시 이전 캐시를 유지하며, 상태는 다음 원격 새로고침 때 재확인합니다.</p>
+</div>
+<div class="doctor-section doctor-card">
   <h4>지원 범위 한눈에 보기</h4>
   <div class="doctor-manual-table-wrap">
     <table class="doctor-manual-table">
