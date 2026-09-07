@@ -16,6 +16,19 @@ SENSITIVE_COLUMNS = {
     ("settings", "value"),
 }
 
+DIAGNOSTIC_TABLES = {
+    "information_schema": {"processlist", "tables", "columns", "statistics", "schemata", "innodb_trx", "innodb_locks", "innodb_lock_waits"},
+    "performance_schema": {"threads", "events_statements_current", "events_statements_history", "events_statements_summary_by_digest", "table_io_waits_summary_by_table"},
+}
+
+DIAGNOSTIC_PRESETS = [
+    ("processlist", "현재 실행 중인 쿼리", "SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE, INFO FROM information_schema.PROCESSLIST WHERE COMMAND <> 'Sleep' ORDER BY TIME DESC"),
+    ("long_queries", "5초 이상 실행 중인 쿼리", "SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE, INFO FROM information_schema.PROCESSLIST WHERE COMMAND <> 'Sleep' AND TIME >= 5 ORDER BY TIME DESC"),
+    ("transactions", "InnoDB 트랜잭션", "SELECT * FROM information_schema.INNODB_TRX ORDER BY trx_started"),
+    ("table_sizes", "테이블 크기", "SELECT TABLE_SCHEMA, TABLE_NAME, ENGINE, TABLE_ROWS, ROUND(DATA_LENGTH / 1024 / 1024, 2) AS data_mb, ROUND(INDEX_LENGTH / 1024 / 1024, 2) AS index_mb FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY DATA_LENGTH + INDEX_LENGTH DESC"),
+    ("indexes", "인덱스 현황", "SELECT TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX"),
+]
+
 FORBIDDEN_KEYWORDS = {
     "ALTER",
     "ANALYZE",
@@ -323,7 +336,7 @@ ORDER BY p.last_watched_at DESC""",
 ]
 
 
-def _strip_literals_and_comments(sql):
+def _strip_literals_and_comments(sql, identifiers=False):
     result = []
     index = 0
     length = len(sql)
@@ -332,7 +345,11 @@ def _strip_literals_and_comments(sql):
         char = sql[index]
         next_char = sql[index + 1] if index + 1 < length else ""
         if quote is not None:
-            result.append(" ")
+            result.append(char if identifiers and quote == "`" and char != "`" else " ")
+            if char == "\\" and quote in {"'", '"'}:
+                result.append(" ")
+                index += 2
+                continue
             if quote == "[" and char == "]":
                 quote = None
             elif char == quote:
@@ -355,7 +372,14 @@ def _strip_literals_and_comments(sql):
                 result.append(" ")
                 index += 1
             continue
+        if char == "#":
+            while index < length and sql[index] not in "\r\n":
+                result.append(" ")
+                index += 1
+            continue
         if char == "/" and next_char == "*":
+            if sql[index + 2:index + 3] == "!" or sql[index + 2:index + 4].upper() == "M!":
+                raise ValueError("실행 가능한 SQL 주석은 허용하지 않습니다.")
             result.extend((" ", " "))
             index += 2
             while index < length:
@@ -432,12 +456,14 @@ class ReadOnlySqlTool:
         self.database_adapter = BookOasisDatabaseAdapter(self.settings)
 
     @staticmethod
-    def presets():
+    def presets(mode="safe"):
         presets = []
         for item in SQL_PRESETS:
             preset = dict(item)
             preset.setdefault("db_types", ["general", "adult"])
             presets.append(preset)
+        if mode == "diagnostic":
+            presets.extend({"id": "diagnostic_" + key, "name": name, "sql": query, "mode": "diagnostic", "db_types": ["general", "adult", "audiobook", "video"], "description": "MariaDB 서버의 권한과 버전에 따라 표시 범위와 지원 테이블이 다릅니다."} for key, name, query in DIAGNOSTIC_PRESETS)
         return presets
 
     def _target(self, db_type):
@@ -485,23 +511,28 @@ class ReadOnlySqlTool:
 
         return authorize
 
-    def execute(self, db_type, sql, max_rows=None, timeout_seconds=None):
+    def execute(self, db_type, sql, max_rows=None, timeout_seconds=None, mode="safe"):
         query = validate_read_only_sql(sql)
+        if mode not in {"safe", "diagnostic"}:
+            raise ValueError("지원하지 않는 SQL 모드입니다.")
         db_key, target = self._target(db_type)
+        diagnostic = mode == "diagnostic"
+        if diagnostic and target.engine != "mariadb":
+            raise ValueError("관리자 진단 모드는 MariaDB에서만 사용할 수 있습니다.")
         try:
             row_limit = int(max_rows or self.DEFAULT_MAX_ROWS)
         except (TypeError, ValueError):
             row_limit = self.DEFAULT_MAX_ROWS
-        row_limit = max(1, min(row_limit, self.MAX_ROWS))
+        row_limit = max(1, min(row_limit, 5000 if diagnostic else self.MAX_ROWS))
         try:
             timeout = float(timeout_seconds or self.DEFAULT_TIMEOUT_SECONDS)
         except (TypeError, ValueError):
             timeout = self.DEFAULT_TIMEOUT_SECONDS
-        timeout = max(0.001, min(timeout, self.MAX_TIMEOUT_SECONDS))
+        timeout = max(0.001, min(timeout, 30.0 if diagnostic else self.MAX_TIMEOUT_SECONDS))
 
         if target.engine == "mariadb":
             return self._execute_mariadb(
-                db_key, target, query, row_limit, timeout
+                db_key, target, query, row_limit, timeout, mode=mode
             )
         return self._execute_sqlite(db_key, target, query, row_limit, timeout)
 
@@ -558,18 +589,31 @@ class ReadOnlySqlTool:
         }
 
     @staticmethod
-    def _guard_mariadb_sensitive(query):
-        sanitized = _strip_literals_and_comments(query).lower()
+    def _guard_mariadb_sensitive(query, mode="safe", database=""):
+        if '"' in query or "\\" in query:
+            raise ValueError("MariaDB SQL 모드에 따른 해석 차이를 피하려면 문자열은 작은따옴표, 식별자는 백틱을 사용하고 역슬래시 이스케이프는 제거해 주세요.")
+        sanitized = _strip_literals_and_comments(query, identifiers=True).lower()
         if re.search(r"\binto\s+(outfile|dumpfile)\b", sanitized):
             raise ValueError("읽기 전용 SQL에서는 MariaDB 파일 출력(OUTFILE/DUMPFILE)을 사용할 수 없습니다.")
-        if re.search(r"\b(password_hash|load_file|sleep|benchmark)\b", sanitized):
+        if re.search(r"\b(password_hash|load_file|sleep|benchmark|get_lock|release_lock)\b", sanitized):
             raise ValueError("민감 컬럼 또는 위험한 MariaDB 함수를 조회할 수 없습니다.")
-        if re.search(r"\b(information_schema|performance_schema|mysql|sys)\s*\.", sanitized):
-            raise ValueError("선택한 BookOasis DB 밖의 스키마는 조회할 수 없습니다.")
-        if re.search(r"\b(from|join)\s+`?settings`?\b", sanitized):
+        if re.search(r"\b(for\s+update|lock\s+in\s+share\s+mode|into)\b", sanitized):
+            raise ValueError("잠금 또는 변수·파일 출력을 사용하는 SQL은 허용하지 않습니다.")
+        for schema, table in re.findall(r"\b(information_schema|performance_schema|mysql|sys)\s*\.\s*(\w+)", sanitized):
+            if mode != "diagnostic":
+                raise ValueError("일반 조회에서는 시스템 스키마를 조회할 수 없습니다. 관리자 진단 모드를 사용해 주세요.")
+            if table not in DIAGNOSTIC_TABLES.get(schema, set()):
+                raise ValueError(f"관리자 진단 모드에서 허용되지 않은 테이블입니다. {schema}.{table}")
+        for schema in re.findall(r"(?:\bfrom\b|\bjoin\b)\s*(?:\(\s*)*(\w+)\s*\.", sanitized):
+            if schema not in DIAGNOSTIC_TABLES and schema != database.lower():
+                raise ValueError("선택한 BookOasis DB 밖의 스키마는 조회할 수 없습니다.")
+        for clause in re.findall(r"\bfrom\b(.*?)(?=\bwhere\b|\bgroup\b|\border\b|\blimit\b|\bunion\b|$)", sanitized, re.DOTALL):
+            if re.search(r",\s*(?:\(\s*)*\w+\s*\.", clause):
+                raise ValueError("스키마를 지정한 쉼표 조인 대신 명시적 JOIN을 사용해 주세요.")
+        if re.search(r"\bsettings\b", sanitized):
             raise ValueError("민감 설정을 포함하는 settings 테이블은 조회할 수 없습니다.")
-        if re.search(r"\b(from|join)\s+`?users`?\b", sanitized):
-            select_part = sanitized.split("from", 1)[0]
+        if re.search(r"\busers\b", sanitized):
+            select_part = sanitized
             select_without_count = re.sub(
                 r"\bcount\s*\(\s*\*\s*\)",
                 "",
@@ -578,8 +622,8 @@ class ReadOnlySqlTool:
             if "*" in select_without_count:
                 raise ValueError("users 테이블은 필요한 비민감 컬럼만 명시해 주세요.")
 
-    def _execute_mariadb(self, db_key, target, query, row_limit, timeout):
-        self._guard_mariadb_sensitive(query)
+    def _execute_mariadb(self, db_key, target, query, row_limit, timeout, mode="safe"):
+        self._guard_mariadb_sensitive(query, mode=mode, database=target.database)
         query = re.sub(
             r"^\s*EXPLAIN\s+QUERY\s+PLAN\s+",
             "EXPLAIN ",
@@ -593,16 +637,19 @@ class ReadOnlySqlTool:
                 connection.execute(
                     "SET SESSION max_statement_time = ?", (float(timeout),)
                 ).close()
-                cursor = connection.execute(query)
+                connection.execute("START TRANSACTION READ ONLY").close()
                 try:
-                    if cursor.description is None:
-                        raise ValueError(
-                            "결과 행을 반환하는 조회 SQL만 실행할 수 있습니다."
-                        )
-                    columns = [str(item[0]) for item in cursor.description]
-                    fetched = cursor.fetchmany(row_limit + 1)
+                    cursor = connection.execute_stream(query)
+                    try:
+                        if cursor.description is None:
+                            raise ValueError("결과 행을 반환하는 조회 SQL만 실행할 수 있습니다.")
+                        columns = [str(item[0]) for item in cursor.description]
+                        fetched = cursor.fetchmany(row_limit + 1)
+                    finally:
+                        cursor.close()
                 finally:
-                    cursor.close()
+                    connection.rollback()
+                    connection.execute("SET SESSION max_statement_time = 0").close()
         except BookOasisDatabaseError as error:
             message = str(error)
             if (
