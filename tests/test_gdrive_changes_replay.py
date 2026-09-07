@@ -136,6 +136,18 @@ class ChangesReplayTest(unittest.TestCase):
         self.assertEqual(1, self.poll())
         self.assertEqual(0, self.poll())
 
+    def test_uncertain_scan_is_not_retried_and_keeps_mapped_library(self):
+        event = self.events.enqueue({"action": "create", "item_type": "file", "path": "/books/book.cbz"}, 0)
+        result = {"success": False, "outcome_unknown": True, "retryable": False,
+                  "mapped_path": "/books/book.cbz", "libraries": [{"id": 7, "db_type": "general", "name": "Books"}],
+                  "scans": [{"message": "timeout"}]}
+        status = self.events.fail_or_retry(event, "결과 확인 필요", result=result)
+        self.assertEqual("failed", status)
+        self.assertEqual([], self.events.claim_ready())
+        saved = self.events.failed(event["id"])
+        self.assertEqual(7, saved["library_id"])
+        self.assertTrue(saved["result"]["outcome_unknown"])
+
 
 if __name__ == "__main__":
     unittest.main()

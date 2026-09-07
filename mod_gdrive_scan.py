@@ -825,32 +825,22 @@ class ModuleGDriveScan(PluginModuleBase):
             username=settings["bookoasis_username"],
             password=settings["bookoasis_password"],
         )
-        response = client.request_scan_path(
-            settings["webhook_token"],
-            library_id,
-            relative_path,
-            db_type=db_type,
-            force=False,
-            timeout=settings["gdrive_scan_path_timeout"],
-        )
-        if not response.get("success") and response.get("http_status") in {404, 405}:
-            admin_response = client.scan_library_path(
+        if settings["bookoasis_username"] and settings["bookoasis_password"]:
+            response = client.scan_library_path(
                 library_id,
                 relative_path,
                 db_type=db_type,
                 force=False,
                 timeout=settings["gdrive_scan_path_timeout"],
             )
-            if admin_response.get("success"):
-                response = {**admin_response, "mode": "admin_scan_path"}
-            elif response.get("http_status") in {404, 405} and admin_response.get("http_status") in {404, 405}:
-                full_response = client.request_scan(
-                    settings["webhook_token"],
-                    library_id,
-                    db_type=db_type,
-                    force=False,
-                )
-                response = {**full_response, "mode": "full_webhook_fallback"}
+            response = {**response, "mode": "admin_scan_path"}
+        else:
+            response = {"success": False, "http_status": 404}
+        if not response.get("success") and response.get("http_status") in {404, 405} and not response.get("outcome_unknown"):
+            response = client.request_scan_path(
+                settings["webhook_token"], library_id, relative_path,
+                db_type=db_type, force=False, timeout=settings["gdrive_scan_path_timeout"],
+            )
         P.logger.info(
             "[BookOasisMate] BookOasis 개별 경로 스캔 결과 "
             f"db={db_type} library_id={library_id} library={library_name} "
@@ -911,6 +901,7 @@ class ModuleGDriveScan(PluginModuleBase):
                         event,
                         result.get("message"),
                         max_attempts=max_attempts,
+                        result=result,
                     )
             try:
                 DiscordWebhookNotifier(

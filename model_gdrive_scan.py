@@ -146,10 +146,11 @@ class ModelGDriveScanEvent(ModelBase):
             F.db.session.commit()
 
     @classmethod
-    def fail_or_retry(cls, event, message, max_attempts=3):
+    def fail_or_retry(cls, event, message, max_attempts=3, result=None):
         attempts = int(event.get("attempts") or 0)
         max_attempts = max(1, min(int(max_attempts or 3), 20))
-        terminal = attempts >= max_attempts
+        result = result or {}
+        terminal = attempts >= max_attempts or result.get("outcome_unknown") or result.get("retryable") is False
         now = datetime.now()
         delay = min(300, max(5, 5 * (2 ** max(0, attempts - 1))))
         values = {
@@ -159,6 +160,15 @@ class ModelGDriveScanEvent(ModelBase):
             cls.ready_at: now if terminal else now + timedelta(seconds=delay),
             cls.error: str(message or "변경 이벤트 처리에 실패했습니다.")[:4000],
         }
+        if result:
+            first_library = (result.get("libraries") or [{}])[0]
+            values.update({
+                cls.db_type: first_library.get("db_type"),
+                cls.library_id: first_library.get("id"),
+                cls.library_name: first_library.get("name"),
+                cls.mapped_path: result.get("mapped_path") or "",
+                cls.result_json: json.dumps(result, ensure_ascii=False),
+            })
         with F.app.app_context():
             (
                 F.db.session.query(cls)

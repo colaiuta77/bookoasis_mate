@@ -14,6 +14,12 @@ MAX_PLUGIN_MANAGEMENT_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_ERROR_RESPONSE_BYTES = 64 * 1024
 
 
+def _uncertain_scan_result(result):
+    return {**result, "outcome_unknown": True, "retryable": False,
+            "message": "스캔 결과 확인 필요: 서버에서 스캔이 계속 실행 중일 수 있어 자동 재시도를 중단했습니다. "
+                       "BookOasis 작업·로그를 확인한 뒤 필요할 때 수동 재시도하세요. " + str(result.get("message") or "")}
+
+
 def _read_json_response(response, max_bytes=MAX_JSON_RESPONSE_BYTES):
     payload = response.read(max_bytes + 1)
     if len(payload) > max_bytes:
@@ -90,7 +96,7 @@ class BookOasisClient:
 
     def _admin_request(
         self, path, method="GET", form=None, payload=None, query=None,
-        retry=True, timeout=None, max_response_bytes=MAX_JSON_RESPONSE_BYTES,
+        retry=True, timeout=None, max_response_bytes=MAX_JSON_RESPONSE_BYTES, uncertain_on_error=False,
     ):
         login = self.login_admin()
         if not login.get("success"):
@@ -121,22 +127,26 @@ class BookOasisClient:
                         path, method=method, form=form, payload=payload,
                         query=query, retry=False, timeout=timeout,
                         max_response_bytes=max_response_bytes,
+                        uncertain_on_error=uncertain_on_error,
                     )
-            return self._admin_error(
+            result = self._admin_error(
                 self._http_error_message(error),
                 error.code,
                 retryable=error.code in {408, 429, 500, 502, 503, 504},
             )
+            return _uncertain_scan_result(result) if uncertain_on_error and error.code in {408, 502, 503, 504} else result
         except (IncompleteRead, RemoteDisconnected, HTTPException) as error:
-            return self._admin_error(
+            result = self._admin_error(
                 f"BookOasis 관리자 API 응답 수신 실패: {error}",
                 retryable=True,
             )
+            return _uncertain_scan_result(result) if uncertain_on_error else result
         except (URLError, ValueError, OSError) as error:
-            return self._admin_error(
+            result = self._admin_error(
                 f"BookOasis 관리자 API 요청 실패: {getattr(error, 'reason', error)}",
                 retryable=True,
             )
+            return _uncertain_scan_result(result) if uncertain_on_error else result
 
     @staticmethod
     def _valid_library_db_type(db_type):
@@ -287,6 +297,7 @@ class BookOasisClient:
                 "force": "true" if force else "false",
             },
             timeout=timeout,
+            uncertain_on_error=True,
         )
 
     def scan_all_libraries(self, db_type="general", force=False):
@@ -483,9 +494,10 @@ class BookOasisClient:
                 "mode": mode,
             }
         except HTTPError as error:
-            return {"success": False, "message": self._http_error_message(error), "http_status": error.code, "library_id": library_id, "db_type": db_type, "mode": "path_webhook"}
-        except (URLError, ValueError, OSError) as error:
-            return {"success": False, "message": f"경로 스캔 요청 실패: {getattr(error, 'reason', error)}", "retryable": True, "library_id": library_id, "db_type": db_type, "mode": "path_webhook"}
+            result = {"success": False, "message": self._http_error_message(error), "http_status": error.code, "library_id": library_id, "db_type": db_type, "mode": "path_webhook", "retryable": error.code in {408, 429, 500, 502, 503, 504}}
+            return _uncertain_scan_result(result) if error.code in {408, 502, 503, 504} else result
+        except (URLError, ValueError, OSError, HTTPException) as error:
+            return _uncertain_scan_result({"success": False, "message": f"경로 스캔 요청 실패: {getattr(error, 'reason', error)}", "library_id": library_id, "db_type": db_type, "mode": "path_webhook"})
 
     def inspect_cover(self, relative_path):
         relative = str(relative_path or "").split("?", 1)[0].replace("\\", "/").strip().lstrip("/")
