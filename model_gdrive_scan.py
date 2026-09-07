@@ -39,7 +39,7 @@ class ModelGDriveScanEvent(ModelBase):
         return now + timedelta(seconds=remainder)
 
     @classmethod
-    def enqueue(cls, event, buffer_seconds=60):
+    def _new_entity(cls, event, buffer_seconds=60):
         now = datetime.now()
         entity = cls()
         entity.created_at = now
@@ -53,6 +53,11 @@ class ModelGDriveScanEvent(ModelBase):
         entity.attempts = 0
         entity.result_json = "{}"
         entity.error = ""
+        return entity
+
+    @classmethod
+    def enqueue(cls, event, buffer_seconds=60):
+        entity = cls._new_entity(event, buffer_seconds)
         with F.app.app_context():
             F.db.session.add(entity)
             F.db.session.commit()
@@ -591,7 +596,21 @@ class ModelGDriveItemState(ModelBase):
     path = db.Column(db.Text)
     mime_type = db.Column(db.String)
     is_directory = db.Column(db.Integer, default=0)
+    content_signature = db.Column(db.Text)
     updated_at = db.Column(db.DateTime, default=datetime.now)
+
+    @classmethod
+    def ensure_schema(cls):
+        from sqlalchemy import inspect, text
+
+        with F.app.app_context():
+            engine = F.db.session.get_bind(mapper=cls)
+            with engine.begin() as connection:
+                schema = inspect(connection)
+                if "content_signature" not in {column["name"] for column in schema.get_columns(cls.__tablename__)}:
+                    connection.execute(text("ALTER TABLE gdrive_item_state ADD COLUMN content_signature TEXT"))
+                if "ix_gdrive_item_remote_file" not in {index["name"] for index in schema.get_indexes(cls.__tablename__)}:
+                    connection.execute(text("CREATE INDEX ix_gdrive_item_remote_file ON gdrive_item_state (remote, file_id)"))
 
     @classmethod
     def get(cls, remote, file_id):
@@ -619,6 +638,7 @@ class ModelGDriveItemState(ModelBase):
                 entity.path = str(item.get("path") or "")
                 entity.mime_type = str(item.get("mime_type") or "")
                 entity.is_directory = 1 if item.get("is_directory") else 0
+                entity.content_signature = str(item.get("content_signature") or "")
                 entity.updated_at = datetime.now()
                 F.db.session.add(entity)
             F.db.session.commit()
@@ -628,65 +648,55 @@ class ModelGDriveItemState(ModelBase):
         if not item.get("file_id"):
             return
         with F.app.app_context():
-            entity = (
-                F.db.session.query(cls)
-                .filter(cls.remote == str(remote))
-                .filter(cls.file_id == str(item["file_id"]))
-                .first()
-            )
-            if entity is None:
-                entity = cls()
-                entity.remote = str(remote)
-                entity.file_id = str(item["file_id"])
-                F.db.session.add(entity)
-            entity.parent_id = str(item.get("parent_id") or "")
-            entity.path = str(item.get("path") or "")
-            entity.mime_type = str(item.get("mime_type") or "")
-            entity.is_directory = 1 if item.get("is_directory") else 0
-            entity.updated_at = datetime.now()
+            cls._upsert(item, remote)
             F.db.session.commit()
 
     @classmethod
-    def delete(cls, remote, file_id):
-        with F.app.app_context():
-            F.db.session.query(cls).filter(cls.remote == str(remote)).filter(
-                cls.file_id == str(file_id)
-            ).delete(synchronize_session=False)
-            F.db.session.commit()
+    def _upsert(cls, item, remote):
+        entity = F.db.session.query(cls).filter(cls.remote == str(remote)).filter(
+            cls.file_id == str(item["file_id"])
+        ).first()
+        if entity is None:
+            entity = cls()
+            entity.remote = str(remote)
+            entity.file_id = str(item["file_id"])
+            F.db.session.add(entity)
+        entity.parent_id = str(item.get("parent_id") or "")
+        entity.path = str(item.get("path") or "")
+        entity.mime_type = str(item.get("mime_type") or "")
+        entity.is_directory = 1 if item.get("is_directory") else 0
+        entity.content_signature = str(item.get("content_signature") or "")
+        entity.updated_at = datetime.now()
 
     @classmethod
-    def move_prefix(cls, remote, old_path, new_path):
-        old_prefix = str(old_path or "").rstrip("/")
-        new_prefix = str(new_path or "").rstrip("/")
-        if not old_prefix or not new_prefix or old_prefix == new_prefix:
-            return 0
+    def record_change(cls, remote, file_id, previous, current, event, event_model, buffer_seconds):
+        # 이벤트와 비교 기준을 함께 저장해야 중간 장애 후 같은 페이지를 안전하게 재생할 수 있습니다.
+        old_path = str((previous or {}).get("path") or "")
+        new_path = str((current or {}).get("path") or "")
         with F.app.app_context():
-            rows = (
-                F.db.session.query(cls)
-                .filter(cls.remote == str(remote))
-                .filter(cls.path.like(f"{old_prefix}/%"))
-                .all()
-            )
-            for entity in rows:
-                entity.path = new_prefix + entity.path[len(old_prefix) :]
-                entity.updated_at = datetime.now()
-            F.db.session.commit()
-            return len(rows)
-
-    @classmethod
-    def delete_prefix(cls, remote, path):
-        prefix = str(path or "").rstrip("/")
-        if not prefix:
-            return 0
-        with F.app.app_context():
-            count = (
-                F.db.session.query(cls)
-                .filter(cls.remote == str(remote))
-                .filter((cls.path == prefix) | (cls.path.like(f"{prefix}/%")))
-                .delete(synchronize_session=False)
-            )
-            F.db.session.commit()
-            return int(count or 0)
+            try:
+                if previous and previous.get("is_directory") and old_path and old_path != new_path:
+                    escaped = old_path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    children = F.db.session.query(cls).filter(cls.remote == str(remote)).filter(
+                        cls.path.like(escaped + "/%", escape="\\")
+                    )
+                    if new_path:
+                        for child in children.all():
+                            child.path = new_path + child.path[len(old_path):]
+                    else:
+                        children.delete(synchronize_session=False)
+                if new_path:
+                    cls._upsert(current, remote)
+                else:
+                    F.db.session.query(cls).filter(cls.remote == str(remote)).filter(
+                        cls.file_id == str(file_id)
+                    ).delete(synchronize_session=False)
+                if event is not None:
+                    F.db.session.add(event_model._new_entity(event, buffer_seconds))
+                F.db.session.commit()
+            except Exception:
+                F.db.session.rollback()
+                raise
 
     @classmethod
     def clear_remote(cls, remote):
@@ -703,4 +713,5 @@ class ModelGDriveItemState(ModelBase):
             "mime_type": self.mime_type or "",
             "is_directory": bool(self.is_directory),
             "trashed": False,
+            "content_signature": self.content_signature or "",
         }

@@ -1,4 +1,5 @@
 # gd-poller 이벤트 수신 API와 영속 큐 기반 BookOasis 스캔 작업자를 제공합니다.
+import random
 import threading
 import time
 import traceback
@@ -9,6 +10,7 @@ from flask import jsonify, render_template
 from .bookoasis_client import BookOasisClient
 from .discord_notifier import DiscordWebhookError, DiscordWebhookNotifier
 from .gdrive_changes import (
+    GoogleDriveApiError,
     GoogleDriveChangesClient,
     GoogleDriveChangesWatcher,
     google_drive_state_remote,
@@ -66,6 +68,7 @@ class ModuleGDriveScan(PluginModuleBase):
         self._worker_lock = threading.RLock()
         self._last_cleanup_monotonic = 0.0
         self._last_builtin_poll_monotonic = 0.0
+        self._builtin_retry = {}
         self._worker_state = {
             "running": False,
             "last_started_at": None,
@@ -530,6 +533,7 @@ class ModuleGDriveScan(PluginModuleBase):
                         settings["gdrive_scan_buffer_seconds"],
                     ).reset()
                 self._last_builtin_poll_monotonic = 0.0
+                self._builtin_retry.clear()
                 self.wake_worker()
                 roots = [
                     self._builtin_state_view(
@@ -760,7 +764,13 @@ class ModuleGDriveScan(PluginModuleBase):
             raise RuntimeError("자체 변경 감지 상태 모델을 사용할 수 없습니다.")
         accepted = 0
         errors = []
+        waiting = False
         for client in self._builtin_clients(settings):
+            key = (getattr(client, "state_remote", client.remote), client.root_id)
+            failures, retry_at = self._builtin_retry.get(key, (0, 0))
+            if now < retry_at:
+                waiting = True
+                continue
             watcher = GoogleDriveChangesWatcher(
                 client, self.state_model, self.item_model, self.model,
                 parse_extensions(settings["gdrive_scan_extensions"]),
@@ -768,14 +778,23 @@ class ModuleGDriveScan(PluginModuleBase):
             )
             try:
                 accepted += watcher.poll_once()
+                self._builtin_retry.pop(key, None)
             except Exception as error:
+                if isinstance(error, GoogleDriveApiError) and (
+                    error.status_code == 429 or error.reason in {"userRateLimitExceeded", "rateLimitExceeded"}
+                ):
+                    failures = min(failures + 1, 5)
+                    delay = min(900, 60 * 2 ** (failures - 1)) + random.uniform(0, 10)
+                    self._builtin_retry[key] = (failures, time.monotonic() + delay)
+                    P.logger.warning(f"[BookOasisMate] Google Drive 호출 제한으로 {int(delay)}초 후 다시 확인합니다.")
                 errors.append(f"{client.remote}:{client.root_id} · {error}")
         if accepted:
             P.logger.info(f"[BookOasisMate] 자체 Google Drive 변경 이벤트 {accepted}건을 등록했습니다.")
         if errors:
             raise RuntimeError(" / ".join(errors))
-        with self._worker_lock:
-            self._worker_state["last_error"] = ""
+        if not waiting:
+            with self._worker_lock:
+                self._worker_state["last_error"] = ""
         return accepted
 
     def _scan_callback(self, db_type, library_id, library_name):
@@ -996,6 +1015,8 @@ class ModuleGDriveScan(PluginModuleBase):
         return data
 
     def plugin_load(self):
+        if self.item_model is not None:
+            self.item_model.ensure_schema()
         self.start_worker()
 
     def plugin_unload(self):

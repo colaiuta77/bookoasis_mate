@@ -229,6 +229,11 @@ def build_change_event(previous, current):
         return {"action": "create", "item_type": item_type, "path": new_path, "removed_path": ""}
     if old_path != new_path:
         return {"action": "rename", "item_type": item_type, "path": new_path, "removed_path": old_path}
+    if item_type == "directory" or (
+        current.get("content_signature")
+        and previous.get("content_signature") == current["content_signature"]
+    ):
+        return None
     return {"action": "edit", "item_type": item_type, "path": new_path, "removed_path": ""}
 
 
@@ -414,7 +419,7 @@ class GoogleDriveChangesClient:
 
     def list_changes(self, page_token):
         token = str(page_token or "").strip()
-        while token:
+        if token:
             payload = self._get(
                 "changes",
                 {
@@ -422,21 +427,18 @@ class GoogleDriveChangesClient:
                     "pageSize": 1000,
                     "includeRemoved": "true",
                     "includeItemsFromAllDrives": "true",
-                    "fields": "nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,mimeType,parents,trashed,modifiedTime))",
+                    "fields": "nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,mimeType,parents,trashed,modifiedTime,size,md5Checksum))",
                 },
             )
             for change in payload.get("changes") or []:
                 yield change, ""
             next_token = str(payload.get("nextPageToken") or "")
-            if not next_token:
-                yield None, str(payload.get("newStartPageToken") or token)
-                return
-            token = next_token
+            yield None, next_token or str(payload.get("newStartPageToken") or token)
 
     def file(self, file_id):
         return self._get(
             f"files/{file_id}",
-            {"fields": "id,name,mimeType,parents,trashed,modifiedTime", "supportsAllDrives": "true"},
+            {"fields": "id,name,mimeType,parents,trashed,modifiedTime,size,md5Checksum", "supportsAllDrives": "true"},
         )
 
     def validate_root(self):
@@ -462,6 +464,8 @@ class GoogleDriveChangesClient:
                     item_model.upsert(self.item_scope, parent)
             parent_path = str((parent or {}).get("path") or "")
         path = posixpath.join(parent_path, name) if parent_path and name else ""
+        content = {key: str(file_data[key]) for key in ("modifiedTime", "size", "md5Checksum", "mimeType")
+                   if file_data.get(key) is not None}
         return {
             "file_id": file_id,
             "parent_id": parent_id,
@@ -469,6 +473,8 @@ class GoogleDriveChangesClient:
             "mime_type": str(file_data.get("mimeType") or ""),
             "is_directory": str(file_data.get("mimeType") or "") == "application/vnd.google-apps.folder",
             "trashed": bool(file_data.get("trashed")),
+            "content_signature": json.dumps(content, sort_keys=True, separators=(",", ":"))
+            if file_data.get("modifiedTime") or file_data.get("md5Checksum") else "",
         }
 
 class GoogleDriveChangesWatcher:
@@ -500,14 +506,15 @@ class GoogleDriveChangesWatcher:
                 )
                 return 0
             accepted = 0
-            final_token = page_token
             try:
                 from .gdrive_scan import validate_event
             except ImportError:
                 from gdrive_scan import validate_event
             for change, token in self.client.list_changes(page_token):
                 if change is None:
-                    final_token = token or final_token
+                    self.state_model.save_cursor(
+                        self.state_remote, self.client.root_id, token or page_token, status="ready"
+                    )
                     continue
                 file_id = str(change.get("fileId") or "")
                 previous = self.item_model.get(self.client.item_scope, file_id)
@@ -516,27 +523,20 @@ class GoogleDriveChangesWatcher:
                 if current is not None and current.get("trashed"):
                     removed = True
                 event = build_change_event(previous, None if removed else current)
-                if event.get("path"):
+                if event is None and current == previous:
+                    continue
+                validated = None
+                if event and event.get("path"):
                     validated = validate_event(
                         event["action"], event["item_type"], event["path"], event.get("removed_path"), self.extensions
                     )
-                    if validated["relevant"]:
-                        self.event_model.enqueue(validated, buffer_seconds=self.buffer_seconds)
-                        accepted += 1
-                old_path = str((previous or {}).get("path") or "")
-                new_path = str((current or {}).get("path") or "")
-                if previous and previous.get("is_directory") and old_path and new_path and old_path != new_path:
-                    self.item_model.move_prefix(self.client.item_scope, old_path, new_path)
-                if removed or not new_path:
-                    if previous and previous.get("is_directory"):
-                        self.item_model.delete_prefix(self.client.item_scope, old_path)
-                    else:
-                        self.item_model.delete(self.client.item_scope, file_id)
-                elif current and current.get("path"):
-                    self.item_model.upsert(self.client.item_scope, current)
-            self.state_model.save_cursor(
-                self.state_remote, self.client.root_id, final_token, status="ready"
-            )
+                    if not validated["relevant"]:
+                        validated = None
+                self.item_model.record_change(
+                    self.client.item_scope, file_id, previous, None if removed else current,
+                    validated, self.event_model, self.buffer_seconds,
+                )
+                accepted += int(validated is not None)
             return accepted
         except Exception as error:
             if getattr(error, "permanent", False):
