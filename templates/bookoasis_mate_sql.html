@@ -1,10 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=sql-toolbar-2">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 <div class="doctor-card doctor-sql-card">
   <div class="doctor-sql-toolbar">
+    <label>SQL 모드
+      <select id="sql_mode" class="form-control form-control-sm" onchange="sqlChangeMode()">
+        <option value="safe">일반 조회</option>
+        {% if arg.get('database_engine', {}).get('resolved_engine') == 'mariadb' %}<option value="diagnostic">관리자 진단</option>{% endif %}
+      </select>
+    </label>
     <label>대상 DB
       <select id="sql_db_type" class="form-control form-control-sm">
         <option value="general">일반 DB</option>
@@ -13,7 +19,7 @@
         {% if arg.get('video_enabled') %}<option value="video">비디오북 DB</option>{% endif %}
       </select>
     </label>
-    <label>진단 프리셋
+    <label class="doctor-sql-preset">진단 프리셋
       <select id="sql_preset" class="form-control form-control-sm">
         <option value="">직접 입력</option>
       </select>
@@ -50,6 +56,7 @@
 
 <div class="doctor-card doctor-sql-warning">
   <strong>안전 제한</strong>
+  <span id="sql_mode_help">일반 조회 모드입니다. BookOasis DB만 조회합니다.</span>
   <span>SELECT·WITH·EXPLAIN QUERY PLAN 한 문장만 허용합니다. DB는 읽기 전용으로 열며 비밀번호 해시와 설정값은 조회할 수 없습니다.</span>
 </div>
 
@@ -76,13 +83,27 @@
 var sqlPresets = [];
 var sqlLastResult = null;
 
+function sqlChangeMode() {
+  var diagnostic = document.getElementById('sql_mode').value === 'diagnostic';
+  [['sql_max_rows', diagnostic ? [100,500,1000,5000] : [50,100,200,500], diagnostic ? 100 : 200, '행'],
+   ['sql_timeout', diagnostic ? [3,5,10,30] : [1,3,5,10], 3, '초']].forEach(function(spec) {
+    var select = document.getElementById(spec[0]);
+    bookoasisMateClear(select);
+    spec[1].forEach(function(value) { var option = new Option(value + spec[3], value); option.selected = value === spec[2]; select.add(option); });
+  });
+  document.getElementById('sql_mode_help').textContent = diagnostic
+    ? '허용된 시스템 진단 테이블만 조회합니다. MariaDB 계정 권한에 따라 일부 세션만 보일 수 있으며 SQL 본문에 민감 정보가 포함될 수 있습니다.'
+    : '일반 조회 모드입니다. BookOasis DB만 조회합니다.';
+  sqlLoadPresets();
+}
+
 function sqlSetRunning(running) {
   document.getElementById('sql_run_btn').disabled = running;
   document.getElementById('sql_running').style.display = running ? 'inline-flex' : 'none';
 }
 
 function sqlLoadPresets() {
-  bookoasisMateAjax('sql', 'presets', {}, function(ret) {
+  bookoasisMateAjax('sql', 'presets', {sql_mode:document.getElementById('sql_mode').value}, function(ret) {
     if (ret.ret !== 'success') return;
     sqlPresets = ret.data || [];
     sqlRefreshPresetOptions();
@@ -98,6 +119,7 @@ function sqlRefreshPresetOptions() {
   direct.textContent = '직접 입력';
   select.appendChild(direct);
   sqlPresets.forEach(function(item) {
+    if (item.mode && item.mode !== document.getElementById('sql_mode').value) return;
     var dbTypes = item.db_types || ['general', 'adult'];
     if (dbTypes.indexOf(dbType) === -1) return;
     var option = document.createElement('option');
@@ -171,6 +193,7 @@ function sqlRun() {
   bookoasisMateAjax('sql', 'execute', {
     db_type:document.getElementById('sql_db_type').value,
     query:query,
+    sql_mode:document.getElementById('sql_mode').value,
     max_rows:document.getElementById('sql_max_rows').value,
     timeout_seconds:document.getElementById('sql_timeout').value
   }, function(ret) {

@@ -908,6 +908,7 @@ class BookOasisPluginManager:
                             urlparse(server["base_url"]).netloc,
                             error,
                         )
+                    raise
         return items
 
     def _discover_gitea_server(self, server, topics):
@@ -1177,6 +1178,7 @@ class BookOasisPluginManager:
 
     def installed(self, settings):
         catalog_by_id = self._known_catalog_items(settings)
+        states = self._repository_cache(settings)
         update_items = self._read_installed_update_cache(settings).get("items") or {}
         result = []
         for plugin_id, installed in self._installed_catalog(settings).items():
@@ -1195,8 +1197,9 @@ class BookOasisPluginManager:
             latest = str(remote.get("version") or "").strip()
             item["latest_version"] = latest
             item["version_error"] = str(remote.get("error") or "")
+            item.update(states.get(self._repository_key(item)) or {"repository_status": "unchecked"})
             item["update_available"] = bool(
-                latest
+                item["repository_status"] != "missing" and latest
                 and installed.get("installed_version")
                 and self._version_tuple(installed["installed_version"])
                 < self._version_tuple(latest)
@@ -1473,6 +1476,42 @@ class BookOasisPluginManager:
         return ""
 
     @classmethod
+    def _repository_status(cls, item):
+        try:
+            if item.get("source") == "gitea":
+                owner, repo = cls.parse_gitea_repository(item["repository"])
+                response = cls._gitea_client(item.get("_settings") or {}, item.get("gitea_server_id"))._open(f"/api/v1/repos/{owner}/{repo}")
+            else:
+                owner, repo = cls.parse_github_url(item["repository"])
+                response = urlopen(Request(f"https://api.github.com/repos/{owner}/{repo}", headers={"User-Agent": "BookOasis-Mate-Plugin-Manager/1"}), timeout=8)
+            with response:
+                response.read(1)
+            return {"repository_status": "available", "repository_http_status": 200}
+        except Exception as error:
+            cause = error.__cause__ if isinstance(error.__cause__, HTTPError) else error
+            code = cause.code if isinstance(cause, HTTPError) else None
+            if isinstance(cause, HTTPError):
+                cause.close()
+            return {"repository_status": {404: "missing", 401: "auth_required", 403: "forbidden"}.get(code, "temporary_error"), "repository_http_status": code}
+
+    def _repository_cache(self, settings, items=None):
+        path = self._discovery_cache_path(settings, create=items is not None)
+        if not path:
+            return {}
+        path = Path(path).with_name("repository-status.json")
+        with self._lock:
+            if items is not None:
+                self._discovery.write_cache(path, {"items": items})
+            try:
+                return self._discovery.read_cache(path).get("items") or {}
+            except (OSError, ValueError):
+                return {}
+
+    @staticmethod
+    def _repository_key(item):
+        return "|".join([str(item.get("source") or "github"), str(item.get("gitea_server_id") or ""), str(item.get("repository") or "")])
+
+    @classmethod
     def _fetch_remote_metadata(cls, item):
         version = cls._fetch_remote_version(item)
         name = ""
@@ -1511,9 +1550,17 @@ class BookOasisPluginManager:
         installed = self._installed_catalog(settings)
         catalog_items = [copy.deepcopy(item) for item in self.CATALOG]
         catalog_items.extend(self._load_custom_catalog(settings))
+        known = {item["id"] for item in catalog_items}
+        catalog_items.extend(item for item in self._discovered_catalog_items(settings) if item["id"] not in known)
+        states = self._repository_cache(settings)
         remote_metadata = {}
         remote_errors = {}
         if refresh_remote:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                checks = {executor.submit(self._repository_status, dict(item, _settings=settings)): self._repository_key(item) for item in catalog_items}
+                for future, key in checks.items():
+                    states[key] = future.result()
+            self._repository_cache(settings, states)
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = {
                     executor.submit(
@@ -1521,6 +1568,7 @@ class BookOasisPluginManager:
                         dict(item, _settings=settings) if item.get("source") == "gitea" else item,
                     ): item["id"]
                     for item in catalog_items
+                    if states.get(self._repository_key(item), {}).get("repository_status") == "available"
                 }
                 for future, plugin_id in futures.items():
                     try:
@@ -1533,13 +1581,16 @@ class BookOasisPluginManager:
             local = installed.get(item["id"]) or {}
             item.update(local)
             item["installed"] = bool(local)
+            item.update(states.get(self._repository_key(original)) or {"repository_status": "unchecked"})
+            if not local and item["repository_status"] == "missing":
+                continue
             if item.get("source") == "gitea":
                 item["repository_url"] = self._gitea_repository_url(settings, item)
             else:
                 item["repository_url"] = item.get("repository", "")
             item["installed_version"] = local.get("installed_version", "")
             remote = remote_metadata.get(item["id"]) or {}
-            item["latest_version"] = remote.get("version") or item["catalog_version"]
+            item["latest_version"] = remote.get("version") or item.get("catalog_version", "")
             if remote.get("name"):
                 item["name"] = remote["name"]
             item["version_error"] = remote_errors.get(item["id"], "")
@@ -1549,7 +1600,7 @@ class BookOasisPluginManager:
                 else True
             )
             item["update_available"] = bool(
-                item["installed_version"]
+                item["repository_status"] != "missing" and item["installed_version"]
                 and self._version_tuple(item["installed_version"])
                 < self._version_tuple(item["latest_version"])
             )
@@ -1694,6 +1745,9 @@ class BookOasisPluginManager:
 
     def start_catalog_install(self, plugin_id, settings):
         item = self._catalog_item(plugin_id, settings)
+        state = self._repository_cache(settings).get(self._repository_key(item)) or {}
+        if state.get("repository_status") == "missing":
+            raise PluginManagerError("저장소가 없거나 접근할 수 없어 설치할 수 없습니다. 전체 새로고침으로 다시 확인해 주세요.")
         self._validate_catalog_dependencies(item, settings)
         source = str(item.get("source") or "github").lower()
         spec = {

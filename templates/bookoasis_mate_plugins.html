@@ -306,6 +306,7 @@ function pluginManagerRenderCatalogCards(items) {
     if (item.installed) badges.appendChild(pluginManagerBadge('설치됨 ' + (item.installed_version || '버전 미상'), 'doctor-plugin-badge-installed'));
     if (item.update_available) badges.appendChild(pluginManagerBadge('업데이트 ' + item.latest_version, 'doctor-plugin-badge-update'));
     if (item.version_error) badges.appendChild(pluginManagerBadge('VERSION 확인 실패', 'doctor-plugin-badge-warning'));
+    if (item.repository_status && !['available', 'unchecked'].includes(item.repository_status)) badges.appendChild(pluginManagerBadge(({missing:'저장소 없음·접근 불가',auth_required:'인증 필요',forbidden:'권한·요청 제한',temporary_error:'원격 확인 실패'})[item.repository_status], 'doctor-plugin-badge-warning'));
     if (item.validation_error) badges.appendChild(pluginManagerBadge('구조 확인 필요', 'doctor-plugin-badge-warning'));
     (item.dependencies || []).forEach(function(value) { badges.appendChild(pluginManagerBadge('필수 ' + value, '')); });
     card.appendChild(badges);
@@ -350,6 +351,7 @@ function pluginManagerRenderInstalledCards(items) {
     }
     if (item.update_available) badges.appendChild(pluginManagerBadge('업데이트 가능 ' + item.latest_version, 'doctor-plugin-badge-update'));
     if (item.version_error) badges.appendChild(pluginManagerBadge('업데이트 확인 실패', 'doctor-plugin-badge-warning'));
+    if (item.repository_status && !['available', 'unchecked'].includes(item.repository_status)) badges.appendChild(pluginManagerBadge(({missing:'저장소 없음·접근 불가 · 업데이트 불가',auth_required:'인증 필요',forbidden:'권한·요청 제한',temporary_error:'원격 확인 실패'})[item.repository_status], 'doctor-plugin-badge-warning'));
     if (item.runtime_available) {
       if (item.custom_settings_ui) badges.appendChild(pluginManagerBadge('BookOasis 전용 설정', 'doctor-plugin-badge-warning'));
       else if ((item.config_fields || []).length) badges.appendChild(pluginManagerBadge('Mate 설정 가능', 'doctor-plugin-badge-installed'));
@@ -406,13 +408,14 @@ function pluginManagerRenderOverview() {
   }
 }
 
-function pluginManagerLoadCatalog(traceId) {
+function pluginManagerLoadCatalog(traceId, refreshRemote) {
   traceId = traceId || '';
   $('#plugin_catalog_status').addClass('doctor-query-status-active').text('카탈로그 불러오는 중');
-  bookoasisMateAjax('plugins', 'catalog', {refresh_remote:'false', trace_id:traceId}, function(ret) {
+  bookoasisMateAjax('plugins', 'catalog', {refresh_remote:refreshRemote ? 'true' : 'false', trace_id:traceId}, function(ret) {
     var payload = ret.data || {};
     pluginCatalogItems = payload.items || [];
     pluginManagerRenderOverview();
+    if (refreshRemote) pluginManagerLoadInstalled(false);
     var message = '미설치 플러그인 ' + Number((payload.items || []).length).toLocaleString() + '개';
     if (payload.topic_count) message += ' · Topic 신규 ' + Number(payload.topic_count).toLocaleString() + '개';
     if (payload.fetched_at) message += ' · Topic 캐시 ' + payload.fetched_at;
@@ -776,7 +779,7 @@ $('#plugin_custom_save').click(function() {
   });
 });
 $('.doctor-plugin-summary-filter').click(function() { pluginOverviewFilter = this.dataset.pluginFilter || 'all'; pluginManagerRenderOverview(); });
-$('#plugin_installed_refresh').click(function() { pluginManagerLoadInstalled(false); pluginManagerLoadCatalog(); });
+$('#plugin_installed_refresh').click(function() { pluginManagerLoadInstalled(false); pluginManagerLoadCatalog('', true); pluginManagerStartDiscoveryRefresh(); });
 $('#plugin_installed_update_refresh').click(pluginManagerStartInstalledUpdateRefresh);
 $('#plugin_history_refresh').click(pluginManagerLoadHistory);
 

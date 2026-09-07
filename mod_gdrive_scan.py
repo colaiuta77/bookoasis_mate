@@ -1,4 +1,5 @@
 # gd-poller 이벤트 수신 API와 영속 큐 기반 BookOasis 스캔 작업자를 제공합니다.
+import random
 import threading
 import time
 import traceback
@@ -9,6 +10,7 @@ from flask import jsonify, render_template
 from .bookoasis_client import BookOasisClient
 from .discord_notifier import DiscordWebhookError, DiscordWebhookNotifier
 from .gdrive_changes import (
+    GoogleDriveApiError,
     GoogleDriveChangesClient,
     GoogleDriveChangesWatcher,
     google_drive_state_remote,
@@ -66,6 +68,7 @@ class ModuleGDriveScan(PluginModuleBase):
         self._worker_lock = threading.RLock()
         self._last_cleanup_monotonic = 0.0
         self._last_builtin_poll_monotonic = 0.0
+        self._builtin_retry = {}
         self._worker_state = {
             "running": False,
             "last_started_at": None,
@@ -530,6 +533,7 @@ class ModuleGDriveScan(PluginModuleBase):
                         settings["gdrive_scan_buffer_seconds"],
                     ).reset()
                 self._last_builtin_poll_monotonic = 0.0
+                self._builtin_retry.clear()
                 self.wake_worker()
                 roots = [
                     self._builtin_state_view(
@@ -760,7 +764,13 @@ class ModuleGDriveScan(PluginModuleBase):
             raise RuntimeError("자체 변경 감지 상태 모델을 사용할 수 없습니다.")
         accepted = 0
         errors = []
+        waiting = False
         for client in self._builtin_clients(settings):
+            key = (getattr(client, "state_remote", client.remote), client.root_id)
+            failures, retry_at = self._builtin_retry.get(key, (0, 0))
+            if now < retry_at:
+                waiting = True
+                continue
             watcher = GoogleDriveChangesWatcher(
                 client, self.state_model, self.item_model, self.model,
                 parse_extensions(settings["gdrive_scan_extensions"]),
@@ -768,14 +778,23 @@ class ModuleGDriveScan(PluginModuleBase):
             )
             try:
                 accepted += watcher.poll_once()
+                self._builtin_retry.pop(key, None)
             except Exception as error:
+                if isinstance(error, GoogleDriveApiError) and (
+                    error.status_code == 429 or error.reason in {"userRateLimitExceeded", "rateLimitExceeded"}
+                ):
+                    failures = min(failures + 1, 5)
+                    delay = min(900, 60 * 2 ** (failures - 1)) + random.uniform(0, 10)
+                    self._builtin_retry[key] = (failures, time.monotonic() + delay)
+                    P.logger.warning(f"[BookOasisMate] Google Drive 호출 제한으로 {int(delay)}초 후 다시 확인합니다.")
                 errors.append(f"{client.remote}:{client.root_id} · {error}")
         if accepted:
             P.logger.info(f"[BookOasisMate] 자체 Google Drive 변경 이벤트 {accepted}건을 등록했습니다.")
         if errors:
             raise RuntimeError(" / ".join(errors))
-        with self._worker_lock:
-            self._worker_state["last_error"] = ""
+        if not waiting:
+            with self._worker_lock:
+                self._worker_state["last_error"] = ""
         return accepted
 
     def _scan_callback(self, db_type, library_id, library_name):
@@ -806,32 +825,22 @@ class ModuleGDriveScan(PluginModuleBase):
             username=settings["bookoasis_username"],
             password=settings["bookoasis_password"],
         )
-        response = client.request_scan_path(
-            settings["webhook_token"],
-            library_id,
-            relative_path,
-            db_type=db_type,
-            force=False,
-            timeout=settings["gdrive_scan_path_timeout"],
-        )
-        if not response.get("success") and response.get("http_status") in {404, 405}:
-            admin_response = client.scan_library_path(
+        if settings["bookoasis_username"] and settings["bookoasis_password"]:
+            response = client.scan_library_path(
                 library_id,
                 relative_path,
                 db_type=db_type,
                 force=False,
                 timeout=settings["gdrive_scan_path_timeout"],
             )
-            if admin_response.get("success"):
-                response = {**admin_response, "mode": "admin_scan_path"}
-            elif response.get("http_status") in {404, 405} and admin_response.get("http_status") in {404, 405}:
-                full_response = client.request_scan(
-                    settings["webhook_token"],
-                    library_id,
-                    db_type=db_type,
-                    force=False,
-                )
-                response = {**full_response, "mode": "full_webhook_fallback"}
+            response = {**response, "mode": "admin_scan_path"}
+        else:
+            response = {"success": False, "http_status": 404}
+        if not response.get("success") and response.get("http_status") in {404, 405} and not response.get("outcome_unknown"):
+            response = client.request_scan_path(
+                settings["webhook_token"], library_id, relative_path,
+                db_type=db_type, force=False, timeout=settings["gdrive_scan_path_timeout"],
+            )
         P.logger.info(
             "[BookOasisMate] BookOasis 개별 경로 스캔 결과 "
             f"db={db_type} library_id={library_id} library={library_name} "
@@ -892,6 +901,7 @@ class ModuleGDriveScan(PluginModuleBase):
                         event,
                         result.get("message"),
                         max_attempts=max_attempts,
+                        result=result,
                     )
             try:
                 DiscordWebhookNotifier(
@@ -996,6 +1006,8 @@ class ModuleGDriveScan(PluginModuleBase):
         return data
 
     def plugin_load(self):
+        if self.item_model is not None:
+            self.item_model.ensure_schema()
         self.start_worker()
 
     def plugin_unload(self):

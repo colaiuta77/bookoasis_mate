@@ -165,6 +165,7 @@
       <div class="doctor-section doctor-card">
         <h4>표지 검사</h4>
         {{ macros.setting_checkbox('cover_root_custom', '커스텀 표지 경로', value=arg.get('cover_root_custom', 'False'), desc=['기본 경로가 아닌 커스텀 경로 사용 시 체크합니다.']) }}
+        {{ macros.setting_input_text('cover_storage_remote_root', '원격 커버 경로 확인값', value=arg.get('cover_storage_remote_root', ''), desc=['연결 테스트에 표시된 BookOasis 커버 경로를 입력합니다. 기본 경로는 &lt;default&gt;입니다.', 'Mate 표지 디렉터리가 같은 저장소로 마운트된 것을 직접 확인한 뒤 저장하세요. 원격 경로로 Mate 경로를 자동 변경하지 않습니다.']) }}
         {{ macros.setting_input_text_and_buttons('cover_root_path', '표지 디렉터리', [['select_cover_root_path_btn', '경로 선택']], value=arg['cover_root_path'], desc=['기본값은 <기본 경로>/covers로 자동 설정됩니다.', '커스텀 표지 경로를 체크하면 직접 입력하거나 경로를 선택할 수 있습니다.']) }}
         {{ macros.setting_input_int('cover_min_width', '최소 표지 너비', value=arg['cover_min_width'], desc=['이 값보다 작으면 저해상도로 표시합니다.']) }}
         {{ macros.setting_input_int('cover_min_height', '최소 표지 높이', value=arg['cover_min_height'], desc=['이 값보다 작으면 저해상도로 표시합니다.']) }}
@@ -1093,6 +1094,8 @@ $('#connection_test_btn').click(function(e) {
     lines.push(bookoasisMateEscape('관리자 API: ' + (ret.data.admin_api.success ? '로그인 성공' : ret.data.admin_api.message)));
     lines.push(bookoasisMateEscape('로그 디렉터리: ' + (!ret.data.log_root.configured ? '미설정' : (ret.data.log_root.readable ? '읽기 가능 · ' + ret.data.log_root.files.length + '개 파일' : ret.data.log_root.error))));
     lines.push(bookoasisMateEscape('표지 디렉터리: ' + (!ret.data.cover_root.configured ? '미설정' : (ret.data.cover_root.readable ? '읽기 가능' : '찾을 수 없음'))));
+    var checks = ret.data.integration || {};
+    Object.keys(checks).forEach(function(key) { var check = checks[key]; lines.push(bookoasisMateEscape(check.message + (check.remote_root ? ' 원격 경로 ' + check.remote_root : '') + (check.remote ? ' 원격 ' + check.remote + ' / Mate ' + check.local : ''))); });
     showModal(lines.join('<br>'), 'BookOasis 연결 테스트', false);
   });
 });

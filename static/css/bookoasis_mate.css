@@ -256,8 +256,8 @@
 .doctor-gdrive-status-failed { color:#dc3545; background:rgba(220,53,69,.12); }
 .doctor-gdrive-json { min-height:260px; max-height:68vh; margin:14px 0 0; overflow:auto; padding:14px; border-radius:6px; background:#111827; color:#d1fae5; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.55 Consolas, Monaco, monospace; }
 .doctor-sql-card { margin-bottom:12px; }
-.doctor-sql-toolbar { display:grid; grid-template-columns:150px minmax(260px,1fr) 120px 120px auto; gap:10px; align-items:end; }
-.doctor-sql-toolbar label { margin:0; color:#495057; font-size:.82rem; font-weight:600; }
+.doctor-sql-toolbar { display:grid; grid-template-columns:140px 140px minmax(260px,1fr) 100px 80px auto; gap:10px; align-items:end; }
+.doctor-sql-toolbar label { min-width:0; margin:0; color:#495057; font-size:.82rem; font-weight:600; }
 .doctor-sql-toolbar label .form-control { margin-top:5px; }
 .doctor-sql-wide { align-self:center; margin-top:20px !important; white-space:nowrap; }
 .doctor-sql-query { margin-top:10px; resize:vertical; font:13px/1.55 Consolas, Monaco, monospace; }
@@ -394,6 +394,8 @@
   .doctor-statistics-grid { grid-template-columns:1fr; }
 }
 @media (max-width: 900px) {
+  .doctor-sql-toolbar { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .doctor-sql-toolbar .doctor-sql-preset { grid-column:1 / -1; }
   .doctor-db-action-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .doctor-summary-content { grid-template-columns:1fr; }
   .doctor-summary-health-card { min-height:360px; }

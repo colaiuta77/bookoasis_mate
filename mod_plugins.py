@@ -74,9 +74,13 @@ class ModulePlugins(PluginModuleBase):
             known_ids.add(plugin_id)
             merged.append(item)
 
-        topic_count = 0
+        topic_count = sum(1 for item in merged if item.get("discovered"))
+        repository_states = self.manager._repository_cache(settings)
         for source_item in discovery.get("items") or []:
             item = dict(source_item)
+            item.update(repository_states.get(self.manager._repository_key(item)) or {})
+            if item.get("repository_status") == "missing":
+                continue
             plugin_id = str(item.get("id") or "").strip()
             if not plugin_id or item.get("installed") or plugin_id in known_ids:
                 continue

@@ -44,7 +44,7 @@ class ModuleSql(PluginModuleBase):
         try:
             tool = self._tool()
             if command == "presets":
-                return jsonify({"ret": "success", "data": tool.presets()})
+                return jsonify({"ret": "success", "data": tool.presets(mode=req.form.get("sql_mode", "safe"))})
             if command == "execute":
                 query = req.form.get("query", "")
                 query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:12]
@@ -57,6 +57,7 @@ class ModuleSql(PluginModuleBase):
                     query,
                     max_rows=req.form.get("max_rows", 200),
                     timeout_seconds=req.form.get("timeout_seconds", 3),
+                    mode=req.form.get("sql_mode", "safe"),
                 )
                 return jsonify(
                     {

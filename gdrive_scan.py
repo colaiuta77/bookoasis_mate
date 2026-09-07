@@ -453,6 +453,11 @@ def event_scan_targets(event, libraries):
             relative_path = directory[len(root) :].lstrip("/")
         else:
             continue
+        roots = {item["root"] for item in libraries
+                 if (item["db_type"], item["id"]) == (library["db_type"], library["id"])}
+        if len(roots) > 1:
+            # 현재 BookOasis API는 상대 경로에 대응하는 루트를 지정할 수 없습니다.
+            relative_path = ""
         key = (library["db_type"], library["id"], relative_path)
         if key in seen:
             continue
@@ -675,7 +680,9 @@ class GDriveScanProcessor:
                             "success": False,
                             "message": str(error),
                         }
-            operation_results.setdefault(event_id, []).append(operation_cache[key])
+            operation_results.setdefault(event_id, []).append({
+                **operation_cache[key], "operation": operation, "path": path,
+            })
 
         fallback_libraries = {
             (target["library"]["db_type"], target["library"]["id"])
@@ -747,9 +754,12 @@ class GDriveScanProcessor:
                 for operation_result in operation_results.get(event_id, [])
             )
             if vfs_failed:
+                reasons = sorted({item.get("message") or "알 수 없는 VFS 오류"
+                                  for event_id in related_event_ids
+                                  for item in operation_results.get(event_id, []) if not item.get("success")})
                 scan_results[request_key] = {
                     "success": False,
-                    "message": "VFS 갱신에 실패하여 BookOasis 스캔 요청을 보류했습니다.",
+                    "message": "VFS 갱신에 실패하여 BookOasis 스캔 요청을 보류했습니다. " + "; ".join(reasons),
                     "response": {},
                     "mode": mode,
                     "path": relative_path,
@@ -802,6 +812,8 @@ class GDriveScanProcessor:
             ]
             results[event_id] = {
                 "success": success,
+                "outcome_unknown": any(item.get("response", {}).get("outcome_unknown") for item in failed_scans),
+                "retryable": all(item.get("response", {}).get("retryable", True) for item in failed_scans),
                 "message": "; ".join(messages) if messages else "변경 이벤트를 처리했습니다.",
                 "mapped_path": event.get("mapped_path"),
                 "libraries": event["libraries"],
