@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=sql-toolbar-2">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 <div class="doctor-card doctor-sql-card">
@@ -19,7 +19,7 @@
         {% if arg.get('video_enabled') %}<option value="video">비디오북 DB</option>{% endif %}
       </select>
     </label>
-    <label>진단 프리셋
+    <label class="doctor-sql-preset">진단 프리셋
       <select id="sql_preset" class="form-control form-control-sm">
         <option value="">직접 입력</option>
       </select>

@@ -3,9 +3,21 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 from sql_query import ReadOnlySqlTool, validate_read_only_sql
+from bookoasis_db import BookOasisDatabaseError
 
 
 class DiagnosticTest(unittest.TestCase):
+    def test_process_privilege_error_is_actionable(self):
+        tool = ReadOnlySqlTool({'db_engine': 'mariadb'})
+        connection = Mock()
+        driver_error = RuntimeError(1227, 'Access denied; you need (at least one of) the PROCESS privilege(s) for this operation')
+        wrapped = BookOasisDatabaseError('MariaDB 스트리밍 조회 실패')
+        wrapped.__cause__ = driver_error
+        connection.execute_stream.side_effect = wrapped
+        tool.database_adapter.connect = Mock(return_value=connection)
+        with self.assertRaisesRegex(ValueError, 'PROCESS 권한'):
+            tool.execute('general', 'SELECT * FROM information_schema.INNODB_TRX', mode='diagnostic')
+
     def test_diagnostic_allowlist_and_sensitive_guards(self):
         guard = ReadOnlySqlTool._guard_mariadb_sensitive
         for query in (

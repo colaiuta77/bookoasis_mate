@@ -464,6 +464,9 @@ class ReadOnlySqlTool:
             presets.append(preset)
         if mode == "diagnostic":
             presets.extend({"id": "diagnostic_" + key, "name": name, "sql": query, "mode": "diagnostic", "db_types": ["general", "adult", "audiobook", "video"], "description": "MariaDB 서버의 권한과 버전에 따라 표시 범위와 지원 테이블이 다릅니다."} for key, name, query in DIAGNOSTIC_PRESETS)
+            for preset in presets:
+                if preset["id"] == "diagnostic_transactions":
+                    preset["description"] = "InnoDB 트랜잭션 조회에는 Mate의 MariaDB 접속 계정에 PROCESS 권한이 필요합니다. 관리자 진단 모드 선택만으로 권한이 부여되지는 않습니다."
         return presets
 
     def _target(self, db_type):
@@ -652,6 +655,12 @@ class ReadOnlySqlTool:
                     connection.execute("SET SESSION max_statement_time = 0").close()
         except BookOasisDatabaseError as error:
             message = str(error)
+            driver_args = getattr(error.__cause__, "args", ())
+            if len(driver_args) >= 2 and driver_args[0] == 1227 and "PROCESS" in str(driver_args[1]).upper():
+                raise ValueError(
+                    "MariaDB 접속 계정의 PROCESS 권한이 없어 이 진단 쿼리를 실행할 수 없습니다. "
+                    "DB 관리자에게 해당 계정의 권한을 확인해 달라고 요청하세요. Mate는 DB 권한을 자동 부여하지 않습니다."
+                ) from error
             if (
                 "max_statement_time" in message.lower()
                 or "query execution was interrupted" in message.lower()
