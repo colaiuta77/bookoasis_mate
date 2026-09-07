@@ -528,6 +528,7 @@ class GDriveScanProcessor:
         path_scan_callback=None,
         rc_client=None,
         logger=None,
+        should_stop=None,
     ):
         self.settings = dict(settings or {})
         self.scan_callback = scan_callback
@@ -536,6 +537,7 @@ class GDriveScanProcessor:
             self.settings.get("gdrive_scan_rc_timeout", 30)
         )
         self.logger = logger
+        self.should_stop = should_stop or (lambda: False)
         self.path_mappings = parse_path_mappings(
             self.settings.get("gdrive_scan_path_mappings", "")
         )
@@ -657,6 +659,8 @@ class GDriveScanProcessor:
         operation_results = {}
         operation_cache = {}
         for event_id, operation, path, item_type in operations:
+            if self.should_stop():
+                break
             key = (operation, path, item_type)
             if key not in operation_cache:
                 rule = find_vfs_rule(path, self.vfs_rules)
@@ -745,6 +749,8 @@ class GDriveScanProcessor:
 
         scan_results = {}
         for request_key, request_data in scan_requests.items():
+            if self.should_stop():
+                break
             mode, db_type, library_id, relative_path = request_key
             library = request_data["library"]
             related_event_ids = request_data["event_ids"]
@@ -798,12 +804,25 @@ class GDriveScanProcessor:
             event_scan_results = [
                 scan_results[key]
                 for key in event_scan_keys.get(event_id, [])
+                if key in scan_results
             ]
+            if len(event_scan_results) < len(event_scan_keys.get(event_id, [])):
+                submitted = bool(event_scan_results)
+                results[event_id] = {
+                    "success": False, "cancelled": not submitted,
+                    "retryable": not submitted,
+                    "message": "작업 중지로 미처리 항목을 재시도 대기로 반환했습니다." if not submitted else "작업 중지 전에 일부 스캔을 요청했습니다. 중복 요청 방지를 위해 결과를 확인한 뒤 수동 재시도해 주세요.",
+                    "libraries": event["libraries"], "mapped_path": event.get("mapped_path"),
+                    "scans": event_scan_results,
+                    "vfs": operation_results.get(event_id, []),
+                }
+                continue
             event_operation_results = operation_results.get(event_id, [])
             failed_operations = [
                 item for item in event_operation_results if not item.get("success")
             ]
             failed_scans = [item for item in event_scan_results if not item.get("success")]
+            cancelled_scans = [item for item in event_scan_results if item.get("response", {}).get("cancelled")]
             success = not failed_operations and not failed_scans
             messages = [
                 item.get("message")
@@ -812,8 +831,9 @@ class GDriveScanProcessor:
             ]
             results[event_id] = {
                 "success": success,
+                "cancelled": bool(failed_scans) and all(item.get("response", {}).get("cancelled") for item in event_scan_results),
                 "outcome_unknown": any(item.get("response", {}).get("outcome_unknown") for item in failed_scans),
-                "retryable": all(item.get("response", {}).get("retryable", True) for item in failed_scans),
+                "retryable": all(item.get("response", {}).get("retryable", True) for item in failed_scans) and not (cancelled_scans and len(cancelled_scans) < len(event_scan_results)),
                 "message": "; ".join(messages) if messages else "변경 이벤트를 처리했습니다.",
                 "mapped_path": event.get("mapped_path"),
                 "libraries": event["libraries"],

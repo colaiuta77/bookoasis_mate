@@ -12,7 +12,7 @@
 .gdrive-scan-root-heading h5 { margin:0 0 4px; color:inherit; font-size:1rem; }
 .gdrive-scan-root-actions { flex:0 0 auto; }
 .gdrive-scan-builtin-root { margin-bottom:10px; padding:14px; }
-.gdrive-scan-root-grid { display:grid; grid-template-columns:minmax(125px,.7fr) minmax(170px,1fr) minmax(180px,1fr) minmax(235px,1.35fr) auto; gap:10px; align-items:start; }
+.gdrive-scan-root-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; align-items:start; }
 .gdrive-scan-root-field { display:block; min-width:0; margin:0; }
 .gdrive-scan-root-field > span { display:block; min-height:20px; font-weight:600; }
 .gdrive-scan-root-field .form-control { width:100%; margin-top:4px; }

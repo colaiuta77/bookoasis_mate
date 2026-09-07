@@ -8,6 +8,7 @@ from datetime import datetime
 from flask import jsonify, render_template
 
 from .bookoasis_client import BookOasisClient
+from .gdrive_activity import GoogleDriveActivityClient
 from .discord_notifier import DiscordWebhookError, DiscordWebhookNotifier
 from .gdrive_changes import (
     GoogleDriveApiError,
@@ -66,6 +67,7 @@ class ModuleGDriveScan(PluginModuleBase):
         self._wake_event = threading.Event()
         self._worker_thread = None
         self._worker_lock = threading.RLock()
+        self._queue_maintenance_lock = threading.Lock()
         self._last_cleanup_monotonic = 0.0
         self._last_builtin_poll_monotonic = 0.0
         self._builtin_retry = {}
@@ -100,6 +102,7 @@ class ModuleGDriveScan(PluginModuleBase):
     def _builtin_state_view(root, state=None):
         state = state or {}
         return {
+            "detection_mode": str(root.get("detection_mode") or "changes"),
             "remote": str(root.get("remote") or ""),
             "source_remote": str(root.get("source_remote") or root.get("remote") or ""),
             "root_id": str(root.get("root_id") or ""),
@@ -216,7 +219,7 @@ class ModuleGDriveScan(PluginModuleBase):
                 self._builtin_state_view(
                     root,
                     self.state_model.get(
-                        google_drive_state_remote(root["remote"], root.get("source_remote")),
+                        google_drive_state_remote(root["remote"], root.get("source_remote"), root.get("detection_mode", "changes")),
                         root["root_id"],
                     )
                     if self.state_model is not None
@@ -510,6 +513,7 @@ class ModuleGDriveScan(PluginModuleBase):
                             {
                                 "remote": client.remote,
                                 "source_remote": source_remote,
+                                "detection_mode": getattr(client, "detection_mode", "changes"),
                                 "root_id": client.root_id,
                                 "remote_path": client.remote_path,
                                 "local_root": client.local_root,
@@ -540,6 +544,7 @@ class ModuleGDriveScan(PluginModuleBase):
                         {
                             "remote": client.remote,
                             "source_remote": getattr(client, "source_remote", client.remote),
+                            "detection_mode": getattr(client, "detection_mode", "changes"),
                             "root_id": client.root_id,
                             "remote_path": client.remote_path,
                             "local_root": client.local_root,
@@ -594,6 +599,11 @@ class ModuleGDriveScan(PluginModuleBase):
                 return jsonify(
                     {"ret": "success", "msg": "변경 감지 작업자를 깨웠습니다."}
                 )
+            if command == "stop":
+                P.ModelSetting.set("gdrive_scan_enabled", "False")
+                self._stop_event.set()
+                self._wake_event.set()
+                return jsonify({"ret": "success", "msg": "연동 사용을 끄고 중지를 요청했습니다. 현재 요청 결과를 저장한 뒤 멈춥니다."})
             if command == "delete":
                 deleted = self.model.delete_terminal(req.form.get("id"))
                 return jsonify(
@@ -604,6 +614,12 @@ class ModuleGDriveScan(PluginModuleBase):
                         else "완료 또는 최종 실패 이벤트만 삭제할 수 있습니다.",
                     }
                 )
+            if command == "clear_pending":
+                if req.form.get("confirm") != "clear_pending":
+                    raise ValueError("대기·재시도 이벤트 전체 삭제를 확인해 주세요.")
+                deleted = self._clear_pending_events()
+                P.logger.info(f"[BookOasisMate] 대기·재시도 이벤트 {deleted}건을 사용자가 삭제했습니다.")
+                return jsonify({"ret": "success", "msg": f"대기·재시도 이벤트 {deleted}건을 삭제했습니다.", "deleted": deleted})
             if command in {"cleanup", "clear"}:
                 settings = self._settings()
                 deleted = self.model.cleanup_terminal(
@@ -734,7 +750,7 @@ class ModuleGDriveScan(PluginModuleBase):
             timeout=settings["gdrive_scan_rc_timeout"],
         )
         return [
-            GoogleDriveChangesClient(
+            (GoogleDriveActivityClient if root.get("detection_mode") == "activity" else GoogleDriveChangesClient)(
                 rclone_path,
                 rclone_config_path,
                 root["remote"],
@@ -754,7 +770,7 @@ class ModuleGDriveScan(PluginModuleBase):
         return self._builtin_clients(settings)[0]
 
     def _poll_builtin_if_due(self, settings):
-        if not settings["gdrive_scan_enabled"] or settings["gdrive_scan_input_mode"] != "builtin":
+        if self._stop_event.is_set() or not settings["gdrive_scan_enabled"] or settings["gdrive_scan_input_mode"] != "builtin":
             return 0
         now = time.monotonic()
         if self._last_builtin_poll_monotonic and now - self._last_builtin_poll_monotonic < settings["gdrive_scan_builtin_poll_seconds"]:
@@ -766,6 +782,9 @@ class ModuleGDriveScan(PluginModuleBase):
         errors = []
         waiting = False
         for client in self._builtin_clients(settings):
+            if self._stop_event.is_set():
+                break
+            client.should_stop = self._stop_event.is_set
             key = (getattr(client, "state_remote", client.remote), client.root_id)
             failures, retry_at = self._builtin_retry.get(key, (0, 0))
             if now < retry_at:
@@ -826,6 +845,7 @@ class ModuleGDriveScan(PluginModuleBase):
             password=settings["bookoasis_password"],
         )
         if settings["bookoasis_username"] and settings["bookoasis_password"]:
+            client.should_stop = self._stop_event.is_set
             response = client.scan_library_path(
                 library_id,
                 relative_path,
@@ -837,6 +857,8 @@ class ModuleGDriveScan(PluginModuleBase):
         else:
             response = {"success": False, "http_status": 404}
         if not response.get("success") and response.get("http_status") in {404, 405} and not response.get("outcome_unknown"):
+            if self._stop_event.is_set():
+                return {"success": False, "cancelled": True, "message": "작업 중지"}
             response = client.request_scan_path(
                 settings["webhook_token"], library_id, relative_path,
                 db_type=db_type, force=False, timeout=settings["gdrive_scan_path_timeout"],
@@ -852,7 +874,7 @@ class ModuleGDriveScan(PluginModuleBase):
 
     def _process_once(self):
         settings = self._settings()
-        if not settings["gdrive_scan_enabled"] or self.model is None:
+        if self._stop_event.is_set() or not settings["gdrive_scan_enabled"] or self.model is None:
             return 0
         events = self.model.claim_ready(limit=500)
         if not events:
@@ -873,6 +895,7 @@ class ModuleGDriveScan(PluginModuleBase):
                 scan_callback=self._scan_callback,
                 path_scan_callback=self._path_scan_callback,
                 logger=P.logger,
+                should_stop=self._stop_event.is_set,
             )
             results = processor.process_batch(events)
         except Exception as error:
@@ -904,9 +927,10 @@ class ModuleGDriveScan(PluginModuleBase):
                         result=result,
                     )
             try:
-                DiscordWebhookNotifier(
-                    settings["gdrive_scan_discord_webhook_url"]
-                ).send_batch(events, results, statuses)
+                if not self._stop_event.is_set():
+                    DiscordWebhookNotifier(
+                        settings["gdrive_scan_discord_webhook_url"]
+                    ).send_batch(events, results, statuses)
             except DiscordWebhookError as error:
                 P.logger.warning(
                     "[BookOasisMate] Discord 변경 요약 전송 실패: "
@@ -931,7 +955,8 @@ class ModuleGDriveScan(PluginModuleBase):
     def _worker_loop(self):
         if self.model is not None:
             try:
-                recovered = self.model.recover_processing()
+                with self._queue_maintenance_lock:
+                    recovered = self.model.recover_processing()
                 if recovered:
                     P.logger.warning(
                         f"[BookOasisMate] 중단된 변경 이벤트 {recovered}건을 복구했습니다."
@@ -944,8 +969,9 @@ class ModuleGDriveScan(PluginModuleBase):
             interval = settings["gdrive_scan_worker_interval"]
             try:
                 self._cleanup_if_due(settings)
-                self._poll_builtin_if_due(settings)
-                processed = self._process_once()
+                with self._queue_maintenance_lock:
+                    self._poll_builtin_if_due(self._settings())
+                    processed = self._process_once()
                 if processed:
                     continue
             except Exception as error:
@@ -955,6 +981,18 @@ class ModuleGDriveScan(PluginModuleBase):
                 P.logger.error(traceback.format_exc())
             self._wake_event.wait(interval)
             self._wake_event.clear()
+
+    def _clear_pending_events(self):
+        if self._settings()["gdrive_scan_enabled"]:
+            raise ValueError("먼저 연동 설정에서 '연동 사용'을 끄고 저장해 주세요.")
+        if not self._queue_maintenance_lock.acquire(blocking=False):
+            raise ValueError("변경 수집 또는 스캔 배치가 실행 중입니다. 현재 작업이 끝난 뒤 다시 시도해 주세요.")
+        try:
+            if self._settings()["gdrive_scan_enabled"]:
+                raise ValueError("연동 사용이 켜져 있어 삭제할 수 없습니다.")
+            return self.model.clear_pending()
+        finally:
+            self._queue_maintenance_lock.release()
 
     def _cleanup_if_due(self, settings):
         if self.model is None or not settings["gdrive_scan_auto_cleanup"]:
@@ -1003,6 +1041,7 @@ class ModuleGDriveScan(PluginModuleBase):
             data["alive"] = bool(
                 self._worker_thread is not None and self._worker_thread.is_alive()
             )
+            data["stopping"] = data["alive"] and self._stop_event.is_set()
         return data
 
     def plugin_load(self):

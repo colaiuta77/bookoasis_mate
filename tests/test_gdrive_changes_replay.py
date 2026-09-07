@@ -148,6 +148,54 @@ class ChangesReplayTest(unittest.TestCase):
         self.assertEqual(7, saved["library_id"])
         self.assertTrue(saved["result"]["outcome_unknown"])
 
+    def test_clear_pending_preserves_terminal_history_and_checkpoint(self):
+        for status in ("queued", "retry", "completed", "failed"):
+            row = self.events._new_entity({"action": "edit", "item_type": "file", "path": "/books/book.cbz"})
+            row.status = status
+            self.session.add(row)
+        self.session.commit()
+        self.items.upsert("drive:root", {"file_id": "book", "path": "/books/book.cbz"})
+        self.assertEqual(2, self.events.clear_pending())
+        self.assertEqual(["completed", "failed"], [row.status for row in self.session.query(self.events).order_by(self.events.id)])
+        self.assertEqual("page-1", self.states.get("drive", "root")["page_token"])
+        self.assertIsNotNone(self.items.get("drive:root", "book"))
+
+    def test_cancelled_last_attempt_returns_to_retry_without_spending_attempt(self):
+        row = self.events._new_entity({"action": "edit", "item_type": "file", "path": "/books/book.cbz"})
+        row.status, row.attempts = "processing", 3
+        self.session.add(row)
+        self.session.commit()
+        event = row.to_dict()
+        self.assertEqual("retry", self.events.fail_or_retry(event, "stop", max_attempts=3, result={"cancelled": True}))
+        self.session.expire_all()
+        saved = self.session.query(self.events).filter_by(id=event["id"]).one()
+        self.assertEqual(2, saved.attempts)
+        self.assertEqual(1, self.events.clear_pending())
+
+    def test_stop_during_collection_preserves_cursor_and_replays_without_duplicates(self):
+        self.client.should_stop = lambda: False
+        original = self.items.record_change
+        def record(*args, **kwargs):
+            original(*args, **kwargs)
+            self.client.should_stop = lambda: True
+        with patch.object(self.items, "record_change", side_effect=record):
+            self.assertEqual(1, self.poll())
+        self.assertEqual("page-1", self.states.get("drive", "root")["page_token"])
+        self.client.should_stop = lambda: False
+        self.assertEqual(0, self.poll())
+        self.assertEqual("page-2", self.states.get("drive", "root")["page_token"])
+        self.assertEqual(1, self.session.query(self.events).count())
+
+    def test_clear_pending_refuses_processing_without_deleting_anything(self):
+        for status in ("queued", "processing", "retry"):
+            row = self.events._new_entity({"action": "edit", "item_type": "file", "path": "/books/book.cbz"})
+            row.status = status
+            self.session.add(row)
+        self.session.commit()
+        with self.assertRaisesRegex(ValueError, "처리 중"):
+            self.events.clear_pending()
+        self.assertEqual(3, self.session.query(self.events).count())
+
 
 if __name__ == "__main__":
     unittest.main()

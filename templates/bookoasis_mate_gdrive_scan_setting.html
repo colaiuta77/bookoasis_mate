@@ -1,10 +1,10 @@
 {# gd-poller 변경 감지와 rclone VFS·BookOasis 스캔 연동값을 설정합니다. #}
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=drive-activity-1">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
-{{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['gdrive_scan_wake_btn', '작업자 깨우기']]) }}
+{{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['gdrive_scan_wake_btn', '작업자 깨우기'], ['gdrive_scan_stop_btn', '작업 중지']]) }}
 <ul class="nav nav-tabs doctor-setting-tabs" role="tablist">
   <li class="nav-item"><a class="nav-link active" id="gdrive-scan-basic-tab" href="#">기본 설정</a></li>
   <li class="nav-item"><a class="nav-link" id="gdrive-scan-integration-tab" href="#">연동 설정</a></li>
@@ -37,7 +37,7 @@
   </div>
   <div id="gdrive_scan_builtin_mode" class="doctor-section doctor-card">
     <h4>Mate 자체 변경 감지</h4>
-    <p class="doctor-muted">Mate 전용 rclone 실행 파일과 rclone.conf를 사용합니다. 직접 Drive 또는 Union 안의 실제 Drive upstream을 감시하며 Google Drive Changes API 체크포인트와 파일 경로 상태는 Mate DB에 저장합니다.</p>
+    <p class="doctor-muted">Mate 전용 rclone 실행 파일과 rclone.conf를 사용합니다. 감시 경로별로 Changes 또는 Activity 방식을 선택하며 체크포인트와 파일 경로 상태는 Mate DB에 저장합니다.</p>
     {{ macros.setting_input_text_and_buttons(
       'gdrive_scan_rclone_path',
       'rclone 실행 파일',
@@ -63,7 +63,7 @@
     </div>
     <div class="alert alert-warning">
       <strong>rclone.conf 권한 범위.</strong>
-      파일과 변경 내역을 읽으려면 <code>drive.readonly</code>가 필요합니다. <code>drive.activity.readonly</code>는 Drive Activity API용이며 Mate 자체 감지에는 필수가 아닙니다.
+      Changes는 <code>drive.readonly</code>, Activity는 <code>drive.readonly,drive.activity.readonly</code>가 필요합니다. 권한을 추가하면 rclone 재인증과 Google Cloud의 Drive Activity API 활성화가 필요합니다. Activity는 바로가기의 실제 대상 폴더 ID를 입력하세요.
     </div>
     <div class="gdrive-scan-poll-setting">
       <label for="gdrive_scan_builtin_poll_seconds"><strong>변경 확인 주기(초)</strong></label>
@@ -83,7 +83,7 @@
     <div id="gdrive_scan_builtin_root_rows"></div>
     <p class="doctor-muted gdrive-scan-root-help">리모트와 폴더 ID는 Google Drive 위치를 식별하고, 두 경로는 rclone 위치를 BookOasis 보관함 경로로 연결합니다.</p>
     <div class="alert alert-warning gdrive-scan-checkpoint-help">
-      <strong>체크포인트란.</strong> 마지막으로 확인한 위치를 뜻합니다. 초기화하면 저장된 Changes API 토큰과 파일 경로 캐시를 지우고 현재 시점부터 새 기준을 잡으므로 이전 변경은 다시 수집하지 않습니다.
+      <strong>체크포인트란.</strong> 마지막으로 확인한 위치를 뜻합니다. 방식별로 따로 저장하며 초기화하면 선택한 방식의 토큰·시간 기준과 파일 경로 캐시를 지웁니다. 새 방식의 첫 실행은 현재 시점부터 시작합니다. Activity는 1분 지연·5분 중첩 조회로 늦게 도착한 활동을 확인합니다.
     </div>
     <div class="doctor-toolbar gdrive-scan-builtin-actions">
       <button type="button" class="btn btn-outline-primary" id="gdrive_scan_builtin_test">토큰 갱신 및 연결 테스트</button>
@@ -166,7 +166,7 @@ function gdriveScanRenderStates(rows) {
     card.appendChild(heading);
     card.appendChild(bookoasisMateText('div', 'doctor-path', row.local_root || row.remote_path || '-'));
     if (row.source_remote && row.source_remote !== row.remote) card.appendChild(bookoasisMateText('small', 'doctor-muted', '실제 감시 Drive · ' + row.source_remote));
-    card.appendChild(bookoasisMateText('small', 'doctor-muted', 'Changes API 체크포인트 · ' + (row.checkpoint_ready ? '저장됨' : '없음')));
+    card.appendChild(bookoasisMateText('small', 'doctor-muted', (row.detection_mode === 'activity' ? 'Activity' : 'Changes') + ' API 체크포인트 · ' + (row.checkpoint_ready ? '저장됨' : '없음')));
     card.appendChild(bookoasisMateText('small', 'doctor-muted', '마지막 확인 · ' + (row.last_poll_at || '미실행')));
     if (row.error) card.appendChild(bookoasisMateText('small', 'text-danger', row.error));
     target.appendChild(card);
@@ -263,6 +263,17 @@ function gdriveScanAddRoot(row) {
     gdriveScanUpdateUpstream(upstreamSelect, upstreamWrap, remoteSelect.value, '');
   });
   grid.appendChild(remoteField);
+  var modeSelect = document.createElement('select');
+  modeSelect.dataset.field = 'detection_mode';
+  modeSelect.className = 'form-control';
+  ['changes', 'activity'].forEach(function(mode) {
+    var option = document.createElement('option');
+    option.value = mode;
+    option.textContent = mode === 'activity' ? 'Activity · 활동 내역' : 'Changes · 변경 목록';
+    option.selected = mode === (row.detection_mode || 'changes');
+    modeSelect.appendChild(option);
+  });
+  grid.appendChild(gdriveScanRootField('감지 방식', modeSelect, '경로마다 한 방식만 실행합니다. 방식 전환 시 기존 대기 이벤트는 유지됩니다.'));
   grid.appendChild(gdriveScanRootField('감시 폴더 ID', gdriveScanRootInput('root_id', row.root_id, 'Google Drive 폴더 ID'), 'Google Drive 폴더 URL의 ID입니다.'));
   grid.appendChild(gdriveScanRootField('rclone 감시 경로', gdriveScanRootInput('remote_path', row.remote_path, 'GDRIVE/READING'), '리모트 내부의 상대 경로입니다. 예: GDRIVE/READING'));
   grid.appendChild(gdriveScanRootField('BookOasis 경로 루트', gdriveScanRootInput('local_root', row.local_root, '/mnt/gds2/GDRIVE/READING'), 'BookOasis가 사용하는 절대 경로입니다. 예: /mnt/gds2/GDRIVE/READING'));
@@ -416,6 +427,11 @@ $('#gdrive_scan_builtin_reset').click(function() {
 $('#gdrive_scan_wake_btn').click(function(e) {
   e.preventDefault();
   bookoasisMateAjax('gdrive_scan', 'wake', {}, function() {});
+});
+$('#gdrive_scan_stop_btn').click(function(e) {
+  e.preventDefault();
+  if (!confirm('연동 사용을 끄고 현재 요청이 끝나면 작업을 멈춥니다. 이미 전달한 BookOasis 스캔은 취소되지 않습니다. 계속하시겠습니까?')) return;
+  bookoasisMateAjax('gdrive_scan', 'stop', {}, function() { location.reload(); });
 });
 
 $('#gdrive_scan_discord_save').click(function() {

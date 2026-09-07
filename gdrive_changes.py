@@ -24,6 +24,7 @@ class GoogleDriveApiError(RuntimeError):
         "forbidden",
         "insufficientFilePermissions",
         "insufficientPermissions",
+        "PERMISSION_DENIED",
     }
 
     def __init__(self, status_code, reason, message):
@@ -160,10 +161,11 @@ def resolve_google_drive_source(sources, remote, source_remote=None):
     return source_remote
 
 
-def google_drive_state_remote(remote, source_remote=None):
+def google_drive_state_remote(remote, source_remote=None, detection_mode="changes"):
     remote = str(remote or "").strip().rstrip(":")
     source_remote = str(source_remote or remote).strip().rstrip(":")
-    return remote if remote == source_remote else f"{remote}->{source_remote}"
+    key = remote if remote == source_remote else f"{remote}->{source_remote}"
+    return key if detection_mode == "changes" else f"activity:{key}"
 
 
 def parse_builtin_roots(value, legacy=None, limit=10):
@@ -184,12 +186,15 @@ def parse_builtin_roots(value, legacy=None, limit=10):
         if not isinstance(row, dict):
             raise ValueError(f"자체 변경 감지 {index}번 설정 형식이 올바르지 않습니다.")
         item = {
+            "detection_mode": str(row.get("detection_mode") or "changes").strip().lower(),
             "remote": str(row.get("remote") or "").strip().rstrip(":"),
             "source_remote": str(row.get("source_remote") or row.get("remote") or "").strip().rstrip(":"),
             "root_id": str(row.get("root_id") or "").strip(),
             "remote_path": str(row.get("remote_path") or "").strip().rstrip("/"),
             "local_root": str(row.get("local_root") or "").strip().replace("\\", "/").rstrip("/"),
         }
+        if item["detection_mode"] not in {"changes", "activity"}:
+            raise ValueError("감지 방식은 Changes 또는 Activity를 선택해 주세요.")
         if not item["remote"] or not item["root_id"] or not item["local_root"]:
             raise ValueError(f"자체 변경 감지 {index}번의 리모트, 폴더 ID와 BookOasis 경로를 입력해 주세요.")
         if item["remote_path"].startswith("/"):
@@ -212,7 +217,7 @@ def parse_builtin_roots(value, legacy=None, limit=10):
                 or left["local_root"].startswith(right["local_root"] + "/")
                 or right["local_root"].startswith(left["local_root"] + "/")
             )
-            if remote_overlap or local_overlap:
+            if remote_overlap or local_overlap or left["root_id"] == right["root_id"]:
                 raise ValueError("자체 변경 감지 경로가 서로 중첩됩니다. 각 파일이 한 설정에만 포함되게 입력해 주세요.")
     return normalized
 
@@ -256,10 +261,13 @@ class GoogleDriveChangesClient:
         self.runner = runner or subprocess.run
         self.opener = opener or urlopen
         self._credentials = None
+        self.should_stop = lambda: False
         if not self.remote or not self.source_remote or not self.root_id or not self.local_root:
             raise ValueError("자체 변경 감지의 rclone 리모트, 감시 폴더 ID와 로컬 루트를 입력해 주세요.")
 
     def _run_json(self, *args):
+        if self.should_stop() and args[:2] != ("config", "update"):
+            raise InterruptedError("변경 수집 중지")
         command = [self.rclone_path, "--config", self.config_path, *args]
         result = self.runner(command, capture_output=True, text=True, timeout=self.timeout, check=True)
         return json.loads(result.stdout or "{}")
@@ -313,6 +321,8 @@ class GoogleDriveChangesClient:
             method="POST",
         )
         try:
+            if self.should_stop():
+                raise InterruptedError("변경 수집 중지")
             with self.opener(request, timeout=self.api_timeout) as response:
                 refreshed = json.loads(response.read().decode("utf-8") or "{}")
         except HTTPError as error:
@@ -362,8 +372,10 @@ class GoogleDriveChangesClient:
         self._credentials = (access_token, str(remote.get("team_drive") or "").strip())
         return self._credentials
 
-    def _get(self, path, params=None):
+    def _get(self, path, params=None, activity_body=None):
         for attempt in range(2):
+            if self.should_stop():
+                raise InterruptedError("변경 수집 중지")
             token, drive_id = self._access()
             query = dict(params or {})
             if path.startswith("changes") or path.startswith("files/"):
@@ -374,10 +386,14 @@ class GoogleDriveChangesClient:
             if query:
                 url += "?" + urlencode(query)
             request = Request(
-                url,
-                headers={"Authorization": f"Bearer {token}", "User-Agent": "BookOasisMate/1.0"},
+                url if activity_body is None else "https://driveactivity.googleapis.com/v2/activity:query",
+                data=None if activity_body is None else json.dumps(activity_body).encode("utf-8"),
+                headers={"Authorization": f"Bearer {token}", "User-Agent": "BookOasisMate/1.0",
+                         "Content-Type": "application/json"},
             )
             try:
+                if self.should_stop():
+                    raise InterruptedError("변경 수집 중지")
                 with self.opener(request, timeout=self.api_timeout) as response:
                     return json.loads(response.read().decode("utf-8") or "{}")
             except HTTPError as error:
@@ -490,8 +506,11 @@ class GoogleDriveChangesWatcher:
     def reset(self):
         self.state_model.reset(self.state_remote, self.client.root_id)
         self.item_model.clear_remote(self.client.item_scope)
+        if getattr(self.client, "detection_mode", "changes") == "activity":
+            self.item_model.clear_remote(self.client.item_scope + ":receipts")
 
     def poll_once(self):
+        accepted = 0
         try:
             state = self.state_model.get(self.state_remote, self.client.root_id) or {}
             if state.get("status") == "blocked":
@@ -511,19 +530,32 @@ class GoogleDriveChangesWatcher:
             except ImportError:
                 from gdrive_scan import validate_event
             for change, token in self.client.list_changes(page_token):
+                if getattr(self.client, "should_stop", lambda: False)():
+                    return accepted
                 if change is None:
                     self.state_model.save_cursor(
                         self.state_remote, self.client.root_id, token or page_token, status="ready"
                     )
+                    if getattr(self.client, "detection_mode", "changes") == "activity":
+                        self.item_model.prune_activity_receipts(
+                            self.client.item_scope, json.loads(token)["start"]
+                        )
+                    continue
+                receipt = change.get("receipt")
+                if receipt and self.item_model.get(self.client.item_scope + ":receipts", receipt["file_id"]):
                     continue
                 file_id = str(change.get("fileId") or "")
                 previous = self.item_model.get(self.client.item_scope, file_id)
                 removed = bool(change.get("removed"))
-                current = None if removed else self.client.resolve_item(change.get("file") or {}, self.item_model)
+                if receipt:
+                    current, event = self.client.activity_event(change, previous, self.item_model)
+                else:
+                    current = None if removed else self.client.resolve_item(change.get("file") or {}, self.item_model)
                 if current is not None and current.get("trashed"):
                     removed = True
-                event = build_change_event(previous, None if removed else current)
-                if event is None and current == previous:
+                if not receipt:
+                    event = build_change_event(previous, None if removed else current)
+                if not receipt and event is None and current == previous:
                     continue
                 validated = None
                 if event and event.get("path"):
@@ -535,8 +567,11 @@ class GoogleDriveChangesWatcher:
                 self.item_model.record_change(
                     self.client.item_scope, file_id, previous, None if removed else current,
                     validated, self.event_model, self.buffer_seconds,
+                    **({"receipt": receipt} if receipt else {}),
                 )
                 accepted += int(validated is not None)
+            return accepted
+        except InterruptedError:
             return accepted
         except Exception as error:
             if getattr(error, "permanent", False):

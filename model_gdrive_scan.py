@@ -151,6 +151,8 @@ class ModelGDriveScanEvent(ModelBase):
         max_attempts = max(1, min(int(max_attempts or 3), 20))
         result = result or {}
         terminal = attempts >= max_attempts or result.get("outcome_unknown") or result.get("retryable") is False
+        if result.get("cancelled"):
+            terminal = False
         now = datetime.now()
         delay = min(300, max(5, 5 * (2 ** max(0, attempts - 1))))
         values = {
@@ -169,6 +171,9 @@ class ModelGDriveScanEvent(ModelBase):
                 cls.mapped_path: result.get("mapped_path") or "",
                 cls.result_json: json.dumps(result, ensure_ascii=False),
             })
+        if result.get("cancelled"):
+            values[cls.attempts] = max(0, attempts - 1)
+            values[cls.ready_at] = now
         with F.app.app_context():
             (
                 F.db.session.query(cls)
@@ -466,6 +471,21 @@ class ModelGDriveScanEvent(ModelBase):
             return int(count or 0)
 
     @classmethod
+    def clear_pending(cls):
+        with F.app.app_context():
+            try:
+                if F.db.session.query(cls.id).filter(cls.status == "processing").first():
+                    raise ValueError("처리 중인 이벤트가 있습니다. 현재 배치가 끝난 뒤 다시 시도해 주세요.")
+                count = F.db.session.query(cls).filter(
+                    cls.status.in_(("queued", "retry"))
+                ).delete(synchronize_session=False)
+                F.db.session.commit()
+                return int(count or 0)
+            except Exception:
+                F.db.session.rollback()
+                raise
+
+    @classmethod
     def counts(cls):
         statuses = ("queued", "retry", "processing", "completed", "failed")
         with F.app.app_context():
@@ -679,7 +699,7 @@ class ModelGDriveItemState(ModelBase):
         entity.updated_at = datetime.now()
 
     @classmethod
-    def record_change(cls, remote, file_id, previous, current, event, event_model, buffer_seconds):
+    def record_change(cls, remote, file_id, previous, current, event, event_model, buffer_seconds, receipt=None):
         # 이벤트와 비교 기준을 함께 저장해야 중간 장애 후 같은 페이지를 안전하게 재생할 수 있습니다.
         old_path = str((previous or {}).get("path") or "")
         new_path = str((current or {}).get("path") or "")
@@ -703,10 +723,20 @@ class ModelGDriveItemState(ModelBase):
                     ).delete(synchronize_session=False)
                 if event is not None:
                     F.db.session.add(event_model._new_entity(event, buffer_seconds))
+                if receipt:
+                    cls._upsert(receipt, remote + ":receipts")
                 F.db.session.commit()
             except Exception:
                 F.db.session.rollback()
                 raise
+
+    @classmethod
+    def prune_activity_receipts(cls, remote, before):
+        with F.app.app_context():
+            F.db.session.query(cls).filter(cls.remote == remote + ":receipts").filter(
+                cls.parent_id < str(before)
+            ).delete(synchronize_session=False)
+            F.db.session.commit()
 
     @classmethod
     def clear_remote(cls, remote):
