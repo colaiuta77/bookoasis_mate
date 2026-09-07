@@ -679,7 +679,7 @@ class ModelGDriveItemState(ModelBase):
         entity.updated_at = datetime.now()
 
     @classmethod
-    def record_change(cls, remote, file_id, previous, current, event, event_model, buffer_seconds):
+    def record_change(cls, remote, file_id, previous, current, event, event_model, buffer_seconds, receipt=None):
         # 이벤트와 비교 기준을 함께 저장해야 중간 장애 후 같은 페이지를 안전하게 재생할 수 있습니다.
         old_path = str((previous or {}).get("path") or "")
         new_path = str((current or {}).get("path") or "")
@@ -703,10 +703,20 @@ class ModelGDriveItemState(ModelBase):
                     ).delete(synchronize_session=False)
                 if event is not None:
                     F.db.session.add(event_model._new_entity(event, buffer_seconds))
+                if receipt:
+                    cls._upsert(receipt, remote + ":receipts")
                 F.db.session.commit()
             except Exception:
                 F.db.session.rollback()
                 raise
+
+    @classmethod
+    def prune_activity_receipts(cls, remote, before):
+        with F.app.app_context():
+            F.db.session.query(cls).filter(cls.remote == remote + ":receipts").filter(
+                cls.parent_id < str(before)
+            ).delete(synchronize_session=False)
+            F.db.session.commit()
 
     @classmethod
     def clear_remote(cls, remote):

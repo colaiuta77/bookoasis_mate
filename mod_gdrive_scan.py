@@ -8,6 +8,7 @@ from datetime import datetime
 from flask import jsonify, render_template
 
 from .bookoasis_client import BookOasisClient
+from .gdrive_activity import GoogleDriveActivityClient
 from .discord_notifier import DiscordWebhookError, DiscordWebhookNotifier
 from .gdrive_changes import (
     GoogleDriveApiError,
@@ -100,6 +101,7 @@ class ModuleGDriveScan(PluginModuleBase):
     def _builtin_state_view(root, state=None):
         state = state or {}
         return {
+            "detection_mode": str(root.get("detection_mode") or "changes"),
             "remote": str(root.get("remote") or ""),
             "source_remote": str(root.get("source_remote") or root.get("remote") or ""),
             "root_id": str(root.get("root_id") or ""),
@@ -216,7 +218,7 @@ class ModuleGDriveScan(PluginModuleBase):
                 self._builtin_state_view(
                     root,
                     self.state_model.get(
-                        google_drive_state_remote(root["remote"], root.get("source_remote")),
+                        google_drive_state_remote(root["remote"], root.get("source_remote"), root.get("detection_mode", "changes")),
                         root["root_id"],
                     )
                     if self.state_model is not None
@@ -510,6 +512,7 @@ class ModuleGDriveScan(PluginModuleBase):
                             {
                                 "remote": client.remote,
                                 "source_remote": source_remote,
+                                "detection_mode": getattr(client, "detection_mode", "changes"),
                                 "root_id": client.root_id,
                                 "remote_path": client.remote_path,
                                 "local_root": client.local_root,
@@ -540,6 +543,7 @@ class ModuleGDriveScan(PluginModuleBase):
                         {
                             "remote": client.remote,
                             "source_remote": getattr(client, "source_remote", client.remote),
+                            "detection_mode": getattr(client, "detection_mode", "changes"),
                             "root_id": client.root_id,
                             "remote_path": client.remote_path,
                             "local_root": client.local_root,
@@ -734,7 +738,7 @@ class ModuleGDriveScan(PluginModuleBase):
             timeout=settings["gdrive_scan_rc_timeout"],
         )
         return [
-            GoogleDriveChangesClient(
+            (GoogleDriveActivityClient if root.get("detection_mode") == "activity" else GoogleDriveChangesClient)(
                 rclone_path,
                 rclone_config_path,
                 root["remote"],
