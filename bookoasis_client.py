@@ -181,6 +181,24 @@ class BookOasisClient:
     def metadata_plugins(self):
         return self._admin_request("api/media/metadata/plugins")
 
+    def remote_db_engine(self, token):
+        if not self._valid_base_url() or not str(token or "").strip():
+            return {"success": False}
+        request = Request(urljoin(f"{self.base_url}/", "api/webhook/system/db-engine"), headers={"Accept": "application/json", "X-Webhook-Token": str(token).strip()})
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                payload = self._response_payload(response)
+            return {"success": bool(payload.get("success")), "engine": payload.get("engine")}
+        except (HTTPError, URLError, ValueError, OSError):
+            return {"success": False}
+
+    def cover_storage_info(self):
+        config = self._admin_request("api/media/settings")
+        migration = self._admin_request("api/media/settings/cover-storage/migrate/status")
+        if not config.get("success") or not migration.get("success"):
+            return {"success": False}
+        return {"success": True, "root": (config.get("settings") or {}).get("COVER_STORAGE_ROOT", ""), "migration_status": (migration.get("status") or {}).get("status", "unknown")}
+
     def metadata_plugins_manage(self):
         return self._admin_request(
             "api/media/metadata/plugins/manage",

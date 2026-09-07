@@ -20,6 +20,7 @@ except ImportError:
     gevent_monkey = None
 
 from .bookoasis_client import BookOasisClient
+from .integration_checks import evaluate_integration
 from .bookoasis_db import BookOasisDatabaseAdapter, BookOasisDatabaseError
 from .bookoasis_logs import (
     delete_all_log_archives,
@@ -429,6 +430,7 @@ class BookOasisMateService:
             "webhook_token": model.get("webhook_token"),
             "bookoasis_log_dir": model.get("bookoasis_log_dir"),
             "cover_root_path": model.get("cover_root_path"),
+            "cover_storage_remote_root": model.get("cover_storage_remote_root"),
             "cover_root_custom": model.get_bool("cover_root_custom"),
             "custom_font_dir": model.get("custom_font_dir"),
             "cover_min_width": _as_int(model.get("cover_min_width"), 200, 1, 10000),
@@ -488,6 +490,7 @@ class BookOasisMateService:
             "webhook_token": values.get("webhook_token"),
             "bookoasis_log_dir": values.get("bookoasis_log_dir"),
             "cover_root_path": values.get("cover_root_path"),
+            "cover_storage_remote_root": values.get("cover_storage_remote_root"),
             "cover_root_custom": _as_bool(
                 values.get("cover_root_custom"),
                 False,
@@ -2316,6 +2319,7 @@ class BookOasisMateService:
         if mode not in {"resolution", "file_size", "aspect"}:
             raise ValueError("파일 정밀 검사 유형이 올바르지 않습니다.")
         settings = self.settings()
+        self._guard_integration(settings, covers=True)
         root = str(settings.get("cover_root_path") or "").strip()
         if not root or not Path(root).is_dir():
             raise FileNotFoundError("설정된 표지 디렉터리를 찾을 수 없습니다.")
@@ -2942,6 +2946,7 @@ class BookOasisMateService:
 
     def start_orphan_cleanup(self, db_type="general", library_id=None, dry_run=True, confirm_delete=False):
         settings = self.settings()
+        self._guard_integration(settings, covers=True, database=True)
         root = Path(settings.get("cover_root_path") or "").expanduser()
         if not root.is_dir():
             raise FileNotFoundError("설정된 표지 디렉터리를 찾을 수 없습니다.")
@@ -3204,6 +3209,7 @@ class BookOasisMateService:
 
     def start_migration(self):
         config = self.migration_config()
+        self._guard_integration(self.settings(), covers=True, database=True)
         operation = config.get("operation")
         if operation not in {"export", "import"}:
             raise ValueError("이관 작업 유형이 올바르지 않습니다.")
@@ -3730,6 +3736,7 @@ class BookOasisMateService:
 
     def start_database_migration(self, values=None):
         config = self.database_migration_config(values)
+        self._guard_integration(self.settings(), covers=True, database=True)
         if config["source_type"] not in {"kavita", "bookoasis"}:
             raise ValueError("이관 원본 유형이 올바르지 않습니다.")
         if config["source_type"] == "kavita" and not config["kavita_db_path"]:
@@ -3909,6 +3916,23 @@ class BookOasisMateService:
         )
         return result
 
+    def integration_status(self, settings=None):
+        settings = settings or self.settings()
+        client = self.admin_client(settings)
+        return evaluate_integration(settings, BookOasisDatabaseAdapter(settings).engine,
+                                    client.remote_db_engine(settings.get("webhook_token")), client.cover_storage_info())
+
+    def _guard_integration(self, settings, covers=False, database=False):
+        result = self.integration_status(settings)
+        if database and result["db_engine"]["status"] == "mismatch":
+            raise ValueError(result["db_engine"]["message"])
+        if covers and result["cover_storage"]["status"] in {"moving", "mismatch", "mapping_required"}:
+            raise ValueError(result["cover_storage"]["message"])
+        for check in result.values():
+            if check["status"] == "unknown":
+                self.P.logger.warning("[BookOasisMate] %s", check["message"])
+        return result
+
     def connection_test(self, settings=None):
         started = time.monotonic()
         settings = settings or self.settings()
@@ -3943,7 +3967,10 @@ class BookOasisMateService:
             "cover_root": cover_root_status,
             "font_root": font_root_status,
             "log_root": log_root_status,
+            "integration": self.integration_status(settings),
         }
+        if data["integration"]["db_engine"]["status"] == "mismatch" or data["integration"]["cover_storage"]["status"] in {"moving", "mismatch", "mapping_required"}:
+            data["success"] = False
         self._debug(
             "연결 검사 완료",
             success=str(data["success"]).lower(),
