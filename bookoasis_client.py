@@ -63,6 +63,8 @@ class BookOasisClient:
         return data
 
     def login_admin(self, force=False):
+        if getattr(self, "should_stop", lambda: False)():
+            return {"success": False, "cancelled": True, "message": "작업 중지"}
         if self._authenticated and not force:
             return {"success": True, "message": "BookOasis 관리자 세션을 사용합니다."}
         if not self._valid_base_url():
@@ -101,6 +103,8 @@ class BookOasisClient:
         login = self.login_admin()
         if not login.get("success"):
             return login
+        if getattr(self, "should_stop", lambda: False)():
+            return {"success": False, "cancelled": True, "message": "작업 중지"}
 
         url = urljoin(f"{self.base_url}/", str(path or "").lstrip("/"))
         if query:
@@ -122,6 +126,8 @@ class BookOasisClient:
             if error.code == 401 and retry:
                 self._authenticated = False
                 login = self.login_admin(force=True)
+                if login.get("cancelled"):
+                    return login
                 if login.get("success"):
                     return self._admin_request(
                         path, method=method, form=form, payload=payload,

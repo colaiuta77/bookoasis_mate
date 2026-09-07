@@ -151,6 +151,8 @@ class ModelGDriveScanEvent(ModelBase):
         max_attempts = max(1, min(int(max_attempts or 3), 20))
         result = result or {}
         terminal = attempts >= max_attempts or result.get("outcome_unknown") or result.get("retryable") is False
+        if result.get("cancelled"):
+            terminal = False
         now = datetime.now()
         delay = min(300, max(5, 5 * (2 ** max(0, attempts - 1))))
         values = {
@@ -169,6 +171,9 @@ class ModelGDriveScanEvent(ModelBase):
                 cls.mapped_path: result.get("mapped_path") or "",
                 cls.result_json: json.dumps(result, ensure_ascii=False),
             })
+        if result.get("cancelled"):
+            values[cls.attempts] = max(0, attempts - 1)
+            values[cls.ready_at] = now
         with F.app.app_context():
             (
                 F.db.session.query(cls)

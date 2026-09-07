@@ -261,10 +261,13 @@ class GoogleDriveChangesClient:
         self.runner = runner or subprocess.run
         self.opener = opener or urlopen
         self._credentials = None
+        self.should_stop = lambda: False
         if not self.remote or not self.source_remote or not self.root_id or not self.local_root:
             raise ValueError("자체 변경 감지의 rclone 리모트, 감시 폴더 ID와 로컬 루트를 입력해 주세요.")
 
     def _run_json(self, *args):
+        if self.should_stop() and args[:2] != ("config", "update"):
+            raise InterruptedError("변경 수집 중지")
         command = [self.rclone_path, "--config", self.config_path, *args]
         result = self.runner(command, capture_output=True, text=True, timeout=self.timeout, check=True)
         return json.loads(result.stdout or "{}")
@@ -318,6 +321,8 @@ class GoogleDriveChangesClient:
             method="POST",
         )
         try:
+            if self.should_stop():
+                raise InterruptedError("변경 수집 중지")
             with self.opener(request, timeout=self.api_timeout) as response:
                 refreshed = json.loads(response.read().decode("utf-8") or "{}")
         except HTTPError as error:
@@ -369,6 +374,8 @@ class GoogleDriveChangesClient:
 
     def _get(self, path, params=None, activity_body=None):
         for attempt in range(2):
+            if self.should_stop():
+                raise InterruptedError("변경 수집 중지")
             token, drive_id = self._access()
             query = dict(params or {})
             if path.startswith("changes") or path.startswith("files/"):
@@ -385,6 +392,8 @@ class GoogleDriveChangesClient:
                          "Content-Type": "application/json"},
             )
             try:
+                if self.should_stop():
+                    raise InterruptedError("변경 수집 중지")
                 with self.opener(request, timeout=self.api_timeout) as response:
                     return json.loads(response.read().decode("utf-8") or "{}")
             except HTTPError as error:
@@ -501,6 +510,7 @@ class GoogleDriveChangesWatcher:
             self.item_model.clear_remote(self.client.item_scope + ":receipts")
 
     def poll_once(self):
+        accepted = 0
         try:
             state = self.state_model.get(self.state_remote, self.client.root_id) or {}
             if state.get("status") == "blocked":
@@ -520,6 +530,8 @@ class GoogleDriveChangesWatcher:
             except ImportError:
                 from gdrive_scan import validate_event
             for change, token in self.client.list_changes(page_token):
+                if getattr(self.client, "should_stop", lambda: False)():
+                    return accepted
                 if change is None:
                     self.state_model.save_cursor(
                         self.state_remote, self.client.root_id, token or page_token, status="ready"
@@ -558,6 +570,8 @@ class GoogleDriveChangesWatcher:
                     **({"receipt": receipt} if receipt else {}),
                 )
                 accepted += int(validated is not None)
+            return accepted
+        except InterruptedError:
             return accepted
         except Exception as error:
             if getattr(error, "permanent", False):

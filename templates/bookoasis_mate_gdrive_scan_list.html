@@ -52,6 +52,7 @@
 
 <div class="doctor-gdrive-summary">
   <span id="gdrive_worker_state" class="doctor-muted"></span>
+  <button id="gdrive_worker_stop" class="btn btn-sm btn-outline-danger">작업 중지</button>
   <strong id="gdrive_event_summary"></strong>
 </div>
 
@@ -379,7 +380,7 @@ function renderGdriveEvents(data) {
   var worker = data.worker || {};
   document.getElementById('gdrive_worker_state').textContent =
     '연동 ' + (data.enabled ? '사용 중' : '꺼짐') +
-    ' · 작업자 ' + (worker.alive ? '실행 중' : '중지') +
+    ' · 작업자 ' + (worker.stopping ? '중지 요청 중' : (worker.alive ? '실행 중' : '중지')) +
     (worker.last_finished_at ? ' · 마지막 처리 ' + worker.last_finished_at : '') +
     (worker.last_error ? ' · 최근 오류 ' + worker.last_error : '');
   renderGdrivePagination(data);
@@ -466,6 +467,11 @@ $('#gdrive_cleanup_pending').click(function(e) {
     gdriveEventPage = 1;
     loadGdriveEvents(false);
   });
+});
+$('#gdrive_worker_stop').click(function(e) {
+  e.preventDefault();
+  if (!confirm('연동 사용을 끄고 현재 요청이 끝나면 작업을 멈춥니다. 이미 전달한 BookOasis 스캔은 취소되지 않습니다. 계속하시겠습니까?')) return;
+  bookoasisMateAjax('gdrive_scan', 'stop', {}, function() { loadGdriveEvents(false); });
 });
 $('#gdrive_event_modal').click(function(e) {
   if (e.target === this) closeGdriveEventDetail();

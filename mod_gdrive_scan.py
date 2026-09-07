@@ -599,6 +599,11 @@ class ModuleGDriveScan(PluginModuleBase):
                 return jsonify(
                     {"ret": "success", "msg": "변경 감지 작업자를 깨웠습니다."}
                 )
+            if command == "stop":
+                P.ModelSetting.set("gdrive_scan_enabled", "False")
+                self._stop_event.set()
+                self._wake_event.set()
+                return jsonify({"ret": "success", "msg": "연동 사용을 끄고 중지를 요청했습니다. 현재 요청 결과를 저장한 뒤 멈춥니다."})
             if command == "delete":
                 deleted = self.model.delete_terminal(req.form.get("id"))
                 return jsonify(
@@ -765,7 +770,7 @@ class ModuleGDriveScan(PluginModuleBase):
         return self._builtin_clients(settings)[0]
 
     def _poll_builtin_if_due(self, settings):
-        if not settings["gdrive_scan_enabled"] or settings["gdrive_scan_input_mode"] != "builtin":
+        if self._stop_event.is_set() or not settings["gdrive_scan_enabled"] or settings["gdrive_scan_input_mode"] != "builtin":
             return 0
         now = time.monotonic()
         if self._last_builtin_poll_monotonic and now - self._last_builtin_poll_monotonic < settings["gdrive_scan_builtin_poll_seconds"]:
@@ -777,6 +782,9 @@ class ModuleGDriveScan(PluginModuleBase):
         errors = []
         waiting = False
         for client in self._builtin_clients(settings):
+            if self._stop_event.is_set():
+                break
+            client.should_stop = self._stop_event.is_set
             key = (getattr(client, "state_remote", client.remote), client.root_id)
             failures, retry_at = self._builtin_retry.get(key, (0, 0))
             if now < retry_at:
@@ -837,6 +845,7 @@ class ModuleGDriveScan(PluginModuleBase):
             password=settings["bookoasis_password"],
         )
         if settings["bookoasis_username"] and settings["bookoasis_password"]:
+            client.should_stop = self._stop_event.is_set
             response = client.scan_library_path(
                 library_id,
                 relative_path,
@@ -848,6 +857,8 @@ class ModuleGDriveScan(PluginModuleBase):
         else:
             response = {"success": False, "http_status": 404}
         if not response.get("success") and response.get("http_status") in {404, 405} and not response.get("outcome_unknown"):
+            if self._stop_event.is_set():
+                return {"success": False, "cancelled": True, "message": "작업 중지"}
             response = client.request_scan_path(
                 settings["webhook_token"], library_id, relative_path,
                 db_type=db_type, force=False, timeout=settings["gdrive_scan_path_timeout"],
@@ -863,7 +874,7 @@ class ModuleGDriveScan(PluginModuleBase):
 
     def _process_once(self):
         settings = self._settings()
-        if not settings["gdrive_scan_enabled"] or self.model is None:
+        if self._stop_event.is_set() or not settings["gdrive_scan_enabled"] or self.model is None:
             return 0
         events = self.model.claim_ready(limit=500)
         if not events:
@@ -884,6 +895,7 @@ class ModuleGDriveScan(PluginModuleBase):
                 scan_callback=self._scan_callback,
                 path_scan_callback=self._path_scan_callback,
                 logger=P.logger,
+                should_stop=self._stop_event.is_set,
             )
             results = processor.process_batch(events)
         except Exception as error:
@@ -915,9 +927,10 @@ class ModuleGDriveScan(PluginModuleBase):
                         result=result,
                     )
             try:
-                DiscordWebhookNotifier(
-                    settings["gdrive_scan_discord_webhook_url"]
-                ).send_batch(events, results, statuses)
+                if not self._stop_event.is_set():
+                    DiscordWebhookNotifier(
+                        settings["gdrive_scan_discord_webhook_url"]
+                    ).send_batch(events, results, statuses)
             except DiscordWebhookError as error:
                 P.logger.warning(
                     "[BookOasisMate] Discord 변경 요약 전송 실패: "
@@ -1028,6 +1041,7 @@ class ModuleGDriveScan(PluginModuleBase):
             data["alive"] = bool(
                 self._worker_thread is not None and self._worker_thread.is_alive()
             )
+            data["stopping"] = data["alive"] and self._stop_event.is_set()
         return data
 
     def plugin_load(self):

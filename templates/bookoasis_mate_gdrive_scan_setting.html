@@ -4,7 +4,7 @@
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=drive-activity-1">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
-{{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['gdrive_scan_wake_btn', '작업자 깨우기']]) }}
+{{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['gdrive_scan_wake_btn', '작업자 깨우기'], ['gdrive_scan_stop_btn', '작업 중지']]) }}
 <ul class="nav nav-tabs doctor-setting-tabs" role="tablist">
   <li class="nav-item"><a class="nav-link active" id="gdrive-scan-basic-tab" href="#">기본 설정</a></li>
   <li class="nav-item"><a class="nav-link" id="gdrive-scan-integration-tab" href="#">연동 설정</a></li>
@@ -427,6 +427,11 @@ $('#gdrive_scan_builtin_reset').click(function() {
 $('#gdrive_scan_wake_btn').click(function(e) {
   e.preventDefault();
   bookoasisMateAjax('gdrive_scan', 'wake', {}, function() {});
+});
+$('#gdrive_scan_stop_btn').click(function(e) {
+  e.preventDefault();
+  if (!confirm('연동 사용을 끄고 현재 요청이 끝나면 작업을 멈춥니다. 이미 전달한 BookOasis 스캔은 취소되지 않습니다. 계속하시겠습니까?')) return;
+  bookoasisMateAjax('gdrive_scan', 'stop', {}, function() { location.reload(); });
 });
 
 $('#gdrive_scan_discord_save').click(function() {
