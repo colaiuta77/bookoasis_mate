@@ -1,79 +1,46 @@
-{# BookOasis 카테고리 내보내기와 신규·병합 가져오기 사용법을 안내합니다. #}
+{# 카테고리 패키지 내보내기와 신규·병합 가져오기를 안내합니다. #}
 {% extends "base.html" %}
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
-
 <div class="doctor-section doctor-card">
   <h3>카테고리 이관 매뉴얼</h3>
-  <p>BookOasis 공식 카테고리 패키지 형식 2.0을 사용해 일반·성인 도서와 오디오북·비디오 카테고리를 내보내거나 신규·기존 카테고리로 가져옵니다. 비디오 패키지는 비디오·에피소드·재생 진행률·포스터를 함께 처리합니다.</p>
-  <div class="doctor-manual-note doctor-manual-note-info"><strong>DB 엔진과 무관한 데이터 패키지</strong>이므로 같은 미디어 유형이면 SQLite에서 내보낸 카테고리를 MariaDB로 가져오거나 그 반대로 가져올 수 있습니다.</div>
-  <div class="doctor-manual-table-wrap">
-    <table class="doctor-manual-table">
-      <thead><tr><th>패키지 유형</th><th>가져오기 대상</th><th>포함 범위</th></tr></thead>
-      <tbody>
-        <tr><td>일반</td><td>일반</td><td>도서·진행률·표지</td></tr>
-        <tr><td>성인</td><td>성인</td><td>도서·진행률·표지</td></tr>
-        <tr><td>오디오북</td><td>오디오북</td><td>오디오북·트랙·진행률·표지</td></tr>
-        <tr><td>비디오</td><td>비디오</td><td>비디오·에피소드·진행률·포스터</td></tr>
-      </tbody>
-    </table>
-  </div>
+  <p><code>.oasis.zip</code>은 DB 엔진과 무관한 데이터 패키지입니다. SQLite↔MariaDB로 옮길 수 있으며, 통DB 복원과 달리 카테고리 단위로 추가·병합합니다.</p>
+  <div class="doctor-manual-table-wrap"><table class="doctor-manual-table">
+    <thead><tr><th>패키지</th><th>대상</th><th>포함 정보</th></tr></thead>
+    <tbody>
+      <tr><td>도서</td><td>일반·성인</td><td>도서·진행률·표지·오프셋 정보.</td></tr>
+      <tr><td>오디오북</td><td>오디오북</td><td>오디오북·트랙·재생 진행률·포스터.</td></tr>
+      <tr><td>비디오</td><td>비디오</td><td>비디오·에피소드·재생 진행률·포스터.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="alert alert-warning mb-0">원본 도서·음원·영상 파일은 포함하지 않습니다. 미디어 파일을 별도로 준비하고 대상 경로를 맞추세요. 카테고리 이관에는 별도 Dry Run이 없습니다.</p>
 </div>
-
 <div class="doctor-section doctor-card">
-  <h4>1. 공통 설정</h4>
+  <h4>내보내기</h4>
   <ol>
-    <li><strong>설정 → 표지 디렉터리</strong>에 FlaskFarm에서 보이는 BookOasis covers 경로를 입력합니다.</li>
-    <li><strong>복사 설정 → 이관 작업 디렉터리</strong>에 패키지와 백업 파일을 저장할 경로를 입력합니다.</li>
-    <li>패키지에 저장할 대상 물리 경로는 BookOasis가 실제로 사용하는 경로여야 합니다. FF가 파일 검사·복사를 수행하는 작업은 FF에서도 해당 경로에 접근할 수 있어야 합니다.</li>
+    <li><strong>복사 설정</strong>에서 이관 작업 디렉터리와 내보내기를 선택합니다.</li>
+    <li>DB와 카테고리를 선택해 저장합니다.</li>
+    <li><strong>복사 상태 → 시작</strong>을 누릅니다. 결과의 패키지 경로를 확인합니다.</li>
   </ol>
-</div>
-
-<div class="doctor-section doctor-card">
-  <h4>2. 내보내기</h4>
+  <h4>신규 카테고리로 가져오기</h4>
   <ol>
-    <li>작업 유형에서 <strong>내보내기</strong>를 선택합니다.</li>
-    <li>일반·성인·오디오북·비디오 DB와 하나 이상의 카테고리를 선택하고 설정을 저장합니다.</li>
-    <li>복사 상태에서 시작을 누릅니다.</li>
-    <li>완료된 <code>.oasis.zip</code> 파일은 이관 작업 디렉터리에 생성됩니다.</li>
+    <li>패키지를 이관 작업 디렉터리에 복사하고 가져오기에서 선택합니다.</li>
+    <li><strong>패키지 검사</strong>로 유형·포함 정보·원본 경로를 확인합니다.</li>
+    <li>대상 DB와 신규 카테고리를 선택하고 대상 물리 경로를 한 줄씩 입력합니다.</li>
+    <li>DB 백업을 켜고 저장한 뒤 복사 상태에서 시작합니다.</li>
   </ol>
+  <h4>기존 카테고리에 병합</h4>
+  <p>가져오기 방식을 <strong>기존 카테고리 병합</strong>으로 바꾸고 대상 DB·카테고리를 선택합니다. 기존 경로는 유지하고 새 경로를 추가하며, 최종 경로가 중복되는 항목은 건너뜁니다.</p>
 </div>
-
 <div class="doctor-section doctor-card">
-  <h4>3. 신규 카테고리로 가져오기</h4>
-  <ol>
-    <li>이관 작업 디렉터리에 <code>.oasis.zip</code> 패키지를 복사합니다.</li>
-    <li>작업 유형에서 <strong>가져오기</strong>를 선택하고 패키지 검사를 실행합니다.</li>
-    <li>새 대상 경로를 개수 제한 없이 한 줄에 하나씩 입력합니다.</li>
-    <li>설정을 저장하고 복사 상태에서 시작을 누릅니다.</li>
-  </ol>
-  <p>대상 경로는 원본 경로 순서대로 대응합니다. 대상 경로가 부족하면 남은 도서·오디오북·비디오는 첫 번째 대상 경로로 가져옵니다.</p>
-  <p>가상 그룹은 설치 환경별 관리 정보이므로 패키지에 포함하지 않습니다. 가져오기 후 가상 그룹은 BookOasis에서 다시 지정합니다.</p>
-  <p>가져오기 전에 ZIP CRC와 DB 무결성을 검사합니다. DB 백업을 켜면 <code>backups</code> 폴더에 SQLite 백업 또는 MariaDB 논리 백업을 생성합니다.</p>
-</div>
-
-<div class="doctor-section doctor-card">
-  <h4>4. 기존 카테고리에 병합</h4>
-  <ol>
-    <li>가져오기 방식에서 <strong>기존 카테고리 병합</strong>을 선택합니다.</li>
-    <li>일반·성인·오디오북·비디오 DB를 선택한 뒤 병합 대상 카테고리를 선택합니다.</li>
-    <li>추가할 물리 경로를 한 줄에 하나씩 입력하고 설정을 저장합니다.</li>
-    <li>복사 상태에서 시작을 누릅니다.</li>
-  </ol>
-  <p>대상 카테고리의 기존 물리 경로는 유지되며 새 경로만 추가합니다. 도서는 최종 파일 경로, 오디오북·비디오는 폴더 경로와 하위 미디어 파일 경로가 이미 있으면 중복으로 판단해 건너뜁니다.</p>
-</div>
-
-<div class="doctor-section doctor-card">
-  <h4>주의 사항</h4>
+  <h4>경로·백업 주의사항</h4>
   <ul>
-    <li>병합 대상은 공식 <code>--merge-to</code>와 같이 카테고리 ID로 지정합니다.</li>
-    <li>SQLite DB가 FTS5를 사용하면 FF Python의 SQLite도 FTS5를 지원해야 하며, 가져오기 전에 자동 검사합니다.</li>
-    <li>MariaDB 백업에는 FF 컨테이너에서 실행 가능한 <code>mariadb-dump</code> 또는 <code>mysqldump</code>가 필요합니다.</li>
-    <li>실행 중인 가져오기 작업을 중지하면 DB 트랜잭션과 임시 표지를 정리합니다.</li>
-    <li>가져오기 중에는 BookOasis 스캔과 메타데이터 변경 작업을 피하는 것이 안전합니다.</li>
-    <li>도서·오디오북·비디오 패키지는 같은 미디어 유형의 DB로만 가져올 수 있습니다.</li>
-    <li>오디오북 재생 진행률은 대상 오디오북 DB에 같은 ID의 사용자가 있을 때만 복원합니다.</li>
-    <li>비디오 재생 진행률은 대상 비디오 DB에 같은 ID의 사용자가 있을 때만 복원합니다.</li>
+    <li>대상 경로는 원본 루트 순서대로 대응합니다. 개수가 부족하면 남은 루트는 첫 대상 경로를 사용하므로 검사 결과를 확인하세요.</li>
+    <li>대상 물리 경로는 BookOasis가 사용할 절대 경로입니다. 가져오기 과정에서 FF도 디렉터리를 생성하므로 접근 권한이 필요합니다.</li>
+    <li>가상 그룹은 이관하지 않습니다. 가져오기 후 BookOasis에서 다시 지정합니다.</li>
+    <li>오디오북·비디오 진행률은 대상 DB에 같은 ID의 사용자가 있을 때 복원합니다. 다른 사람의 같은 ID로 연결되지 않는지 확인하세요.</li>
+    <li>실제 가져오기 전 외부 백업을 만들고 BookOasis의 스캔·메타데이터 변경을 멈춥니다. 자동 DB 백업은 작업 디렉터리의 <code>backups</code>에 저장합니다.</li>
+    <li>SQLite FTS5를 사용하는 DB는 FF SQLite에도 FTS5가 필요합니다. MariaDB 백업에는 <code>mariadb-dump</code> 또는 <code>mysqldump</code>가 필요합니다.</li>
   </ul>
 </div>
 {% endblock %}
