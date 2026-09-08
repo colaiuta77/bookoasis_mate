@@ -31,12 +31,12 @@
     <div class="tab-pane fade show active" id="setting-basic" role="tabpanel" aria-labelledby="setting-basic-tab">
       <div class="doctor-section doctor-card">
         <h4>BookOasis API 연결</h4>
-        <p class="doctor-muted">상태 확인, 관리자 기능과 보관함 스캔 요청에 사용할 연결 정보를 입력합니다.</p>
-        {{ macros.setting_input_text('bookoasis_url', 'BookOasis URL', value=arg['bookoasis_url'], desc=['상태 API와 표지 URL에 사용합니다.', '예: http://172.17.0.1:5930', 'Reverse proxy 사용 시 예: https://yourdomain.com']) }}
+        <p class="doctor-muted">API 연결 정보를 입력합니다. <a href="/bookoasis_mate/manual#manual-connection" target="_blank" rel="noopener">연결 매뉴얼 ↗</a></p>
+        {{ macros.setting_input_text('bookoasis_url', 'BookOasis URL', value=arg['bookoasis_url'], desc=['예: http://172.17.0.1:5930 또는 HTTPS 대표 주소']) }}
         {{ macros.setting_input_text('bookoasis_username', 'BookOasis 관리자 계정', value=arg['bookoasis_username'], desc=['개별 도서 재스캔과 메타데이터 검색·적용에 사용합니다.']) }}
         {{ macros.setting_input_text('bookoasis_password', 'BookOasis 관리자 비밀번호', value=arg['bookoasis_password'], type='password', desc=['서버 측 관리자 세션 생성에만 사용하며 로그나 API 응답에 표시하지 않습니다.']) }}
-        {{ macros.setting_input_text('webhook_token', '스캔 웹훅 토큰', value=arg['webhook_token'], desc=['BookOasis 설치 시 .env에 설정한 WEBHOOK_TOKEN과 같은 값을 입력합니다.', '보관함 전체 재스캔 요청에만 사용합니다.']) }}
-        {{ macros.setting_input_int('api_timeout', 'API 연결 제한 시간(초)', value=arg['api_timeout'], desc=['1~30초', '너무 짧으면 API 연결이 실패할 수 있습니다. 기본값 30초']) }}
+        {{ macros.setting_input_text('webhook_token', '스캔 웹훅 토큰', value=arg['webhook_token'], desc=['BookOasis .env의 WEBHOOK_TOKEN 값입니다.']) }}
+        {{ macros.setting_input_int('api_timeout', 'API 연결 제한 시간(초)', value=arg['api_timeout'], desc=['1~30초 · 기본값 30초']) }}
       </div>
     </div>
 
@@ -71,12 +71,13 @@
 
       <div id="mariadb_database_settings" class="doctor-section doctor-card">
         <h4>MariaDB 연결</h4>
-        {{ macros.setting_input_text('mariadb_host', 'MariaDB 호스트', value=arg.get('mariadb_host', ''), desc=['FF 컨테이너에서 접근 가능한 MariaDB 호스트 또는 IP입니다.', '컨테이너가 분리되어 있으면 127.0.0.1은 FF 컨테이너 자신이므로 MariaDB 서버 주소를 입력해야 합니다.', 'MariaDB 계정의 Host 허용 범위에는 FF가 실제로 접속하는 원본 IP가 포함되어야 합니다.', '예: 172.17.0.1']) }}
+        <p class="doctor-muted"><a href="/bookoasis_mate/manual#manual-mariadb" target="_blank" rel="noopener">MariaDB 주소·권한·패키지 안내 ↗</a></p>
+        {{ macros.setting_input_text('mariadb_host', 'MariaDB 호스트', value=arg.get('mariadb_host', ''), desc=['FF에서 접근 가능한 주소 · 예: 172.17.0.1']) }}
         {{ macros.setting_input_int('mariadb_port', 'MariaDB 포트', value=arg.get('mariadb_port', '3306'), desc=['기본값 3306']) }}
-        {{ macros.setting_input_text('mariadb_user', 'MariaDB 사용자', value=arg.get('mariadb_user', ''), desc=['진단만 사용할 때는 media_general·media_adult·media_audiobook·media_video 읽기 권한이 필요합니다.', '카테고리·Kavita·통DB 실제 이관에는 대상 DB 쓰기와 논리 백업·복원 권한이 필요하므로 BookOasis와 같은 수준의 계정을 권장합니다.']) }}
+        {{ macros.setting_input_text('mariadb_user', 'MariaDB 사용자', value=arg.get('mariadb_user', ''), desc=['진단은 읽기 권한, 실제 이관은 쓰기·백업·복원 권한이 필요합니다.']) }}
         {{ macros.setting_input_text('mariadb_password', 'MariaDB 비밀번호', value=arg.get('mariadb_password', ''), type='password', desc=['로그나 연결 결과에 표시하지 않습니다.']) }}
         {{ macros.setting_input_text('mariadb_database_prefix', 'DB 이름 접두어', value=arg.get('mariadb_database_prefix', 'media_'), desc=['기본값 media_ · 실제 DB 이름은 media_general 같은 형식입니다.']) }}
-        {{ macros.setting_input_int('mariadb_read_pool_size', 'DB별 MariaDB 읽기 풀 크기', value=arg.get('mariadb_read_pool_size', '15'), desc=['1~64 · 권장값 8~20 · 기본값 15', '일반·성인·오디오북·비디오 DB별로 풀이 생성되므로 활성 DB 수에 따라 전체 연결 수가 늘어날 수 있습니다.', '설정 저장 후 다음 DB 조회부터 새 크기를 사용합니다.']) }}
+        {{ macros.setting_input_int('mariadb_read_pool_size', 'DB별 MariaDB 읽기 풀 크기', value=arg.get('mariadb_read_pool_size', '15'), desc=['1~64 · 기본값 15 · DB마다 별도 생성']) }}
         {{ macros.setting_input_int('mariadb_connect_timeout', 'MariaDB 연결 제한 시간(초)', value=arg.get('mariadb_connect_timeout', '10'), desc=['1~60초']) }}
         {{ macros.setting_input_int('mariadb_read_timeout', 'MariaDB 읽기 제한 시간(초)', value=arg.get('mariadb_read_timeout', '30'), desc=['1~600초']) }}
         {{ macros.setting_input_int('mariadb_write_timeout', 'MariaDB 쓰기 제한 시간(초)', value=arg.get('mariadb_write_timeout', '30'), desc=['카테고리·Kavita·통DB 실제 이관의 MariaDB 쓰기 작업에 적용합니다.', '1~600초 · 기본값 30']) }}
@@ -164,8 +165,9 @@
     <div class="tab-pane fade" id="setting-diagnosis" role="tabpanel" aria-labelledby="setting-diagnosis-tab">
       <div class="doctor-section doctor-card">
         <h4>표지 검사</h4>
+        <p class="doctor-muted"><a href="/bookoasis_mate/manual#manual-paths" target="_blank" rel="noopener">표지 마운트·경로 확인 안내 ↗</a></p>
         {{ macros.setting_checkbox('cover_root_custom', '커스텀 표지 경로', value=arg.get('cover_root_custom', 'False'), desc=['기본 경로가 아닌 커스텀 경로 사용 시 체크합니다.']) }}
-        {{ macros.setting_input_text('cover_storage_remote_root', '원격 커버 경로 확인값', value=arg.get('cover_storage_remote_root', ''), desc=['연결 테스트에 표시된 BookOasis 커버 경로를 입력합니다. 기본 경로는 &lt;default&gt;입니다.', 'Mate 표지 디렉터리가 같은 저장소로 마운트된 것을 직접 확인한 뒤 저장하세요. 원격 경로로 Mate 경로를 자동 변경하지 않습니다.']) }}
+        {{ macros.setting_input_text('cover_storage_remote_root', '원격 커버 경로 확인값', value=arg.get('cover_storage_remote_root', ''), desc=['연결 테스트의 커버 경로(기본값 &lt;default&gt;). 같은 저장소 마운트인지 확인한 뒤 저장하세요.']) }}
         {{ macros.setting_input_text_and_buttons('cover_root_path', '표지 디렉터리', [['select_cover_root_path_btn', '경로 선택']], value=arg['cover_root_path'], desc=['기본값은 <기본 경로>/covers로 자동 설정됩니다.', '커스텀 표지 경로를 체크하면 직접 입력하거나 경로를 선택할 수 있습니다.']) }}
         {{ macros.setting_input_int('cover_min_width', '최소 표지 너비', value=arg['cover_min_width'], desc=['이 값보다 작으면 저해상도로 표시합니다.']) }}
         {{ macros.setting_input_int('cover_min_height', '최소 표지 높이', value=arg['cover_min_height'], desc=['이 값보다 작으면 저해상도로 표시합니다.']) }}

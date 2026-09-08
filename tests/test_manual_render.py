@@ -1,5 +1,6 @@
 # 매뉴얼 템플릿의 실제 렌더링과 내부 링크·HTML 구조를 검증합니다.
 import unittest
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -49,3 +50,10 @@ class ManualRenderTest(unittest.TestCase):
                         module, page = link.removeprefix("/bookoasis_mate/").split("/")
                         self.assertTrue((root / ("mod_" + module + ".py")).is_file())
                         self.assertTrue((root / "templates" / ("bookoasis_mate_" + module + "_" + page + ".html")).is_file())
+
+        manual = Markup()
+        manual.feed(env.get_template("bookoasis_mate_manual.html").render())
+        for name in ("bookoasis_mate_setting.html", "bookoasis_mate_plugins.html"):
+            source = (root / "templates" / name).read_text(encoding="utf-8")
+            for anchor in re.findall(r'href="/bookoasis_mate/manual#([^"]+)"', source):
+                self.assertIn(anchor, manual.ids, name)

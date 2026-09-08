@@ -251,7 +251,7 @@ class ModulePlugins(PluginModuleBase):
                 return jsonify({"ret": "success", "msg": "플러그인 관리 설정을 저장했습니다."})
             if command == "gitea_test":
                 data = self.manager.test_gitea_connection(settings)
-                return jsonify({"ret": "success", "msg": "Gitea 연결과 토큰 권한을 확인했습니다.", "data": data})
+                return jsonify({"ret": "success", "msg": "Gitea 연결과 사용자 인증을 확인했습니다. 저장소 접근 권한은 조회 시 확인합니다.", "data": data})
             if command == "gitea_servers":
                 return jsonify({"ret": "success", "data": self.manager.public_gitea_servers(settings)})
             if command == "gitea_server_add":
@@ -273,7 +273,7 @@ class ModulePlugins(PluginModuleBase):
                 data = self.manager.test_gitea_connection(
                     settings, req.form.get("server_id")
                 )
-                return jsonify({"ret": "success", "msg": "Gitea 연결과 토큰 권한을 확인했습니다.", "data": data})
+                return jsonify({"ret": "success", "msg": "Gitea 연결과 사용자 인증을 확인했습니다. 저장소 접근 권한은 조회 시 확인합니다.", "data": data})
             if command in {"gitea_server_toggle", "gitea_server_delete"}:
                 servers = self.manager.update_gitea_server(
                     settings,

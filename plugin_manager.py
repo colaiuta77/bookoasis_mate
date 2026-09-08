@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import ssl
 import stat
 import threading
@@ -74,19 +75,29 @@ class GiteaClient:
         try:
             return self.opener.open(request, timeout=self.timeout)
         except HTTPError as error:
+            user_request = path.split("?", 1)[0] == "/api/v1/user"
             messages = {
-                401: "Gitea 인증 정보가 올바르지 않습니다.",
-                403: "Gitea 계정 또는 토큰에 저장소 읽기 권한이 없습니다.",
-                404: "Gitea API 또는 저장소·ref를 찾을 수 없습니다.",
+                401: "Gitea 인증 실패 (HTTP 401). 토큰의 만료·폐기 여부와 프록시의 인증 헤더 전달을 확인하세요.",
+                403: ("Gitea 사용자 정보 조회 권한을 확인하세요 (HTTP 403). 연결 검사는 /api/v1/user를 사용합니다."
+                      if user_request else "Gitea 저장소 읽기 권한과 계정의 저장소 접근 권한을 확인하세요 (HTTP 403)."),
+                404: ("Gitea API 주소를 찾을 수 없습니다 (HTTP 404). 대표 주소와 프록시 경로를 확인하세요."
+                      if user_request else "Gitea 저장소·ref를 찾을 수 없습니다 (HTTP 404). 삭제·이름 변경 또는 비공개 저장소 접근 권한을 확인하세요."),
+                429: "Gitea 요청 제한에 도달했습니다 (HTTP 429). 잠시 후 다시 시도하세요.",
             }
-            raise PluginManagerError(messages.get(error.code, f"Gitea 요청에 실패했습니다. HTTP {error.code}")) from error
+            fallback = (f"Gitea 서버 또는 프록시 오류입니다 (HTTP {error.code}). 서버 상태를 확인한 뒤 다시 시도하세요."
+                        if 500 <= error.code < 600 else f"Gitea 요청에 실패했습니다. HTTP {error.code}")
+            raise PluginManagerError(messages.get(error.code, fallback)) from None
         except ssl.SSLError as error:
-            raise PluginManagerError("Gitea SSL 인증서 검증에 실패했습니다.") from error
+            raise PluginManagerError("Gitea SSL 연결에 실패했습니다. 인증서·호스트 이름·TLS 설정을 확인하세요.") from None
         except (TimeoutError, URLError, OSError) as error:
             reason = getattr(error, "reason", error)
             if isinstance(reason, ssl.SSLError):
-                raise PluginManagerError("Gitea SSL 인증서 검증에 실패했습니다.") from error
-            raise PluginManagerError("Gitea 서버에 연결할 수 없거나 응답 시간이 초과되었습니다.") from error
+                raise PluginManagerError("Gitea SSL 연결에 실패했습니다. 인증서·호스트 이름·TLS 설정을 확인하세요.") from None
+            if isinstance(reason, socket.gaierror):
+                raise PluginManagerError("Gitea 서버 이름 해석에 실패했습니다. 대표 주소와 FF 컨테이너의 DNS를 확인하세요.") from None
+            if isinstance(reason, TimeoutError):
+                raise PluginManagerError("Gitea 응답 시간이 초과되었습니다. 서버 부하·네트워크·프록시 상태를 확인하세요.") from None
+            raise PluginManagerError("Gitea 서버에 연결할 수 없습니다. 주소·포트·방화벽과 서버 실행 상태를 확인하세요.") from None
 
     def test_connection(self):
         with self._open("/api/v1/user") as response:

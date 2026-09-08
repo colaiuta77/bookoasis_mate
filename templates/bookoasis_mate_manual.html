@@ -24,7 +24,7 @@
   </figure>
 </div>
 <div class="doctor-section doctor-card">
-  <h4>처음 연결하기</h4>
+  <h4 id="manual-connection">처음 연결하기</h4>
   <ol>
     <li><strong>설정</strong>에서 BookOasis URL과 DB 엔진을 선택합니다. SQLite는 DB 파일 경로, MariaDB는 접속 정보를 입력합니다.</li>
     <li>관리자 API를 사용할 계정과 BookOasis <code>WEBHOOK_TOKEN</code>을 입력하고 연결을 확인합니다.</li>
@@ -53,7 +53,7 @@
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>연결·표지 경로 확인</h4>
+  <h4 id="manual-paths">연결·표지 경로 확인</h4>
   <ul>
     <li><strong>DB 엔진 불일치</strong>가 확인되면 이관과 고아 표지 정리를 차단합니다. 엔진이 같아도 같은 서버·DB인지 직접 확인해야 합니다.</li>
     <li>원격 <code>COVER_STORAGE_ROOT</code>와 Mate 표지 경로가 다르면 같은 저장소의 마운트인지 확인하고 <strong>원격 커버 경로 확인값</strong>을 입력합니다. 원격 기본 경로는 <code>&lt;default&gt;</code>로 확인합니다.</li>
@@ -63,12 +63,14 @@
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>MariaDB 준비</h4>
+  <h4 id="manual-mariadb">MariaDB 준비</h4>
   <p><strong>설정 → DB 연결 → MariaDB 필수 구성요소</strong>에서 확인·설치합니다.</p>
   <ul>
     <li><code>PyMySQL&gt;=1.1,&lt;2</code> — DB 연결·조회.</li>
     <li><code>mariadb-client</code> — 이관 시 논리 백업·복원. <code>mariadb-dump</code>·<code>mariadb</code> 또는 호환 클라이언트가 필요합니다.</li>
   </ul>
+  <p>호스트는 FF 컨테이너에서 접근 가능한 주소입니다. 별도 컨테이너의 MariaDB에 연결할 때 <code>127.0.0.1</code>은 FF 자신을 가리킵니다. DB 계정의 Host 허용 범위에 실제 접속 원본 IP가 포함되어야 합니다.</p>
+  <p>진단에는 각 미디어 DB 읽기 권한이, 실제 이관에는 대상 DB 쓰기·백업·복원 권한이 필요합니다. 읽기 풀은 DB마다 생성되므로 총 연결 수를 고려하세요. 풀 크기 변경은 저장 후 다음 조회부터 적용됩니다.</p>
   <p>컨테이너에 직접 설치한 패키지는 재생성 때 사라질 수 있습니다. 계속 사용할 패키지는 사용 중인 FF 이미지에 맞춘 사용자 이미지에 포함하세요.</p>
 </div>
 
@@ -84,7 +86,7 @@
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>플러그인 관리</h4>
+  <h4 id="manual-plugins">플러그인 관리</h4>
   <ul>
     <li><strong>플러그인</strong> 탭에서 설치된 항목을 먼저, 미설치 항목을 뒤에 표시합니다. 전체·활성화·비활성화·설치됨·미설치로 필터링합니다.</li>
     <li><strong>업데이트 확인</strong>은 버전을, <strong>Topic 새로고침</strong>은 발견 목록을 갱신합니다. <strong>전체 새로고침</strong>은 저장소 접근 상태도 확인합니다.</li>
@@ -93,11 +95,20 @@
     <li>설치 진행은 상단에 표시하며 성공 후 숨깁니다. 상세 내역은 <strong>작업 이력</strong>에서 확인합니다.</li>
   </ul>
   <p>실행 상태 미확인은 비활성화와 다릅니다. 관리자 API 연결을 먼저 확인하세요. 저장소 404 항목은 미설치 목록에서 숨길 수 있지만 설치 파일과 사용자 등록 원본은 삭제하지 않습니다.</p>
-  <p class="alert alert-warning mb-0">플러그인은 BookOasis 서버에서 실행되는 코드입니다. 소유자·소스를 신뢰하는 패키지만 설치하세요. Gitea 401은 인증 실패 응답이며, 토큰뿐 아니라 서버·프록시 설정도 확인해야 합니다.</p>
+  <p class="alert alert-warning mb-0">플러그인은 BookOasis 서버에서 실행되는 코드입니다. 소유자·소스를 신뢰하는 패키지만 설치하세요.</p>
+  <h5 id="manual-gitea">Gitea 연결 오류</h5>
+  <p>연결 검사는 <code>/api/v1/user</code>의 사용자 인증을 확인합니다. 성공해도 모든 비공개 저장소의 읽기 권한을 보장하지 않습니다. 사용자 조회와 대상 저장소 읽기가 가능한 토큰을 사용하세요.</p>
+  <ul>
+    <li><strong>401 인증 실패</strong> — 토큰 만료·폐기, 서버 주소, 프록시의 Authorization 헤더 전달을 확인합니다.</li>
+    <li><strong>403 접근 거부</strong> — 사용자 조회 또는 저장소 읽기 권한을 확인합니다. 프록시 접근 정책도 원인일 수 있습니다.</li>
+    <li><strong>404</strong> — 연결 검사에서는 API 주소·프록시 경로를, 저장소 조회에서는 이름·ref·접근 권한을 확인합니다.</li>
+    <li><strong>429·5xx</strong> — 요청 제한 또는 서버·프록시 오류입니다. 잠시 후 재시도하고 서버 상태를 확인합니다.</li>
+    <li><strong>DNS·SSL·시간 초과·연결 실패</strong> — FF 컨테이너의 DNS, 인증서·TLS, 주소·포트·방화벽을 확인합니다. 인증서 검증을 끄기보다 인증서 구성을 바로잡으세요.</li>
+  </ul>
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>Docker·폰트</h4>
+  <h4 id="manual-docker">Docker·폰트</h4>
   <ul>
     <li>Docker 관리는 FF의 <code>/host</code> 마운트와 호스트 Docker·Compose 접근이 필요합니다. 작업 대상은 <code>bookoasis</code> 서비스입니다.</li>
     <li><strong>재시작</strong>은 기존 컨테이너를 다시 시작하고, <strong>구성 적용</strong>은 Compose 변경을 반영합니다. 이미지 방식은 이미지를 내려받고, 소스 빌드 방식은 Git 업데이트 후 빌드합니다.</li>
