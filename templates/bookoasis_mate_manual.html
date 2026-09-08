@@ -17,144 +17,116 @@
 <div class="tab-content doctor-manual-tab-content">
 <div class="tab-pane fade show active" id="manual-guide-pane" role="tabpanel" aria-labelledby="manual-guide-tab">
 <div class="doctor-section doctor-card">
-  <h4>원격 설정 확인과 운영 진단</h4>
-  <p>연결 테스트는 웹훅 토큰으로 실제 DB 엔진을 확인합니다. 엔진 불일치 시 카테고리·통DB 이관과 고아 표지 정리를 차단합니다. 엔진 일치는 같은 DB 서버나 계정에 연결됐다는 보장이 아닙니다. 서버 중지·구버전·인증 실패는 확인 불가로 구분하며, 오프라인 이관을 위해 경고 후 기존 수동 확인 절차를 유지합니다.</p>
-  <p>BookOasis의 COVER_STORAGE_ROOT와 커버 이동 상태를 관리자 API로 확인합니다. 원격 커버 경로와 Mate 표지 디렉터리가 다르면 같은 저장소의 마운트인지 직접 확인하고 설정의 ‘원격 커버 경로 확인값’에 원격 경로를 입력하세요. 기본 경로의 확인값은 &lt;default&gt;입니다. Mate 경로는 자동 변경하지 않습니다. 이동 중 또는 확인값 변경 시 커버 검사·정리·이관을 차단합니다. 검사 시작 후 원격 설정을 변경하지 마세요. 서버의 일시적인 기본 경로 폴백이나 실제 마운트 동일성까지 자동 검증하지는 않습니다.</p>
-  <p>MariaDB SQL 관리자 진단은 information_schema의 PROCESSLIST, TABLES, COLUMNS, STATISTICS, SCHEMATA, INNODB_TRX, INNODB_LOCKS, INNODB_LOCK_WAITS와 performance_schema의 threads, events_statements_current, events_statements_history, events_statements_summary_by_digest, table_io_waits_summary_by_table만 추가 허용합니다. mysql·sys와 비밀번호 해시·settings 조회, 파일 출력, 잠금 함수, 쓰기 및 다중 문장은 차단합니다.</p>
-  <p>일반 조회는 최대 500행·10초, 진단은 최대 5,000행·30초이며 기본 제한 시간은 3초입니다. 스트리밍으로 최대 결과+1행을 읽고 잘림 여부를 표시합니다. 실제 쿼리 전체 실행 비용은 행 제한만으로 줄지 않으며 DB 제한 시간이 적용됩니다. 서버 버전·PROCESS 권한·performance_schema 활성화 상태에 따라 조회가 실패하거나 일부 세션만 보일 수 있습니다. 실행 중 쿼리 본문에는 민감한 값이 포함될 수 있으므로 결과 공유에 주의하세요. MariaDB에서 문자열은 작은따옴표, 식별자는 백틱을 사용하고 역슬래시 이스케이프는 사용하지 마세요.</p>
-  <p>플러그인 전체 새로고침은 저장소 존재 확인과 Topic 재검색을 수행합니다. 저장소 API의 404는 삭제 또는 비공개 접근 불가를 뜻할 수 있어 미설치 목록에서 숨기지만 사용자 카탈로그 원본과 설치 파일은 삭제하지 않습니다. 401·403·네트워크 장애는 삭제로 판단하지 않습니다. VERSION 파일만 없는 경우에도 저장소 삭제로 판정하지 않습니다. Topic 검색 실패 시 이전 캐시를 유지하며, 상태는 다음 원격 새로고침 때 재확인합니다.</p>
-</div>
-<div class="doctor-section doctor-card">
-  <h4>지원 범위 한눈에 보기</h4>
-  <div class="doctor-manual-table-wrap">
-    <table class="doctor-manual-table">
-      <thead><tr><th>기능</th><th>일반</th><th>성인</th><th>오디오북</th><th>비디오</th></tr></thead>
-      <tbody>
-        <tr><td>상태 요약·라이브러리 통계</td><td>지원</td><td>지원</td><td>지원</td><td>지원</td></tr>
-        <tr><td>스캔 상태·DB 정보·읽기 전용 SQL</td><td>지원</td><td>지원</td><td>지원</td><td>지원</td></tr>
-        <tr><td>문제 도서·시리즈·표지 진단</td><td>지원</td><td>지원</td><td>도서 전용</td><td>도서 전용</td></tr>
-        <tr><td>카테고리 이관·통DB 패키지</td><td>지원</td><td>지원</td><td>지원</td><td>지원</td></tr>
-        <tr><td>Google Drive 변경 연동</td><td>지원</td><td>지원</td><td>지원</td><td>지원</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <p class="doctor-muted mb-0">오디오북과 비디오는 전용 스키마를 사용합니다. 일반·성인 도서용 진단을 억지로 적용하지 않고 전용 집계와 스캔 기능만 제공합니다.</p>
-</div>
-
-<div class="doctor-section doctor-card">
   <h4>Mate 전체 구조</h4>
-  <p>Mate는 FlaskFarm 화면에서 BookOasis의 API와 DB를 연결하고, 오래 걸리는 작업과 Google Drive 이벤트를 별도 경계에서 처리합니다.</p>
   <figure class="doctor-manual-diagram">
-    <img src="{{ url_for('bookoasis_mate.static', filename='img/manual/mate-architecture.svg') }}" alt="FlaskFarm, BookOasis Mate, 별도 작업 프로세스, BookOasis API와 DB, Redis 및 Google Drive 연동 관계" loading="lazy">
-    <figcaption>현재 Mate 버전 기준 개념도입니다. 화살표는 주요 데이터·작업 흐름이며 실제 네트워크 배치는 설치 환경에 따라 달라질 수 있습니다.</figcaption>
+    <img src="{{ url_for('bookoasis_mate.static', filename='img/manual/mate-architecture.svg') }}" alt="Mate 전체 구조" loading="lazy">
+    <figcaption>현재 Mate 버전 기준 개념도입니다. 세부 설정과 제약은 아래 안내를 확인하세요.</figcaption>
   </figure>
 </div>
+<div class="doctor-section doctor-card">
+  <h4 id="manual-connection">처음 연결하기</h4>
+  <ol>
+    <li><strong>설정</strong>에서 BookOasis URL과 DB 엔진을 선택합니다. SQLite는 DB 파일 경로, MariaDB는 접속 정보를 입력합니다.</li>
+    <li>관리자 API를 사용할 계정과 BookOasis <code>WEBHOOK_TOKEN</code>을 입력하고 연결을 확인합니다.</li>
+    <li>표지·로그·플러그인·폰트 경로는 <strong>FlaskFarm 컨테이너에서 보이는 경로</strong>로 지정합니다. Google Drive 감시의 BookOasis 경로 루트는 BookOasis DB 경로를 따릅니다.</li>
+    <li>필요한 기능만 설정한 뒤 해당 메뉴에서 실행합니다. 진단 조회와 실제 삭제·이관·스캔 요청은 별도 작업입니다.</li>
+  </ol>
+  <p>자동 감지는 <code>DB_ENGINE</code>·<code>DBMS</code>와 설정을 확인합니다. MariaDB 연결 실패 시 SQLite로 자동 전환하지 않습니다.</p>
+</div>
 
 <div class="doctor-section doctor-card">
-  <h4>1. 공통 연결 조건</h4>
+  <h4>메뉴별 안내</h4>
+  <div class="doctor-manual-table-wrap"><table class="doctor-manual-table">
+    <thead><tr><th>메뉴</th><th>할 수 있는 일</th></tr></thead>
+    <tbody>
+      <tr><td><a href="/bookoasis_mate/main/manual">라이브러리 진단</a></td><td>상태·통계·스캔 확인, 문제 도서·시리즈·표지 검사, 고아 표지 정리.</td></tr>
+      <tr><td><a href="/bookoasis_mate/migration/manual">카테고리 이관</a></td><td>카테고리 패키지 내보내기, 신규 가져오기·병합. SQLite↔MariaDB 지원.</td></tr>
+      <tr><td><a href="/bookoasis_mate/database_migration/manual">통DB 이관</a></td><td>Kavita 이관 또는 같은 엔진의 BookOasis DB·표지 전체 교체.</td></tr>
+      <tr><td><a href="/bookoasis_mate/gdrive_scan/manual">Google Drive 연동</a></td><td>Changes·Activity 자체 감지 또는 외부 이벤트 수신, 경로 스캔과 대기열 관리.</td></tr>
+      <tr><td>SQL 도구</td><td>일반 조회 및 MariaDB 관리자 진단.</td></tr>
+      <tr><td>플러그인 관리</td><td>통합 목록, 설치·업데이트·설정, 저장소·ZIP 설치, 작업 이력.</td></tr>
+      <tr><td>커스텀 폰트</td><td>공유 폴더에 폰트 업로드.</td></tr>
+      <tr><td>설정의 Docker·환경 파일</td><td>환경·Compose 편집, BookOasis 서비스 재시작·구성 적용·업데이트.</td></tr>
+    </tbody>
+  </table></div>
+  <p>일반·성인·오디오북·비디오 DB를 지원합니다. 문제 도서·시리즈·표지 진단은 일반·성인 도서 전용입니다.</p>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4 id="manual-paths">연결·표지 경로 확인</h4>
   <ul>
-    <li>FF에서 BookOasis URL에 접근할 수 있어야 하며 관리자 API 기능에는 BookOasis 관리자 계정이 필요합니다.</li>
-    <li>보관함 스캔 웹훅은 BookOasis <code>.env</code>의 <code>WEBHOOK_TOKEN</code>과 같은 값을 사용합니다.</li>
-    <li>SQLite 진단·이관은 FF 컨테이너에서 BookOasis DB 파일을 볼 수 있어야 합니다. 표지 검사·정리, 로그와 커스텀 폰트도 해당 호스트 경로를 FF에 마운트해야 합니다.</li>
-    <li>MariaDB 진단·이관은 FF에서 MariaDB 호스트에 접속할 수 있어야 합니다. 진단은 읽기 권한, 실제 이관은 대상 DB 쓰기와 논리 백업·복원 권한이 필요합니다.</li>
-    <li>경로 입력값은 호스트 경로가 아니라 <strong>FF 컨테이너에서 보이는 경로</strong>를 기준으로 합니다.</li>
+    <li><strong>DB 엔진 불일치</strong>가 확인되면 이관과 고아 표지 정리를 차단합니다. 엔진이 같아도 같은 서버·DB인지 직접 확인해야 합니다.</li>
+    <li>원격 <code>COVER_STORAGE_ROOT</code>와 Mate 표지 경로가 다르면 같은 저장소의 마운트인지 확인하고 <strong>원격 커버 경로 확인값</strong>을 입력합니다. 원격 기본 경로는 <code>&lt;default&gt;</code>로 확인합니다.</li>
+    <li>커버 이동 중이거나 경로 확인값이 맞지 않으면 관련 검사·정리·이관을 차단합니다. 검사 중 원격 설정을 바꾸지 마세요.</li>
+    <li>서버 중지·구버전·인증 실패로 원격 확인이 불가능할 때는 경고가 표시됩니다. 경고는 안전이 확인됐다는 뜻이 아닙니다.</li>
   </ul>
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>2. MariaDB 필수 패키지</h4>
-  <p><strong>PyMySQL 1.1 이상 2.0 미만</strong>은 FlaskFarm이 MariaDB에 직접 연결할 때 사용하는 Python 드라이버입니다.</p>
-  <p><strong>mariadb-client</strong>는 MariaDB 통DB·카테고리·Kavita 이관의 논리 백업과 복원에 사용하는 <code>mariadb</code>와 <code>mariadb-dump</code> 명령을 제공합니다.</p>
-  <div class="alert alert-info mb-0">
-    설치 상태 확인, 설치·재설치와 필요한 패키지 자동 설치는 <strong>설정 → DB 연결 → MariaDB 필수 구성요소</strong>에서 진행합니다.
-  </div>
-</div>
-
-<div class="doctor-section doctor-card">
-  <h4>3. 컨테이너 재생성 후에도 유지하기</h4>
-  <p>실행 중인 컨테이너에 직접 설치한 패키지는 단순 재시작에는 남지만 이미지 업데이트나 컨테이너 재생성 시 사라집니다. 계속 사용할 환경은 사용자 이미지를 권장합니다.</p>
-  <div class="doctor-code-window">
-    <div class="doctor-code-window-header">Dockerfile</div>
-    <pre><code># Dockerfile.ff-bookoasis-mate
-FROM flaskfarm/flaskfarm:4.1
-USER root
-RUN apt-get update \
-    &amp;&amp; apt-get install -y --no-install-recommends mariadb-client \
-    &amp;&amp; python -m pip install --no-cache-dir "PyMySQL&gt;=1.1" \
-    &amp;&amp; rm -rf /var/lib/apt/lists/*</code></pre>
-  </div>
-  <p class="doctor-muted">PyMySQL만 설치하면 MariaDB 진단·조회는 가능하지만 논리 백업·복원 기능은 실행할 수 없습니다.</p>
-</div>
-
-<div class="doctor-section doctor-card">
-  <h4>4. 안전 수칙</h4>
+  <h4 id="manual-mariadb">MariaDB 준비</h4>
+  <p><strong>설정 → DB 연결 → MariaDB 필수 구성요소</strong>에서 확인·설치합니다.</p>
   <ul>
-    <li>카테고리·Kavita·통DB 실제 이관 전에는 Dry Run과 별도 외부 백업을 완료합니다.</li>
-    <li>DB를 변경하거나 교체하는 동안 BookOasis, 스캐너와 메타데이터 변경 작업을 중지합니다.</li>
-    <li>API 키, 관리자 비밀번호와 MariaDB 비밀번호는 로그·스크린샷·공유 설정 파일에 포함하지 않습니다.</li>
-    <li>고아 표지 정리는 Dry Run 결과를 먼저 확인하고, 삭제 범위와 백업 위치를 검토한 후 실행합니다.</li>
-    <li>SQLite와 MariaDB 통DB 패키지는 서로 교차 복원하지 않습니다.</li>
+    <li><code>PyMySQL&gt;=1.1,&lt;2</code> — DB 연결·조회.</li>
+    <li><code>mariadb-client</code> — 이관 시 논리 백업·복원. <code>mariadb-dump</code>·<code>mariadb</code> 또는 호환 클라이언트가 필요합니다.</li>
+  </ul>
+  <p>호스트는 FF 컨테이너에서 접근 가능한 주소입니다. 별도 컨테이너의 MariaDB에 연결할 때 <code>127.0.0.1</code>은 FF 자신을 가리킵니다. DB 계정의 Host 허용 범위에 실제 접속 원본 IP가 포함되어야 합니다.</p>
+  <p>진단에는 각 미디어 DB 읽기 권한이, 실제 이관에는 대상 DB 쓰기·백업·복원 권한이 필요합니다. 읽기 풀은 DB마다 생성되므로 총 연결 수를 고려하세요. 풀 크기 변경은 저장 후 다음 조회부터 적용됩니다.</p>
+  <p>컨테이너에 직접 설치한 패키지는 재생성 때 사라질 수 있습니다. 계속 사용할 패키지는 사용 중인 FF 이미지에 맞춘 사용자 이미지에 포함하세요.</p>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4>SQL 도구</h4>
+  <ol>
+    <li>SQL 모드·대상 DB·진단 프리셋을 선택합니다.</li>
+    <li>최대 결과와 제한 시간을 정하고 <strong>실행</strong>합니다.</li>
+    <li>잘림 표시와 오류를 확인합니다. 행 제한만으로 전체 쿼리 비용이 줄지는 않습니다.</li>
+  </ol>
+  <p>일반 조회는 최대 500행·10초, MariaDB 관리자 진단은 최대 5,000행·30초입니다. SELECT·WITH·EXPLAIN 한 문장만 허용하며 쓰기·파일 출력·민감 설정 조회는 차단합니다.</p>
+  <p>관리자 진단은 허용된 information_schema·performance_schema 테이블만 조회합니다. InnoDB 트랜잭션은 <code>PROCESS</code> 권한이 필요할 수 있습니다. 권한을 자동 부여하지 않으며, 실행 중 SQL 본문에는 민감한 값이 포함될 수 있습니다.</p>
+</div>
+
+<div class="doctor-section doctor-card">
+  <h4 id="manual-plugins">플러그인 관리</h4>
+  <ul>
+    <li><strong>플러그인</strong> 탭에서 설치된 항목을 먼저, 미설치 항목을 뒤에 표시합니다. 전체·활성화·비활성화·설치됨·미설치로 필터링합니다.</li>
+    <li><strong>업데이트 확인</strong>은 버전을, <strong>Topic 새로고침</strong>은 발견 목록을 갱신합니다. <strong>전체 새로고침</strong>은 저장소 접근 상태도 확인합니다.</li>
+    <li>사용자 저장소와 비공개 Gitea는 <strong>설정</strong> 탭에서 등록합니다. 저장소·ZIP 설치는 패키지 검사 후 확인을 거쳐 실행합니다.</li>
+    <li>일반 설정은 BookOasis가 제공한 설정 계약으로 편집합니다. <strong>BookOasis 전용 설정</strong>은 BookOasis에서 열어 변경합니다. 비밀번호·토큰은 비우면 유지하고 삭제를 선택해야 초기화됩니다.</li>
+    <li>설치 진행은 상단에 표시하며 성공 후 숨깁니다. 상세 내역은 <strong>작업 이력</strong>에서 확인합니다.</li>
+  </ul>
+  <p>실행 상태 미확인은 비활성화와 다릅니다. 관리자 API 연결을 먼저 확인하세요. 저장소 404 항목은 미설치 목록에서 숨길 수 있지만 설치 파일과 사용자 등록 원본은 삭제하지 않습니다.</p>
+  <p class="alert alert-warning mb-0">플러그인은 BookOasis 서버에서 실행되는 코드입니다. 소유자·소스를 신뢰하는 패키지만 설치하세요.</p>
+  <h5 id="manual-gitea">Gitea 연결 오류</h5>
+  <p>연결 검사는 <code>/api/v1/user</code>의 사용자 인증을 확인합니다. 성공해도 모든 비공개 저장소의 읽기 권한을 보장하지 않습니다. 사용자 조회와 대상 저장소 읽기가 가능한 토큰을 사용하세요.</p>
+  <ul>
+    <li><strong>401 인증 실패</strong> — 토큰 만료·폐기, 서버 주소, 프록시의 Authorization 헤더 전달을 확인합니다.</li>
+    <li><strong>403 접근 거부</strong> — 사용자 조회 또는 저장소 읽기 권한을 확인합니다. 프록시 접근 정책도 원인일 수 있습니다.</li>
+    <li><strong>404</strong> — 연결 검사에서는 API 주소·프록시 경로를, 저장소 조회에서는 이름·ref·접근 권한을 확인합니다.</li>
+    <li><strong>429·5xx</strong> — 요청 제한 또는 서버·프록시 오류입니다. 잠시 후 재시도하고 서버 상태를 확인합니다.</li>
+    <li><strong>DNS·SSL·시간 초과·연결 실패</strong> — FF 컨테이너의 DNS, 인증서·TLS, 주소·포트·방화벽을 확인합니다. 인증서 검증을 끄기보다 인증서 구성을 바로잡으세요.</li>
   </ul>
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>5. BookOasis 공식 구현 참고</h4>
+  <h4 id="manual-docker">Docker·폰트</h4>
   <ul>
-    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/database.py" target="_blank" rel="noopener noreferrer">database.py</a> — 일반·성인·오디오북·비디오 DB 역할과 공통 스키마.</li>
-    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/docs/api_endpoints.md" target="_blank" rel="noopener noreferrer">api_endpoints.md</a> — 상태 조회, 스캔, 도서 작업과 상세 화면 연동 API 계약.</li>
-    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/docs/move_to_mariadb.md" target="_blank" rel="noopener noreferrer">move_to_mariadb.md</a> — SQLite·MariaDB 엔진 설정과 공식 전환 절차.</li>
-    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/tools/scanner/tasks.py" target="_blank" rel="noopener noreferrer">scanner/tasks.py</a>와 <a href="https://github.com/leeyj/BookOasis_stable/blob/main/tools/scanner/db_writer.py" target="_blank" rel="noopener noreferrer">scanner/db_writer.py</a> — 전체 스캔의 파일 정보 수집과 DB 저장.</li>
-    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/services/book_info_service.py" target="_blank" rel="noopener noreferrer">book_info_service.py</a>와 <a href="https://github.com/leeyj/BookOasis_stable/blob/main/tools/lazy_scanner.py" target="_blank" rel="noopener noreferrer">lazy_scanner.py</a> — 상세·뷰어 요청과 지연 스캔의 정보 보정.</li>
-    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/repositories/sqlite/audiobook_repository.py" target="_blank" rel="noopener noreferrer">SQLite 오디오북 저장소</a>와 <a href="https://github.com/leeyj/BookOasis_stable/blob/main/repositories/mariadb/audiobook_repository.py" target="_blank" rel="noopener noreferrer">MariaDB 오디오북 저장소</a> — 오디오북·트랙·재생 진행률의 엔진별 구현.</li>
-    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/repositories/sqlite/video_repository.py" target="_blank" rel="noopener noreferrer">SQLite 비디오 저장소</a>와 <a href="https://github.com/leeyj/BookOasis_stable/blob/main/repositories/mariadb/video_repository.py" target="_blank" rel="noopener noreferrer">MariaDB 비디오 저장소</a> — 작품·에피소드·시청 진행률의 엔진별 구현.</li>
-    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/docs/spec_scanner_logic.md" target="_blank" rel="noopener noreferrer">spec_scanner_logic.md</a> — 체크포인트, 원격 경로, VFS와 예외 필터를 포함한 스캐너 명세.</li>
-    <li><a href="https://github.com/leeyj/BookOasis_stable/blob/main/tools/export_category.py" target="_blank" rel="noopener noreferrer">export_category.py</a>, <a href="https://github.com/leeyj/BookOasis_stable/blob/main/tools/import_category.py" target="_blank" rel="noopener noreferrer">import_category.py</a>와 <a href="https://github.com/leeyj/BookOasis_stable/blob/main/docs/guide_category_migration.md" target="_blank" rel="noopener noreferrer">guide_category_migration.md</a> — 카테고리 패키지 형식과 병합 계약.</li>
+    <li>Docker 관리는 FF의 <code>/host</code> 마운트와 호스트 Docker·Compose 접근이 필요합니다. 작업 대상은 <code>bookoasis</code> 서비스입니다.</li>
+    <li><strong>재시작</strong>은 기존 컨테이너를 다시 시작하고, <strong>구성 적용</strong>은 Compose 변경을 반영합니다. 이미지 방식은 이미지를 내려받고, 소스 빌드 방식은 Git 업데이트 후 빌드합니다.</li>
+    <li>소스 수정 파일이 있으면 자동 업데이트를 중단합니다. 변경 이유를 확인하고 백업한 뒤 Git 상태를 정리하세요. 변경 내용을 강제로 지우지 마세요.</li>
+    <li>폰트는 FF 업로드 폴더와 BookOasis <code>/app/static/fonts/custom</code>이 같은 저장소를 보게 합니다. TTF·OTF·WOFF·WOFF2, 파일당 최대 30MB이며 같은 이름은 덮어쓰지 않습니다.</li>
+    <li>폰트 마운트 변경은 컨테이너 재생성 등 Compose 구성 적용이 필요합니다. 기존 마운트에 파일만 추가하면 폰트 목록을 다시 조회합니다. 업로드 자체는 재시작하지 않습니다.</li>
   </ul>
 </div>
 
 <div class="doctor-section doctor-card">
-  <h4>6. 오디오북 공통 지원</h4>
+  <h4>삭제·이관 전 확인</h4>
   <ul>
-    <li>SQLite의 <code>db/media_audiobook.db</code> 또는 MariaDB의 오디오북 DB를 별도로 연결하며 상태 요약, DB 무결성 검사, DB 정보·보관함 확인, 스캔 상태와 읽기 전용 SQL에서 사용할 수 있습니다.</li>
-    <li>Google Drive 변경 연동은 MP3·M4B·M4A·FLAC·AAC·WAV·OGG·OPUS·WMA 이벤트를 오디오북 보관함에 연결해 VFS 갱신과 보관함 스캔을 요청할 수 있습니다.</li>
-    <li>오디오북은 <code>audiobooks</code>·<code>audiobook_tracks</code> 구조를 사용하므로 도서 전용 문제 도서, 시리즈 누락, 표지 검사, 개별 도서 재스캔과 메타데이터 적용 메뉴에는 표시하지 않습니다.</li>
+    <li>DB와 표지를 별도로 백업하고, 대상 DB·경로를 확인합니다.</li>
+    <li>Kavita·통DB 이관과 고아 표지 정리는 <strong>Dry Run</strong>을 먼저 실행합니다. 카테고리 이관은 별도 Dry Run이 없으므로 <strong>패키지 검사</strong>와 백업을 확인합니다.</li>
+    <li>실제 DB 변경·교체 중에는 BookOasis와 스캐너 등 같은 데이터를 쓰는 작업을 중지합니다.</li>
+    <li>토큰·비밀번호·개인정보가 담긴 설정, 로그, DB 패키지를 외부에 공유하지 마세요.</li>
   </ul>
-</div>
-
-<div class="doctor-section doctor-card">
-  <h4>7. 비디오북 공통 지원</h4>
-  <ul>
-    <li>SQLite의 <code>db/media_video.db</code> 또는 MariaDB의 비디오 DB를 별도로 연결하며 상태 요약, 라이브러리 통계, DB 정보·보관함 확인, 스캔 상태와 읽기 전용 SQL에서 사용할 수 있습니다.</li>
-    <li>Google Drive 변경 연동은 MP4·MKV·AVI·WEBM·MOV·M4V·TS와 SMI·SRT·VTT 이벤트를 비디오 보관함의 개별 경로 스캔으로 연결합니다.</li>
-    <li>비디오는 <code>videos</code>·<code>video_episodes</code> 구조를 사용하므로 도서 전용 문제 도서, 시리즈 누락, 표지 검사와 도서 메타데이터 메뉴에는 표시하지 않습니다.</li>
-  </ul>
-</div>
-
-<div class="doctor-section doctor-card">
-  <h4>8. 네이티브 플러그인 관리</h4>
-  <ul>
-    <li><strong>카탈로그</strong>는 Mate에서 확인한 저장소와 사용자가 등록한 저장소를 관리하며, 실제 설치 전에 ZIP 구조와 Python 패키지를 검사합니다.</li>
-    <li><strong>설치 플러그인</strong>은 설치 정보와 최신 BookOasis 관리 API 결과를 결합해 활성화 여부와 실제 로드 성공·오류를 구분해 표시합니다.</li>
-    <li>플러그인이 <code>config_schema</code>를 제공하면 Mate에서 설정할 수 있습니다. 비밀번호·토큰 값은 브라우저에 반환하지 않으며 비워 두면 기존 값을 유지합니다.</li>
-    <li>네이티브 업데이트 계약을 지원하는 플러그인은 BookOasis 업데이트 API를 사용합니다. GitHub 직접 설치·업데이트와는 별도 기능입니다.</li>
-    <li>GitHub의 <code>bookoasis-plugin</code> Topic과 등록한 비공개 Gitea의 <code>bookoasis-plugin</code>·<code>security-bookoasis-plugin</code> Topic 후보를 백그라운드에서 수집하고 캐시합니다. 후보는 자동 설치하지 않으며 플러그인 ID 확인 후 기존 패키지 검사로 넘깁니다.</li>
-  </ul>
-</div>
-
-<div class="doctor-section doctor-card">
-  <h4>9. 기능별 안내 위치</h4>
-  <div class="doctor-manual-summary-grid">
-    <div class="doctor-manual-summary-card"><strong>설정</strong><span>BookOasis·DB 연결, 진단 정책, 환경 파일과 Docker 관리.</span></div>
-    <div><strong>라이브러리 진단</strong><span>판정 기준, 스캔 상태, 표지·고아 파일 동작 방식.</span></div>
-    <div><strong>카테고리 이관</strong><span>내보내기, 신규 가져오기, 기존 카테고리 병합.</span></div>
-    <div><strong>통DB 이관</strong><span>Kavita 이관과 BookOasis 전체 패키지 내보내기·가져오기.</span></div>
-    <div><strong>Google Drive 연동</strong><span>gd-poller 래퍼, 경로 매핑, VFS 갱신과 스캔 큐.</span></div>
-    <div><strong>SQL 도구</strong><span>네 엔진 DB의 읽기 전용 진단 프리셋과 제한된 SELECT 실행.</span></div>
-    <div><strong>플러그인 관리</strong><span>카탈로그, 설치 플러그인, GitHub·Gitea·ZIP 설치와 작업 이력.</span></div>
-    <div><strong>커스텀 폰트</strong><span>공유 마운트 경로, 파일 업로드와 BookOasis 재시작 조건.</span></div>
-    <div><strong>Docker·환경 파일</strong><span>환경·Compose 편집, BookOasis 재시작과 이미지 업데이트 안전 범위.</span></div>
-    <div><strong>로그·검사 이력</strong><span>BookOasis 주요 로그, 과거 ZIP 로그와 진단 기록 확인.</span></div>
-  </div>
+  <p class="mb-0">외부 계약은 <a href="https://github.com/leeyj/BookOasis_stable/blob/main/docs/api_endpoints.md" target="_blank" rel="noopener noreferrer">BookOasis API 문서</a>와 설치한 BookOasis 버전을 함께 확인하세요.</p>
 </div>
 </div>
 
