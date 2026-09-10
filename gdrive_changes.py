@@ -558,7 +558,9 @@ class GoogleDriveChangesWatcher:
                 if not receipt and event is None and current == previous:
                     continue
                 validated = None
-                if event and event.get("path"):
+                if receipt and event and event.get("activity_hold"):
+                    validated = event
+                elif event and event.get("path"):
                     validated = validate_event(
                         event["action"], event["item_type"], event["path"], event.get("removed_path"), self.extensions
                     )

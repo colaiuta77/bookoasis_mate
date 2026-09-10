@@ -113,9 +113,30 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
             if not parents:
                 return ""
             node = self.file(parents[0])
-        raise RuntimeError("Activity 폴더 경로의 최대 탐색 깊이를 초과했습니다.")
+        raise ValueError("Activity 폴더 경로의 최대 탐색 깊이를 초과했습니다.")
 
     def activity_event(self, change, previous, item_model):
+        try:
+            return self._resolve_activity_event(change, previous)
+        except GoogleDriveApiError as error:
+            if error.status_code != 404:
+                raise
+            reason = "부모 폴더 조회 404. 삭제·접근 불가로 부모 경로를 확인할 수 없습니다."
+        except ValueError as error:
+            reason = str(error)
+        action = change["activity_action"]
+        detail = action.get("detail") or {}
+        target = (action.get("target") or {}).get("driveItem") or {}
+        kind = next(key for key in ("delete", "move", "rename", "restore", "create", "edit") if key in detail)
+        metadata = {"file_id": change["fileId"], "title": str(target.get("title") or ""),
+                    "action": kind, "root_id": self.root_id, "remote": self.remote,
+                    "time": change["receipt"]["parent_id"], "reason": reason}
+        # 경로를 추측해 스캔하지 않고 실패 행과 receipt를 함께 저장합니다.
+        return previous, {"action": kind, "item_type": "directory" if "driveFolder" in target else "file",
+                          "path": "", "removed_path": "", "activity_hold": metadata,
+                          "ingestion_error": f"Activity 경로 확인 보류 ({kind}, 파일 ID {change['fileId']}): {reason} 경로 수정 후 재시도해 주세요. 다른 활동 수집은 계속합니다."}
+
+    def _resolve_activity_event(self, change, previous):
         action = change["activity_action"]
         detail = action.get("detail") or {}
         target = (action.get("target") or {}).get("driveItem") or {}
@@ -128,7 +149,11 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
         except GoogleDriveApiError as error:
             if error.status_code != 404:
                 raise
-        new_path = self._path(data) if data and not data.get("trashed") else ""
+        if data and data.get("trashed"):
+            old_path = old_path or self._path(data)
+            new_path = ""
+        else:
+            new_path = self._path(data) if data else ""
         item_type = "directory" if "driveFolder" in target or (data or {}).get("mimeType") == "application/vnd.google-apps.folder" else "file"
         if kind == "rename" and new_path:
             old_title = (detail["rename"] or {}).get("oldTitle")
@@ -141,7 +166,13 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
                 if parent_id:
                     old_path = self._path({"id": file_id, "name": target.get("title") or (data or {}).get("name"), "parents": [parent_id]})
         if not new_path and not old_path:
-            raise RuntimeError("Activity 대상의 현재·이전 경로를 확인할 수 없습니다. 파일 접근 권한과 실제 감시 폴더를 확인해 주세요. 체크포인트를 유지합니다.")
+            if data is None:
+                reason = "파일 조회 404이며 저장된 이전 경로가 없습니다. 삭제 또는 접근 불가 상태입니다."
+            elif data.get("trashed"):
+                reason = "휴지통 파일의 부모 경로를 감시 폴더까지 복원할 수 없고 이전 경로도 없습니다."
+            else:
+                reason = "현재 부모 경로가 감시 폴더 ID에 도달하지 않고 이전 경로도 없습니다. 이동 또는 바로가기 대상 ID를 확인해 주세요."
+            raise ValueError(reason)
         current = {"file_id": file_id, "path": new_path, "is_directory": item_type == "directory",
                    "parent_id": str(((data or {}).get("parents") or [""])[0])} if new_path else None
         if not new_path:

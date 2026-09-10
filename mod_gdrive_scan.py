@@ -590,7 +590,7 @@ class ModuleGDriveScan(PluginModuleBase):
                         "ret": "success" if retried else "warning",
                         "msg": "실패 이벤트를 다시 대기열에 등록했습니다."
                         if retried
-                        else "재시도할 실패 이벤트를 찾을 수 없습니다.",
+                        else "재시도할 실패 이벤트가 없거나 경로가 비어 있습니다. 경로 확인 보류 항목은 경로 수정 후 재시도해 주세요.",
                     }
                 )
             if command == "wake":
