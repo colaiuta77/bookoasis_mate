@@ -5,13 +5,20 @@
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 <div class="doctor-card doctor-section">
   <h3>로컬 폴더 감지</h3>
-  <p>로컬 디스크는 실시간 이벤트로, Windows Docker·CIFS/NFS·FUSE는 폴링으로 변경을 확인합니다. <a href="#local_watch_manual">매뉴얼</a></p>
+  <p>로컬 디스크는 실시간 이벤트로, Windows Docker·CIFS/NFS·FUSE는 폴링으로 변경을 확인합니다. <a href="#local_watch_manual" id="local_manual_link">매뉴얼</a></p>
   <button id="local_start" class="btn btn-sm btn-primary">새 기준으로 시작</button>
   <button id="local_stop" class="btn btn-sm btn-outline-danger">작업 중지</button>
   <span id="local_state" role="status" aria-live="polite"></span>
   <p id="local_error" class="text-danger" role="alert"></p>
   <div id="local_roots_status"></div>
 </div>
+<ul class="nav nav-tabs doctor-setting-tabs" role="tablist" aria-label="로컬 폴더 감지">
+  <li class="nav-item"><a class="nav-link active" id="local_settings_tab" data-toggle="tab" href="#local_settings" role="tab" aria-controls="local_settings" aria-selected="true">설정</a></li>
+  <li class="nav-item"><a class="nav-link" id="local_changes_tab" data-toggle="tab" href="#local_changes" role="tab" aria-controls="local_changes" aria-selected="false">변경 이벤트</a></li>
+  <li class="nav-item"><a class="nav-link" id="local_manual_tab" data-toggle="tab" href="#local_watch_manual" role="tab" aria-controls="local_watch_manual" aria-selected="false">매뉴얼</a></li>
+</ul>
+<div class="tab-content">
+<div class="tab-pane fade show active" id="local_settings" role="tabpanel" aria-labelledby="local_settings_tab">
 <div class="doctor-card doctor-section">
   <h4>감시 설정</h4>
   <p class="doctor-muted">두 경로 모두 각 컨테이너에서 보이는 절대 경로입니다. 설정 변경은 작업 중지 후 적용하세요.</p>
@@ -25,6 +32,8 @@
   <button id="local_save" class="btn btn-sm btn-primary">설정 저장</button>
   <p class="doctor-muted mt-2">BookOasis 연결 및 Discord 웹훅은 기존 Mate 설정을 사용합니다. Google Drive 연동을 켤 필요는 없습니다.</p>
 </div>
+</div>
+<div class="tab-pane fade" id="local_changes" role="tabpanel" aria-labelledby="local_changes_tab">
 <div class="doctor-card doctor-section">
   <h4>변경 이벤트</h4>
   <div class="form-inline mb-2">
@@ -38,7 +47,9 @@
   <div class="table-responsive"><table class="table table-sm"><thead><tr><th>ID·수신</th><th>변경</th><th>경로</th><th>상태</th><th>작업</th></tr></thead><tbody id="local_events"></tbody></table></div>
   <button id="local_prev" class="btn btn-sm btn-outline-primary">이전</button><span id="local_page" class="mx-2"></span><button id="local_next" class="btn btn-sm btn-outline-primary">다음</button>
 </div>
-<div class="doctor-card doctor-section" id="local_watch_manual">
+</div>
+<div class="tab-pane fade" id="local_watch_manual" role="tabpanel" aria-labelledby="local_manual_tab">
+<div class="doctor-card doctor-section">
   <h4>사용 매뉴얼</h4>
   <ol>
     <li>감시 폴더를 FlaskFarm 컨테이너에 마운트하고, 동일 자료를 BookOasis 보관함에도 연결합니다.</li>
@@ -57,6 +68,8 @@
     <li>요청 완료는 BookOasis가 스캔 요청을 수락했다는 뜻입니다. 최종 스캔 완료 여부는 BookOasis에서 확인하세요.</li>
     <li>Windows 네이티브 FlaskFarm 실행은 지원 범위 밖입니다. Windows PC 공유 폴더는 NAS/컨테이너에 CIFS로 마운트해야 합니다.</li>
   </ul>
+</div>
+</div>
 </div>
 <script>
 var localPage = 1, localPages = 1, localRunning = false, localLoading = false;
@@ -116,6 +129,7 @@ function localStatus() {
   });
 }
 $('#local_add').on('click', function() { localAddRoot(); });
+$('#local_manual_link').on('click', function(event) { event.preventDefault(); $('#local_manual_tab').tab('show'); });
 $('#local_save').on('click', function() {
   var values = localValues();
   localRequest('validate', values, function(ret) {
