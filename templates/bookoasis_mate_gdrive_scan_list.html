@@ -325,7 +325,10 @@ function renderGdriveEvents(data) {
 
     var pathColumn = document.createElement('div');
     pathColumn.className = 'doctor-gdrive-paths';
-    pathColumn.appendChild(gdriveEventInfoLine('경로', item.path, 'doctor-path'));
+    pathColumn.appendChild(gdriveEventInfoLine('경로', item.path || '경로 확인 보류', 'doctor-path'));
+    if (!item.path && item.result && item.result.activity) {
+      pathColumn.appendChild(gdriveEventInfoLine('파일', item.result.activity.title || item.result.activity.file_id, 'doctor-path'));
+    }
     if (item.removed_path) {
       pathColumn.appendChild(gdriveEventInfoLine('이동 전', item.removed_path, 'doctor-path doctor-gdrive-previous'));
     }
@@ -354,9 +357,11 @@ function renderGdriveEvents(data) {
       actionColumn.appendChild(gdriveEventButton('경로 수정', 'btn-outline-primary', function() {
         openGdrivePathEdit(item);
       }));
-      actionColumn.appendChild(gdriveEventButton('재시도', 'btn-outline-warning', function() {
-        openGdriveRetry(item);
-      }));
+      if (item.path) {
+        actionColumn.appendChild(gdriveEventButton('재시도', 'btn-outline-warning', function() {
+          openGdriveRetry(item);
+        }));
+      }
     }
     if (item.status === 'completed' || item.status === 'failed') {
       actionColumn.appendChild(gdriveEventButton('삭제', 'btn-outline-danger', function() {

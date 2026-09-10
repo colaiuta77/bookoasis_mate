@@ -53,6 +53,11 @@ class ModelGDriveScanEvent(ModelBase):
         entity.attempts = 0
         entity.result_json = "{}"
         entity.error = ""
+        if event.get("activity_hold"):
+            entity.status = "failed"
+            entity.completed_at = now
+            entity.error = str(event["ingestion_error"])[:4000]
+            entity.result_json = json.dumps({"activity": event["activity_hold"]}, ensure_ascii=False)
         return entity
 
     @classmethod
@@ -191,6 +196,7 @@ class ModelGDriveScanEvent(ModelBase):
                 F.db.session.query(cls)
                 .filter(cls.id == int(event_id))
                 .filter(cls.status == "failed")
+                .filter(cls.path != "")
                 .update(
                     {
                         cls.status: "retry",
@@ -269,6 +275,7 @@ class ModelGDriveScanEvent(ModelBase):
                         F.db.session.query(cls)
                         .filter(cls.id.in_(event_ids[offset : offset + 500]))
                         .filter(cls.status == "failed")
+                        .filter(cls.path != "")
                         .update(
                             {
                                 cls.status: "retry",
