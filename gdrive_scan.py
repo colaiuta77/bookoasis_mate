@@ -529,6 +529,7 @@ class GDriveScanProcessor:
         rc_client=None,
         logger=None,
         should_stop=None,
+        refresh_vfs=True,
     ):
         self.settings = dict(settings or {})
         self.scan_callback = scan_callback
@@ -538,6 +539,7 @@ class GDriveScanProcessor:
         )
         self.logger = logger
         self.should_stop = should_stop or (lambda: False)
+        self.refresh_vfs = refresh_vfs
         self.path_mappings = parse_path_mappings(
             self.settings.get("gdrive_scan_path_mappings", "")
         )
@@ -653,7 +655,7 @@ class GDriveScanProcessor:
         operations = []
         for event in prepared:
             event_id = int(event["id"])
-            for operation in event_vfs_operations(event):
+            for operation in event_vfs_operations(event) if self.refresh_vfs else ():
                 operations.append((event_id,) + operation)
 
         operation_results = {}

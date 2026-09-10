@@ -10,6 +10,7 @@
 - 시리즈 누락, 표지 문제와 고아 표지파일 검사.
 - 안전한 읽기 전용 SQL 진단 도구와 SQLite·MariaDB 관리자 진단 프리셋.
 - gd-poller CommandDispatcher·WebhookDispatcher 또는 Mate에 직접 지정한 rclone 실행 파일·설정을 사용하는 Google Drive·Union upstream 변경 감지 기반 BookOasis 개별 경로 스캔.
+- 로컬 폴더 감지. Linux 로컬 디스크는 watchdog, Windows Docker·CIFS/NFS·FUSE는 폴링으로 확인하고 별도 이벤트 대기열에서 스캔합니다.
 - BookOasis 일반·성인·오디오북·비디오 카테고리 내보내기·가져오기.
 - Kavita 및 BookOasis 공유 패키지 통DB 이관.
 - BookOasis 커스텀 폰트 업로드와 설치 상태 확인.
@@ -39,6 +40,17 @@ volumes:
 - 오디오북 카테고리 패키지는 오디오북·트랙·재생 진행률·포스터를 포함하며 대상 오디오북 DB의 사용자 ID가 일치하는 진행률만 복원합니다.
 - 통DB 이관은 SQLite 파일 패키지와 MariaDB 논리 백업 패키지를 엔진별로 지원합니다. MariaDB에서는 FF 컨테이너에 `mariadb-dump`와 `mariadb` 또는 호환 `mysql` 클라이언트가 필요합니다.
 - SQLite와 MariaDB 통DB 패키지는 서로 교차 복원할 수 없습니다.
+
+## 로컬 폴더 감지
+
+- FlaskFarm과 BookOasis가 동일 자료에 접근할 수 있도록 마운트하고, `로컬 폴더 감지` 메뉴에 양쪽 컨테이너 경로를 지정합니다.
+- Linux 로컬 실시간 감지는 `watchdog>=4,<7`이 필요합니다. 폴링은 추가 패키지 없이 사용하며 기본 주기는 300초입니다.
+- Windows Docker는 컨테이너 경로로 폴링합니다. NAS에서 Windows PC를 감시하려면 SMB 공유를 CIFS로 마운트하세요. Windows 네이티브 FlaskFarm은 지원 범위 밖입니다.
+- 최초 실행·재시작은 새 기준만 만듭니다. 중지 중 변경은 자동 복구하지 않습니다. 이동은 삭제+생성으로 표시합니다.
+- 조회 오류·루트 변경·대량 삭제는 보류합니다. 정상 삭제라면 BookOasis 수동 스캔 후 새 기준으로 시작하세요. 대기열은 중지해도 유지됩니다.
+- 루트당 최대 20만 항목을 비교합니다. 실시간 모드도 변경 신호 후 트리를 비교하므로 큰 폴더에는 비용이 발생합니다. Google Drive 경로는 기존 Drive 감지를 권장합니다.
+- Mate의 로컬 처리에서는 rclone VFS 명령을 보내지 않습니다. BookOasis 보관함 자체의 스캔 전 갱신 설정은 별도로 적용될 수 있습니다.
+- 상세 설정·안전 제한은 해당 메뉴 하단 매뉴얼을 참고하세요. 실제 SMB/NFS/FUSE 환경 검증은 배포 전 필요합니다.
 
 ## Changelog
 

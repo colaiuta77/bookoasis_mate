@@ -44,7 +44,8 @@ class DiscordWebhookNotifier:
     }
     DEFAULT_COLOR = 0x95A5A6
 
-    def __init__(self, webhook_url, timeout=5, sender=None):
+    def __init__(self, webhook_url, timeout=5, sender=None, source_name="Google Drive"):
+        self.source_name = source_name
         self.webhook_url = str(webhook_url or "").strip()
         self.timeout = max(1, min(int(timeout or 5), 30))
         self.sender = sender or self._send
@@ -222,7 +223,7 @@ class DiscordWebhookNotifier:
             "title": self._book_title(event),
             "color": self.ACTION_COLORS.get(action, self.DEFAULT_COLOR),
             "fields": fields,
-            "footer": {"text": "BookOasis Mate · Google Drive 변경 감지"},
+            "footer": {"text": f"BookOasis Mate · {self.source_name} 변경 감지"},
         }
 
     def _content(self, events, statuses, omitted=0):
@@ -240,7 +241,7 @@ class DiscordWebhookNotifier:
             for status, count in sorted(state_counts.items())
         )
         lines = [
-            "**BookOasis Google Drive 변경 처리**",
+            f"**BookOasis {self.source_name} 변경 처리**",
             "```text",
             f"전체  {len(events)}건",
             f"변경  {action_text or '변경 정보 없음'}",

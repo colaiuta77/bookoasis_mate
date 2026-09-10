@@ -5,9 +5,9 @@ from datetime import datetime, timedelta
 from .setup import *
 
 
-class ModelGDriveScanEvent(ModelBase):
+class ScanEventBase(ModelBase):
+    __abstract__ = True
     P = P
-    __tablename__ = "gdrive_scan_event"
     __table_args__ = {"mysql_collate": "utf8_general_ci"}
     __bind_key__ = P.package_name
 
@@ -74,6 +74,16 @@ class ModelGDriveScanEvent(ModelBase):
             F.db.session.add(entity)
             F.db.session.commit()
             return entity.to_dict()
+
+    @classmethod
+    def enqueue_many(cls, events, buffer_seconds=60):
+        with F.app.app_context():
+            try:
+                F.db.session.add_all([cls._new_entity(event, buffer_seconds) for event in events])
+                F.db.session.commit()
+            except Exception:
+                F.db.session.rollback()
+                raise
 
     @classmethod
     def recover_processing(cls):
@@ -543,6 +553,14 @@ class ModelGDriveScanEvent(ModelBase):
             "result": result,
             "error": self.error,
         }
+
+
+class ModelGDriveScanEvent(ScanEventBase):
+    __tablename__ = "gdrive_scan_event"
+
+
+class ModelLocalFolderEvent(ScanEventBase):
+    __tablename__ = "local_folder_event"
 
 
 class ModelGDriveScanState(ModelBase):

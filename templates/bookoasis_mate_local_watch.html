@@ -1,0 +1,141 @@
+{# 로컬 폴더 감시 설정과 독립 이벤트 대기열을 표시합니다. #}
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+<div class="doctor-card doctor-section">
+  <h3>로컬 폴더 감지</h3>
+  <p>로컬 디스크는 실시간 이벤트로, Windows Docker·CIFS/NFS·FUSE는 폴링으로 변경을 확인합니다. <a href="#local_watch_manual">매뉴얼</a></p>
+  <button id="local_start" class="btn btn-sm btn-primary">새 기준으로 시작</button>
+  <button id="local_stop" class="btn btn-sm btn-outline-danger">작업 중지</button>
+  <span id="local_state" role="status" aria-live="polite"></span>
+  <p id="local_error" class="text-danger" role="alert"></p>
+  <div id="local_roots_status"></div>
+</div>
+<div class="doctor-card doctor-section">
+  <h4>감시 설정</h4>
+  <p class="doctor-muted">두 경로 모두 각 컨테이너에서 보이는 절대 경로입니다. 설정 변경은 작업 중지 후 적용하세요.</p>
+  <div id="local_roots"></div>
+  <button id="local_add" class="btn btn-sm btn-outline-primary">감시 경로 추가</button>
+  <div class="row mt-3">
+    <div class="col-md-4 form-group"><label for="local_interval">폴링 주기(초)</label><input id="local_interval" class="form-control" type="number" min="30" max="86400" value="{{ arg.get('local_watch_interval', '300') }}"></div>
+    <div class="col-md-4 form-group"><label for="local_debounce">변경 대기시간(초)</label><input id="local_debounce" class="form-control" type="number" min="2" max="120" value="{{ arg.get('local_watch_debounce', '10') }}"></div>
+  </div>
+  <div class="form-group"><label for="local_extensions">감시 확장자</label><input id="local_extensions" class="form-control" value="{{ arg.get('local_watch_extensions', '') }}"></div>
+  <button id="local_save" class="btn btn-sm btn-primary">설정 저장</button>
+  <p class="doctor-muted mt-2">BookOasis 연결 및 Discord 웹훅은 기존 Mate 설정을 사용합니다. Google Drive 연동을 켤 필요는 없습니다.</p>
+</div>
+<div class="doctor-card doctor-section">
+  <h4>변경 이벤트</h4>
+  <div class="form-inline mb-2">
+    <label class="mr-2" for="local_filter">상태</label>
+    <select id="local_filter" class="form-control mr-2"><option value="">전체</option><option value="queued">대기</option><option value="retry">재시도</option><option value="processing">처리 중</option><option value="completed">요청 완료</option><option value="failed">실패</option></select>
+    <label class="sr-only" for="local_search">경로 검색</label><input id="local_search" class="form-control mr-2" placeholder="경로 검색">
+    <button id="local_refresh" class="btn btn-sm btn-outline-primary">검색</button>
+    <button id="local_clear" class="btn btn-sm btn-outline-danger ml-2">대기·재시도 일괄 삭제</button>
+  </div>
+  <p id="local_counts"></p>
+  <div class="table-responsive"><table class="table table-sm"><thead><tr><th>ID·수신</th><th>변경</th><th>경로</th><th>상태</th><th>작업</th></tr></thead><tbody id="local_events"></tbody></table></div>
+  <button id="local_prev" class="btn btn-sm btn-outline-primary">이전</button><span id="local_page" class="mx-2"></span><button id="local_next" class="btn btn-sm btn-outline-primary">다음</button>
+</div>
+<div class="doctor-card doctor-section" id="local_watch_manual">
+  <h4>사용 매뉴얼</h4>
+  <ol>
+    <li>감시 폴더를 FlaskFarm 컨테이너에 마운트하고, 동일 자료를 BookOasis 보관함에도 연결합니다.</li>
+    <li>Mate 경로와 BookOasis 경로를 입력합니다. 예를 들어 <code>/watch/books</code> → <code>/data/books</code>입니다.</li>
+    <li>Linux 실제 디스크는 자동 또는 실시간, Windows Docker·SMB/CIFS·NFS·FUSE는 폴링을 선택합니다.</li>
+    <li>저장 후 시작합니다. 최초 조회는 기준만 만들며 기존 파일을 스캔하지 않습니다.</li>
+  </ol>
+  <ul>
+    <li>실시간 감지에는 FlaskFarm Python 환경의 <code>watchdog&gt;=4,&lt;7</code> 설치가 필요합니다. 없으면 오류를 표시하며 자동 설치하지 않습니다.</li>
+    <li>실시간 모드는 watchdog 신호를 모아 변경 시 트리를 비교합니다. 폴링은 매 주기 파일 크기·수정시간을 비교합니다. 대규모 경로는 조회 비용이 크며 루트당 최대 20만 항목입니다.</li>
+    <li>이동은 삭제+생성으로 기록합니다. 심볼릭 링크는 따라가지 않습니다. 감시 중지·재시작 사이의 변경은 자동 복구하지 않습니다.</li>
+    <li>루트 변경·조회 오류·빈 트리·대량 삭제는 기준을 유지하고 보류합니다. 정상 삭제임을 확인했다면 BookOasis 수동 스캔 후 중지·시작으로 새 기준을 만드세요.</li>
+    <li>같은 경로의 네이티브 플러그인·gd-poller 감시는 직접 꺼 주세요. Mate 내 Drive 자체 감지와 겹치는 대상은 시작할 수 없습니다.</li>
+    <li>로컬 스캔은 rclone VFS를 갱신하지 않습니다. FUSE 캐시에 아직 보이지 않는 변경은 감지할 수 없습니다.</li>
+    <li>중지 시 감지는 종료하고 현재 API 요청 이후 스캔을 멈춥니다. 대기열은 유지되며 별도로 삭제할 수 있습니다. 처리 이력은 30일 보관합니다.</li>
+    <li>요청 완료는 BookOasis가 스캔 요청을 수락했다는 뜻입니다. 최종 스캔 완료 여부는 BookOasis에서 확인하세요.</li>
+    <li>Windows 네이티브 FlaskFarm 실행은 지원 범위 밖입니다. Windows PC 공유 폴더는 NAS/컨테이너에 CIFS로 마운트해야 합니다.</li>
+  </ul>
+</div>
+<script>
+var localPage = 1, localPages = 1, localRunning = false, localLoading = false;
+function localAddRoot(row) {
+  if ($('#local_roots .local-root').length >= 10) return;
+  row = row || {};
+  var box = $('<div class="local-root border rounded p-3 mb-2"></div>');
+  var path = $('<input class="form-control local-path" placeholder="/watch/books">').val(row.path || '');
+  var target = $('<input class="form-control local-target" placeholder="/data/books">').val(row.target || '');
+  var mode = $('<select class="form-control local-mode"><option value="auto">자동</option><option value="native">실시간 · Linux 로컬</option><option value="polling">폴링 · Windows Docker/CIFS/NFS/FUSE</option></select>').val(row.mode || 'auto');
+  box.append($('<label class="d-block">Mate 감시 경로</label>').append(path));
+  box.append($('<label class="d-block">BookOasis 경로</label>').append(target));
+  box.append($('<label class="d-block">감지 방식</label>').append(mode));
+  box.append($('<button type="button" class="btn btn-sm btn-outline-danger">삭제</button>').on('click', function() { if (!localRunning) box.remove(); }));
+  $('#local_roots').append(box);
+}
+function localValues() {
+  var roots = [];
+  $('#local_roots .local-root').each(function() { roots.push({path:$(this).find('.local-path').val(), target:$(this).find('.local-target').val(), mode:$(this).find('.local-mode').val()}); });
+  return {local_watch_roots:JSON.stringify(roots), local_watch_interval:$('#local_interval').val(), local_watch_debounce:$('#local_debounce').val(), local_watch_extensions:$('#local_extensions').val()};
+}
+function localRequest(command, data, done) {
+  $.ajax({url:'/' + PACKAGE_NAME + '/ajax/local_watch/' + command, type:'POST', data:data || {}, dataType:'json', global:false,
+    success:function(ret) { if (ret.msg) notify(ret.msg, ret.ret); if (done) done(ret); },
+    error:function(xhr) { notify((xhr.responseJSON || {}).msg || '요청 실패', 'warning'); },
+    complete:function() { if (command === 'status') localLoading = false; }});
+}
+function localStatus() {
+  if (localLoading) return;
+  localLoading = true;
+  localRequest('status', {page:localPage,status:$('#local_filter').val(),search:$('#local_search').val()}, function(ret) {
+    var data = ret.data || {}, list = data.events || {};
+    localRunning = !!data.running;
+    $('#local_state').text(data.stopping ? '중지 중 · 현재 요청 대기' : (localRunning ? '실행 중' : '중지됨'));
+    $('#local_error').text(data.error || '');
+    $('#local_start').prop('disabled', localRunning); $('#local_stop').prop('disabled', !localRunning);
+    $('#local_save, #local_add, #local_clear, #local_roots input, #local_roots select, #local_roots button, #local_interval, #local_debounce, #local_extensions').prop('disabled', localRunning);
+    $('#local_roots_status').empty();
+    (data.roots || []).forEach(function(root) { $('#local_roots_status').append($('<p></p>').text((root.path || '') + ' · ' + (root.mode || '') + ' · ' + root.status + ' · ' + (root.checked_at || '') + (root.error ? ' · ' + root.error : ''))); });
+    var counts = data.counts || {};
+    $('#local_counts').text('대기 ' + (counts.queued || 0) + ' · 재시도 ' + (counts.retry || 0) + ' · 처리 중 ' + (counts.processing || 0) + ' · 요청 완료 ' + (counts.completed || 0) + ' · 실패 ' + (counts.failed || 0));
+    $('#local_events').empty();
+    var labels = {queued:'대기',retry:'재시도',processing:'처리 중',completed:'요청 완료',failed:'실패'};
+    (list.items || []).forEach(function(item) {
+      var tr = $('<tr></tr>');
+      tr.append($('<td></td>').text('#' + item.id + ' ' + (item.created_at || '')));
+      tr.append($('<td></td>').text(item.action));
+      tr.append($('<td style="overflow-wrap:anywhere"></td>').text(item.path));
+      tr.append($('<td></td>').text((labels[item.status] || item.status) + (item.error ? ' · ' + item.error : '')));
+      var actions = $('<td></td>');
+      if (item.status === 'failed') actions.append($('<button class="btn btn-sm btn-outline-primary">재시도</button>').on('click', function() { localRequest('retry', {id:item.id}, localStatus); }));
+      tr.append(actions); $('#local_events').append(tr);
+    });
+    localPage = list.page || 1; localPages = list.pages || 1;
+    $('#local_page').text(localPage + ' / ' + localPages);
+    $('#local_prev').prop('disabled', localPage <= 1); $('#local_next').prop('disabled', localPage >= localPages);
+  });
+}
+$('#local_add').on('click', function() { localAddRoot(); });
+$('#local_save').on('click', function() {
+  var values = localValues();
+  localRequest('validate', values, function(ret) {
+    if (ret.ret !== 'success') return;
+    $.ajax({url:'/' + PACKAGE_NAME + '/ajax/setting_save', type:'POST', data:values, dataType:'json', success:function(saved) { notify(saved ? '설정을 저장했습니다.' : '저장 실패', saved ? 'success' : 'warning'); }});
+  });
+});
+$('#local_start').on('click', function() { if (confirm('저장된 설정으로 새 기준을 만듭니다. 기존 파일과 중지 중 변경은 자동 스캔하지 않습니다. 시작할까요?')) localRequest('start', {}, localStatus); });
+$('#local_stop').on('click', function() { localRequest('stop', {}, localStatus); });
+$('#local_clear').on('click', function() { if (confirm('로컬 감지 대기·재시도 이벤트를 삭제할까요?')) localRequest('clear_pending', {}, localStatus); });
+$('#local_refresh, #local_filter').on('click change', function() { localPage = 1; localStatus(); });
+$('#local_prev').on('click', function() { localPage--; localStatus(); });
+$('#local_next').on('click', function() { localPage++; localStatus(); });
+$(function() {
+  var roots;
+  try { roots = JSON.parse({{ arg.get('local_watch_roots', '[]')|tojson }}); } catch (e) { roots = []; }
+  (roots.length ? roots : [{}]).forEach(localAddRoot);
+  localStatus();
+  var timer = setInterval(function() { if (!document.hidden) localStatus(); }, 5000);
+  $(window).on('beforeunload', function() { clearInterval(timer); });
+});
+</script>
+{% endblock %}
