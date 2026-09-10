@@ -153,9 +153,14 @@
     <div class="doctor-card doctor-plugin-source-card">
       <h4>ZIP 패키지 업로드 검사</h4>
       <p class="doctor-muted">ZIP은 라이브 경로에 직접 해제하지 않으며 경로 이탈·심볼릭 링크·중첩 압축·비정상 압축률을 먼저 검사합니다.</p>
-      <div class="form-group"><label for="plugin_zip_archive">ZIP 파일</label><input id="plugin_zip_archive" class="form-control-file" type="file" accept=".zip,application/zip"></div>
+      <input id="plugin_zip_archive" type="file" accept=".zip,application/zip" hidden>
+      <div id="plugin_zip_dropzone" class="doctor-font-dropzone" tabindex="0" role="button" aria-label="ZIP 파일 선택" aria-describedby="plugin_zip_selection">
+        <span>ZIP 파일을 여기에 놓거나 클릭해 선택하세요.</span>
+        <small>ZIP 파일 한 개 · 선택 후 패키지 검사를 진행하세요.</small>
+      </div>
+      <p id="plugin_zip_selection" class="doctor-muted" role="status" aria-live="polite">선택한 파일 없음</p>
       <div class="form-group"><label for="plugin_zip_id">플러그인 ID</label><input id="plugin_zip_id" class="form-control" placeholder="plugin_id"></div>
-      <button id="plugin_zip_inspect" type="button" class="btn btn-sm btn-primary">ZIP 패키지 검사</button>
+      <button id="plugin_zip_inspect" type="button" class="btn btn-sm btn-primary" disabled>ZIP 패키지 검사</button>
     </div>
   </div>
 
@@ -790,10 +795,35 @@ $('#plugin_github_inspect').click(function() {
   });
 });
 
-$('#plugin_zip_inspect').click(function() {
+var pluginZipFile = null;
+function setPluginZipFiles(files) {
+  pluginZipFile = null;
   var input = document.getElementById('plugin_zip_archive');
-  if (!input.files || !input.files.length) { notify('검사할 ZIP 파일을 선택해 주세요.', 'warning'); return; }
-  var data = new FormData(); data.append('archive', input.files[0]); data.append('plugin_id', $('#plugin_zip_id').val());
+  if (files && files.length) {
+    if (files.length !== 1) notify('ZIP 파일은 한 개만 선택해 주세요.', 'warning');
+    else if (!/\.zip$/i.test(files[0].name)) notify('ZIP 파일을 선택해 주세요.', 'warning');
+    else pluginZipFile = files[0];
+  }
+  input.value = '';
+  $('#plugin_zip_selection').text(pluginZipFile ? pluginZipFile.name + ' · ' + (pluginZipFile.size / 1048576).toFixed(1) + ' MB' : '선택한 파일 없음');
+  $('#plugin_zip_inspect').prop('disabled', !pluginZipFile);
+}
+$('#plugin_zip_dropzone').on('click keydown', function(event) {
+  if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  document.getElementById('plugin_zip_archive').click();
+}).on('dragover', function(event) {
+  event.preventDefault();
+  this.classList.add('is-dragover');
+}).on('dragleave drop', function(event) {
+  event.preventDefault();
+  this.classList.remove('is-dragover');
+  if (event.type === 'drop') setPluginZipFiles(event.originalEvent.dataTransfer.files);
+});
+$('#plugin_zip_archive').on('change', function() { setPluginZipFiles(this.files); });
+$('#plugin_zip_inspect').click(function() {
+  if (!pluginZipFile) { notify('검사할 ZIP 파일을 선택해 주세요.', 'warning'); return; }
+  var data = new FormData(); data.append('archive', pluginZipFile); data.append('plugin_id', $('#plugin_zip_id').val());
   $.ajax({
     url:'/' + PACKAGE_NAME + '/ajax/plugins/zip_inspect', type:'POST', data:data, dataType:'json', processData:false, contentType:false, global:false,
     success:function(ret) { if (ret.msg) notify(ret.msg, ret.ret || 'info'); pluginManagerRenderJob(ret.data || {}, true); pluginManagerStartPolling(); },
