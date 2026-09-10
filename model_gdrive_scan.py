@@ -51,14 +51,21 @@ class ModelGDriveScanEvent(ModelBase):
         entity.removed_path = event.get("removed_path") or ""
         entity.status = "queued"
         entity.attempts = 0
-        entity.result_json = "{}"
+        result = {"drive": event["drive"]} if event.get("drive") else {}
+        entity.result_json = json.dumps(result, ensure_ascii=False)
         entity.error = ""
         if event.get("activity_hold"):
             entity.status = "failed"
             entity.completed_at = now
             entity.error = str(event["ingestion_error"])[:4000]
-            entity.result_json = json.dumps({"activity": event["activity_hold"]}, ensure_ascii=False)
+            entity.result_json = json.dumps(dict(result, activity=event["activity_hold"]), ensure_ascii=False)
         return entity
+
+    @classmethod
+    def _result_json_with_drive(cls, event_id, result):
+        entity = F.db.session.query(cls).filter(cls.id == int(event_id)).first()
+        drive = (entity.to_dict()["result"].get("drive") or {}) if entity else {}
+        return json.dumps(dict(result, drive=drive) if drive else result, ensure_ascii=False)
 
     @classmethod
     def enqueue(cls, event, buffer_seconds=60):
@@ -142,7 +149,7 @@ class ModelGDriveScanEvent(ModelBase):
                         cls.library_id: first_library.get("id"),
                         cls.library_name: first_library.get("name"),
                         cls.mapped_path: result.get("mapped_path") or "",
-                        cls.result_json: json.dumps(result, ensure_ascii=False),
+                        cls.result_json: cls._result_json_with_drive(event_id, result),
                         cls.error: "",
                     },
                     synchronize_session=False,
@@ -174,12 +181,13 @@ class ModelGDriveScanEvent(ModelBase):
                 cls.library_id: first_library.get("id"),
                 cls.library_name: first_library.get("name"),
                 cls.mapped_path: result.get("mapped_path") or "",
-                cls.result_json: json.dumps(result, ensure_ascii=False),
             })
         if result.get("cancelled"):
             values[cls.attempts] = max(0, attempts - 1)
             values[cls.ready_at] = now
         with F.app.app_context():
+            if result:
+                values[cls.result_json] = cls._result_json_with_drive(event["id"], result)
             (
                 F.db.session.query(cls)
                 .filter(cls.id == int(event["id"]))
@@ -315,7 +323,7 @@ class ModelGDriveScanEvent(ModelBase):
                         cls.library_id: None,
                         cls.library_name: None,
                         cls.mapped_path: "",
-                        cls.result_json: "{}",
+                        cls.result_json: cls._result_json_with_drive(event_id, {}),
                         cls.error: "",
                     },
                     synchronize_session=False,
@@ -347,7 +355,7 @@ class ModelGDriveScanEvent(ModelBase):
                                 cls.library_id: None,
                                 cls.library_name: None,
                                 cls.mapped_path: "",
-                                cls.result_json: "{}",
+                                cls.result_json: cls._result_json_with_drive(item["id"], {}),
                                 cls.error: "",
                             },
                             synchronize_session=False,
