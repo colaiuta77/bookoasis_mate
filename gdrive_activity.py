@@ -70,19 +70,23 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
                 detail = action.get("detail") or {}
                 if not any(kind in detail for kind in ("create", "edit", "move", "rename", "delete", "restore")):
                     continue
-                target = (action.get("target") or {}).get("driveItem") or {}
-                if not target:
-                    continue
-                file_id = str(target.get("name") or "").removeprefix("items/")
+                # 개별 대상이 생략된 action은 활동의 모든 공통 대상에 적용됩니다.
+                targets = [action["target"]] if action.get("target") else activity.get("targets") or []
+                if not targets:
+                    raise RuntimeError("Activity 응답에 대상 정보가 없습니다. 체크포인트를 유지합니다.")
                 when = action.get("timestamp") or (action.get("timeRange") or {}).get("endTime")
                 when = when or activity.get("timestamp") or (activity.get("timeRange") or {}).get("endTime")
-                if not file_id or not when:
-                    raise RuntimeError("Activity 응답에 파일 ID 또는 활동 시각이 없습니다. 체크포인트를 유지합니다.")
-                stamp = self._stamp(self._time(when))
-                identity = json.dumps([file_id, when, detail, action.get("actor")], sort_keys=True, separators=(",", ":"))
-                receipt_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
-                yield {"fileId": file_id, "activity_action": action,
-                       "receipt": {"file_id": receipt_id, "parent_id": stamp, "path": "activity"}}, ""
+                for target in targets:
+                    if "driveItem" not in target:
+                        continue
+                    file_id = str((target.get("driveItem") or {}).get("name") or "").removeprefix("items/")
+                    if not file_id or not when:
+                        raise RuntimeError("Activity 응답에 파일 ID 또는 활동 시각이 없습니다. 체크포인트를 유지합니다.")
+                    stamp = self._stamp(self._time(when))
+                    identity = json.dumps([file_id, when, detail, action.get("actor")], sort_keys=True, separators=(",", ":"))
+                    receipt_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+                    yield {"fileId": file_id, "activity_action": dict(action, target=target),
+                           "receipt": {"file_id": receipt_id, "parent_id": stamp, "path": "activity"}}, ""
         next_page = payload.get("nextPageToken")
         if next_page:
             cursor.update(end=self._stamp(end), page=next_page)

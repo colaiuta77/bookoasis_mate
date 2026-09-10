@@ -41,6 +41,35 @@ class ActivityTest(unittest.TestCase):
         self.assertEqual(1, self.session.query(self.events).count())
         self.assertEqual("2026-09-07T01:05:00.000000+00:00", json.loads(self.states.get(self.client.state_remote, "root")["page_token"])["start"])
 
+    def test_shared_delete_targets_are_recorded_once(self):
+        targets = []
+        for file_id in ("first", "second"):
+            self.items.upsert(self.client.item_scope, {"file_id": file_id, "path": "/books/" + file_id + ".cbz"})
+            targets.append({"driveItem": {"name": "items/" + file_id, "driveFile": {}}})
+        payload = {"activities": [{"actions": [{"detail": {"delete": {"type": "TRASH"}}}],
+                                   "targets": targets, "timestamp": "2026-09-07T01:08:00Z"}]}
+        with patch.object(self.client, "_query", return_value=payload), patch.object(
+            self.client, "file", side_effect=GoogleDriveApiError(404, "notFound", "gone")
+        ):
+            self.assertEqual(2, self.watcher.poll_once())
+            self.assertEqual(0, self.watcher.poll_once())
+        rows = self.session.query(self.events).all()
+        self.assertEqual({"/books/first.cbz", "/books/second.cbz"}, {row.path for row in rows})
+        self.assertEqual(["delete", "delete"], [row.action for row in rows])
+
+    def test_explicit_target_does_not_expand_to_shared_targets(self):
+        activity = self.activity()
+        activity["targets"] = [{"driveItem": {"name": "items/other"}}]
+        self.assertEqual(1, self.poll({"activities": [activity]}))
+        self.assertIsNone(self.items.get(self.client.item_scope, "other"))
+
+    def test_missing_all_targets_preserves_checkpoint(self):
+        payload = {"activities": [{"actions": [{"detail": {"delete": {}}}],
+                                   "timestamp": "2026-09-07T01:08:00Z"}]}
+        with self.assertRaisesRegex(RuntimeError, "체크포인트"):
+            self.poll(payload)
+        self.assertEqual(self.cursor, self.states.get(self.client.state_remote, "root")["page_token"])
+
     def test_partial_failure_keeps_cursor_and_deduplicates(self):
         payload = {"activities": [self.activity(), self.activity(file_id="other")]}
         def lookup(file_id):
