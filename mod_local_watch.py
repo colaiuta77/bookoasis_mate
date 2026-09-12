@@ -23,6 +23,7 @@ class ModuleLocalWatch(PluginModuleBase):
             "local_watch_enabled": "False", "local_watch_roots": "[]",
             "local_watch_interval": "300", "local_watch_debounce": "10",
             "local_watch_ignore_patterns": "@eaDir/\n#recycle/",
+            "local_watch_discord_webhook_url": "",
             "local_watch_extensions": ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json,.mp3,.m4b,.m4a,.flac,.aac,.wav,.ogg,.opus,.wma,.mp4,.mkv,.avi,.webm,.mov,.m4v,.ts,.smi,.srt,.vtt",
         }
         self._lock = threading.RLock()
@@ -233,7 +234,7 @@ class ModuleLocalWatch(PluginModuleBase):
                         statuses[event["id"]] = self.model.fail_or_retry(event, result.get("message"), result=result)
                 if not self._stop.is_set():
                     try:
-                        DiscordWebhookNotifier(settings.get("gdrive_scan_discord_webhook_url"), source_name="로컬 폴더").send_batch(events, results, statuses)
+                        DiscordWebhookNotifier(settings.get("local_watch_discord_webhook_url"), source_name="로컬 폴더").send_batch(events, results, statuses)
                     except Exception as error:
                         P.logger.warning(f"로컬 폴더 Discord 알림 실패: {error}")
                 if time.monotonic() - last_cleanup > 3600:
@@ -260,6 +261,7 @@ class ModuleLocalWatch(PluginModuleBase):
                 if self.running():
                     raise ValueError("설정을 바꾸기 전에 작업을 중지해 주세요.")
                 self._config(req.form.to_dict())
+                DiscordWebhookNotifier(req.form.get("local_watch_discord_webhook_url", ""))
             elif command == "stop":
                 P.ModelSetting.set("local_watch_enabled", "False")
                 self.stop()

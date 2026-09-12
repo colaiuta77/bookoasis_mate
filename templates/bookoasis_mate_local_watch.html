@@ -24,15 +24,15 @@
   <div id="local_roots_status"></div>
 </div>
 <div class="doctor-section">
-  <h4>감시 경로</h4>
+  <div class="d-flex justify-content-between align-items-center mb-2"><h4 class="mb-0">감시 경로</h4><button id="local_add" class="btn btn-sm btn-outline-primary">감시 경로 추가</button></div>
   <p class="doctor-muted">두 경로 모두 각 컨테이너에서 보이는 절대 경로입니다. 설정 변경은 작업 중지 후 적용하세요.</p>
   <div id="local_roots"></div>
-  <button id="local_add" class="btn btn-sm btn-outline-primary">감시 경로 추가</button>
   <div class="form-group row mt-4"><label for="local_interval" class="col-md-3 col-form-label text-md-right font-weight-bold">폴링 주기(초)</label><div class="col-md-9"><input id="local_interval" class="form-control" style="max-width:180px" type="number" min="30" max="86400" value="{{ arg.get('local_watch_interval', '300') }}"></div></div>
   <div class="form-group row"><label for="local_debounce" class="col-md-3 col-form-label text-md-right font-weight-bold">변경 대기시간(초)</label><div class="col-md-9"><input id="local_debounce" class="form-control" style="max-width:180px" type="number" min="2" max="120" value="{{ arg.get('local_watch_debounce', '10') }}"></div></div>
   <div class="form-group row"><label for="local_extensions" class="col-md-3 col-form-label text-md-right font-weight-bold">감시 확장자</label><div class="col-md-9"><input id="local_extensions" class="form-control" value="{{ arg.get('local_watch_extensions', '') }}"></div></div>
   <div class="form-group row"><label for="local_ignore_patterns" class="col-md-3 col-form-label text-md-right font-weight-bold">감지 제외 패턴</label><div class="col-md-9"><textarea id="local_ignore_patterns" class="form-control" rows="7" placeholder="@eaDir/&#10;#recycle/&#10;*.tmp&#10;*.sample.cbz&#10;.DS_Store&#10;Thumbs.db&#10;desktop.ini">{{ arg.get('local_watch_ignore_patterns', '@eaDir/\n#recycle/') }}</textarea><small class="form-text text-muted">한 줄에 하나씩 입력합니다. 끝에 /를 붙이면 폴더와 하위 전체를 제외합니다. *.tmp 같은 파일 패턴도 지원하며, 비우면 제외하지 않습니다. 작업 중지 → 설정 저장 → 새 기준으로 시작 순서로 적용하세요.</small></div></div>
-  <p class="doctor-muted mt-2">BookOasis 연결 및 Discord 웹훅은 기존 Mate 설정을 사용합니다. Google Drive 연동을 켤 필요는 없습니다.</p>
+  <div class="form-group row"><label for="local_discord_webhook" class="col-md-3 col-form-label text-md-right font-weight-bold">로컬 감지 Discord 웹훅</label><div class="col-md-9"><input id="local_discord_webhook" type="password" autocomplete="new-password" class="form-control" placeholder="https://discord.com/api/webhooks/..." value="{{ arg.get('local_watch_discord_webhook_url', '') }}"><small class="form-text text-muted">로컬 폴더 변경 처리 알림 전용입니다. 비워 두면 보내지 않으며 Google Drive 알림 주소는 사용하지 않습니다.</small></div></div>
+  <p class="doctor-muted mt-2">BookOasis 연결은 기존 Mate 설정을 사용합니다. Google Drive 연동을 켤 필요는 없습니다.</p>
 </div>
 </div>
 <div class="tab-pane fade" id="local_changes" role="tabpanel" aria-labelledby="local_changes_tab">
@@ -80,6 +80,7 @@ function localAddRoot(row) {
   if ($('#local_roots .local-root').length >= 10) return;
   row = row || {};
   var box = $('<div class="local-root doctor-card doctor-section"></div>');
+  var fields = $('<div class="row"></div>').appendTo(box);
   var path = $('<input class="form-control local-path" placeholder="/host/volume2/DATA/02.Ebook/02.IT서적">').val(row.path || '');
   var target = $('<input class="form-control local-target" placeholder="/volume2/DATA/02.Ebook/02.IT서적">').val(row.target || '');
   var picker = $('<button type="button" class="btn btn-sm btn-outline-primary ml-2 text-nowrap">경로 선택</button>').on('click', function() {
@@ -90,10 +91,10 @@ function localAddRoot(row) {
   });
   var mode = $('<select class="form-control local-mode"><option value="auto">자동</option><option value="native">실시간 · Linux 로컬</option><option value="polling">폴링 · Windows Docker/CIFS/NFS/FUSE</option></select>').val(row.mode || 'auto');
   [['Mate 감시 경로', path], ['BookOasis 경로', target], ['감지 방식', mode]].forEach(function(field) {
-    var label = $('<div class="form-group row d-flex align-items-center"></div>');
-    label.append($('<span class="col-md-3 text-md-right font-weight-bold"></span>').text(field[0]));
+    var label = $('<div class="form-group col-lg-4"></div>');
+    label.append($('<span class="d-block font-weight-bold mb-1"></span>').text(field[0]));
     field[1].attr('aria-label', field[0]);
-    var control = $('<div class="col-md-9"></div>');
+    var control = $('<div></div>');
     if (field[1] === path) {
       control.append($('<div class="d-flex align-items-center"></div>').append(path, picker));
       control.append($('<small class="doctor-muted d-block mt-1"></small>').text('FF 컨테이너에서 보이는 경로입니다. 예: /host/volume2/DATA/02.Ebook/02.IT서적'));
@@ -102,7 +103,7 @@ function localAddRoot(row) {
       if (field[1] === target) control.append($('<small class="doctor-muted d-block mt-1"></small>').text('BookOasis 컨테이너에서 보이는 경로입니다. 예: /volume2/DATA/02.Ebook/02.IT서적'));
     }
     label.append(control);
-    box.append(label);
+    fields.append(label);
   });
   box.append($('<button type="button" class="btn btn-sm btn-outline-danger">삭제</button>').on('click', function() { if (!localRunning) box.remove(); }));
   $('#local_roots').append(box);
@@ -110,7 +111,7 @@ function localAddRoot(row) {
 function localValues() {
   var roots = [];
   $('#local_roots .local-root').each(function() { roots.push({path:$(this).find('.local-path').val(), target:$(this).find('.local-target').val(), mode:$(this).find('.local-mode').val()}); });
-  return {local_watch_roots:JSON.stringify(roots), local_watch_interval:$('#local_interval').val(), local_watch_debounce:$('#local_debounce').val(), local_watch_extensions:$('#local_extensions').val(), local_watch_ignore_patterns:$('#local_ignore_patterns').val()};
+  return {local_watch_roots:JSON.stringify(roots), local_watch_interval:$('#local_interval').val(), local_watch_debounce:$('#local_debounce').val(), local_watch_extensions:$('#local_extensions').val(), local_watch_ignore_patterns:$('#local_ignore_patterns').val(), local_watch_discord_webhook_url:$('#local_discord_webhook').val()};
 }
 function localRequest(command, data, done) {
   $.ajax({url:'/' + PACKAGE_NAME + '/ajax/local_watch/' + command, type:'POST', data:data || {}, dataType:'json', global:false,
@@ -127,7 +128,7 @@ function localStatus() {
     $('#local_state').text(data.stopping ? '중지 중 · 현재 요청 대기' : (localRunning ? '실행 중' : '중지됨'));
     $('#local_error').text(data.error || '');
     $('#local_start').prop('disabled', localRunning); $('#local_stop').prop('disabled', !localRunning);
-    $('#local_save, #local_add, #local_clear, #local_roots input, #local_roots select, #local_roots button, #local_interval, #local_debounce, #local_extensions, #local_ignore_patterns').prop('disabled', localRunning);
+    $('#local_save, #local_add, #local_clear, #local_roots input, #local_roots select, #local_roots button, #local_interval, #local_debounce, #local_extensions, #local_ignore_patterns, #local_discord_webhook').prop('disabled', localRunning);
     $('#local_roots_status').empty();
     (data.roots || []).forEach(function(root) {
       var state = $('<div class="border-top pt-2 mt-2"></div>');
