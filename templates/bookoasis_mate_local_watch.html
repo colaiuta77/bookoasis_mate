@@ -3,49 +3,50 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
-<div class="doctor-card doctor-section">
-  <h3>로컬 폴더 감지</h3>
-  <p>로컬 디스크는 실시간 이벤트로, Windows Docker·CIFS/NFS·FUSE는 폴링으로 변경을 확인합니다. <a href="#local_watch_manual" id="local_manual_link">매뉴얼</a></p>
-  <button id="local_start" class="btn btn-sm btn-primary">새 기준으로 시작</button>
-  <button id="local_stop" class="btn btn-sm btn-outline-danger">작업 중지</button>
-  <span id="local_state" role="status" aria-live="polite"></span>
-  <p id="local_error" class="text-danger" role="alert"></p>
-  <div id="local_roots_status"></div>
-</div>
-<ul class="nav nav-tabs doctor-setting-tabs" role="tablist" aria-label="로컬 폴더 감지">
+<ul class="nav nav-pills doctor-setting-tabs mb-3" role="tablist" aria-label="로컬 폴더 감지">
   <li class="nav-item"><a class="nav-link active" id="local_settings_tab" data-toggle="tab" href="#local_settings" role="tab" aria-controls="local_settings" aria-selected="true">설정</a></li>
   <li class="nav-item"><a class="nav-link" id="local_changes_tab" data-toggle="tab" href="#local_changes" role="tab" aria-controls="local_changes" aria-selected="false">변경 이벤트</a></li>
   <li class="nav-item"><a class="nav-link" id="local_manual_tab" data-toggle="tab" href="#local_watch_manual" role="tab" aria-controls="local_watch_manual" aria-selected="false">매뉴얼</a></li>
 </ul>
+<div class="doctor-gdrive-summary flex-wrap align-items-center mb-3">
+  <span id="local_state" class="doctor-muted" role="status" aria-live="polite"></span>
+  <div><button id="local_start" class="btn btn-sm btn-outline-primary">새 기준으로 시작</button>
+  <button id="local_stop" class="btn btn-sm btn-outline-danger">작업 중지</button></div>
+  <strong id="local_counts"></strong>
+</div>
+<p id="local_error" class="text-danger" role="alert"></p>
 <div class="tab-content">
 <div class="tab-pane fade show active" id="local_settings" role="tabpanel" aria-labelledby="local_settings_tab">
 <div class="doctor-card doctor-section">
-  <h4>감시 설정</h4>
+  <h3>로컬 폴더 감지</h3>
+  <p class="doctor-muted">로컬 디스크는 실시간, Windows Docker·CIFS/NFS·FUSE는 폴링으로 확인합니다. <a href="#local_watch_manual" id="local_manual_link">매뉴얼</a></p>
+  <div id="local_roots_status"></div>
+</div>
+<div class="mb-3"><button id="local_save" class="btn btn-sm btn-outline-primary">설정 저장</button></div>
+<div class="doctor-section">
+  <h4>감시 경로</h4>
   <p class="doctor-muted">두 경로 모두 각 컨테이너에서 보이는 절대 경로입니다. 설정 변경은 작업 중지 후 적용하세요.</p>
   <div id="local_roots"></div>
   <button id="local_add" class="btn btn-sm btn-outline-primary">감시 경로 추가</button>
-  <div class="row mt-3">
-    <div class="col-md-4 form-group"><label for="local_interval">폴링 주기(초)</label><input id="local_interval" class="form-control" type="number" min="30" max="86400" value="{{ arg.get('local_watch_interval', '300') }}"></div>
-    <div class="col-md-4 form-group"><label for="local_debounce">변경 대기시간(초)</label><input id="local_debounce" class="form-control" type="number" min="2" max="120" value="{{ arg.get('local_watch_debounce', '10') }}"></div>
-  </div>
-  <div class="form-group"><label for="local_extensions">감시 확장자</label><input id="local_extensions" class="form-control" value="{{ arg.get('local_watch_extensions', '') }}"></div>
-  <button id="local_save" class="btn btn-sm btn-primary">설정 저장</button>
+  <div class="form-group row mt-4"><label for="local_interval" class="col-md-3 col-form-label text-md-right font-weight-bold">폴링 주기(초)</label><div class="col-md-9"><input id="local_interval" class="form-control" style="max-width:180px" type="number" min="30" max="86400" value="{{ arg.get('local_watch_interval', '300') }}"></div></div>
+  <div class="form-group row"><label for="local_debounce" class="col-md-3 col-form-label text-md-right font-weight-bold">변경 대기시간(초)</label><div class="col-md-9"><input id="local_debounce" class="form-control" style="max-width:180px" type="number" min="2" max="120" value="{{ arg.get('local_watch_debounce', '10') }}"></div></div>
+  <div class="form-group row"><label for="local_extensions" class="col-md-3 col-form-label text-md-right font-weight-bold">감시 확장자</label><div class="col-md-9"><input id="local_extensions" class="form-control" value="{{ arg.get('local_watch_extensions', '') }}"></div></div>
   <p class="doctor-muted mt-2">BookOasis 연결 및 Discord 웹훅은 기존 Mate 설정을 사용합니다. Google Drive 연동을 켤 필요는 없습니다.</p>
 </div>
 </div>
 <div class="tab-pane fade" id="local_changes" role="tabpanel" aria-labelledby="local_changes_tab">
-<div class="doctor-card doctor-section">
-  <h4>변경 이벤트</h4>
+<div class="doctor-section">
   <div class="form-inline mb-2">
     <label class="mr-2" for="local_filter">상태</label>
     <select id="local_filter" class="form-control mr-2"><option value="">전체</option><option value="queued">대기</option><option value="retry">재시도</option><option value="processing">처리 중</option><option value="completed">요청 완료</option><option value="failed">실패</option></select>
-    <label class="sr-only" for="local_search">경로 검색</label><input id="local_search" class="form-control mr-2" placeholder="경로 검색">
-    <button id="local_refresh" class="btn btn-sm btn-outline-primary">검색</button>
-    <button id="local_clear" class="btn btn-sm btn-outline-danger ml-2">대기·재시도 일괄 삭제</button>
+    <label class="sr-only" for="local_search">경로·보관함·오류 검색</label><input id="local_search" class="form-control mr-2" placeholder="경로·보관함·오류 검색">
+    <button id="local_refresh" class="btn btn-sm btn-primary">검색</button>
+    <button id="local_reset" class="btn btn-sm btn-outline-secondary ml-1">리셋</button>
   </div>
-  <p id="local_counts"></p>
-  <div class="table-responsive"><table class="table table-sm"><thead><tr><th>ID·수신</th><th>변경</th><th>경로</th><th>상태</th><th>작업</th></tr></thead><tbody id="local_events"></tbody></table></div>
-  <button id="local_prev" class="btn btn-sm btn-outline-primary">이전</button><span id="local_page" class="mx-2"></span><button id="local_next" class="btn btn-sm btn-outline-primary">다음</button>
+  <div class="table-responsive"><div id="local_events" class="doctor-gdrive-list" role="list" aria-label="변경 이벤트"></div></div>
+  <div id="local_empty" class="doctor-empty" hidden>조건에 맞는 변경 이벤트가 없습니다.</div>
+  <div class="doctor-pagination"><button id="local_prev" class="btn btn-sm btn-outline-primary">이전</button><span id="local_page" class="mx-2"></span><button id="local_next" class="btn btn-sm btn-outline-primary">다음</button></div>
+  <div class="doctor-card doctor-section mt-3"><h4>변경 이벤트 DB 정리</h4><button id="local_clear" class="btn btn-sm btn-outline-danger">대기·재시도 일괄 삭제</button><p class="doctor-muted mt-2">작업 중지 후 삭제할 수 있습니다. 이미 전달된 스캔은 취소하지 않습니다.</p></div>
 </div>
 </div>
 <div class="tab-pane fade" id="local_watch_manual" role="tabpanel" aria-labelledby="local_manual_tab">
@@ -76,13 +77,16 @@ var localPage = 1, localPages = 1, localRunning = false, localLoading = false;
 function localAddRoot(row) {
   if ($('#local_roots .local-root').length >= 10) return;
   row = row || {};
-  var box = $('<div class="local-root border rounded p-3 mb-2"></div>');
+  var box = $('<div class="local-root doctor-card doctor-section"></div>');
   var path = $('<input class="form-control local-path" placeholder="/watch/books">').val(row.path || '');
   var target = $('<input class="form-control local-target" placeholder="/data/books">').val(row.target || '');
   var mode = $('<select class="form-control local-mode"><option value="auto">자동</option><option value="native">실시간 · Linux 로컬</option><option value="polling">폴링 · Windows Docker/CIFS/NFS/FUSE</option></select>').val(row.mode || 'auto');
-  box.append($('<label class="d-block">Mate 감시 경로</label>').append(path));
-  box.append($('<label class="d-block">BookOasis 경로</label>').append(target));
-  box.append($('<label class="d-block">감지 방식</label>').append(mode));
+  [['Mate 감시 경로', path], ['BookOasis 경로', target], ['감지 방식', mode]].forEach(function(field) {
+    var label = $('<label class="form-group row d-flex align-items-center"></label>');
+    label.append($('<span class="col-md-3 text-md-right font-weight-bold"></span>').text(field[0]));
+    label.append($('<span class="col-md-9"></span>').append(field[1]));
+    box.append(label);
+  });
   box.append($('<button type="button" class="btn btn-sm btn-outline-danger">삭제</button>').on('click', function() { if (!localRunning) box.remove(); }));
   $('#local_roots').append(box);
 }
@@ -108,21 +112,43 @@ function localStatus() {
     $('#local_start').prop('disabled', localRunning); $('#local_stop').prop('disabled', !localRunning);
     $('#local_save, #local_add, #local_clear, #local_roots input, #local_roots select, #local_roots button, #local_interval, #local_debounce, #local_extensions').prop('disabled', localRunning);
     $('#local_roots_status').empty();
-    (data.roots || []).forEach(function(root) { $('#local_roots_status').append($('<p></p>').text((root.path || '') + ' · ' + (root.mode || '') + ' · ' + root.status + ' · ' + (root.checked_at || '') + (root.error ? ' · ' + root.error : ''))); });
+    (data.roots || []).forEach(function(root) {
+      var state = $('<div class="border-top pt-2 mt-2"></div>');
+      state.append($('<strong class="doctor-path"></strong>').text(root.path || '감지 서비스'));
+      state.append($('<p class="doctor-muted mb-0"></p>').text(({native:'실시간',polling:'폴링'}[root.mode] || root.mode || '') + ' · ' + root.status + (root.checked_at ? ' · 마지막 확인 ' + root.checked_at : '')));
+      if (root.error) state.append($('<p class="text-danger mb-0"></p>').text(root.error));
+      $('#local_roots_status').append(state);
+    });
     var counts = data.counts || {};
     $('#local_counts').text('대기 ' + (counts.queued || 0) + ' · 재시도 ' + (counts.retry || 0) + ' · 처리 중 ' + (counts.processing || 0) + ' · 요청 완료 ' + (counts.completed || 0) + ' · 실패 ' + (counts.failed || 0));
     $('#local_events').empty();
     var labels = {queued:'대기',retry:'재시도',processing:'처리 중',completed:'요청 완료',failed:'실패'};
     (list.items || []).forEach(function(item) {
-      var tr = $('<tr></tr>');
-      tr.append($('<td></td>').text('#' + item.id + ' ' + (item.created_at || '')));
-      tr.append($('<td></td>').text(item.action));
-      tr.append($('<td style="overflow-wrap:anywhere"></td>').text(item.path));
-      tr.append($('<td></td>').text((labels[item.status] || item.status) + (item.error ? ' · ' + item.error : '')));
-      var actions = $('<td></td>');
+      var tr = $('<div class="doctor-gdrive-row" role="listitem"></div>');
+      var dbLabel = {general:'일반 DB',adult:'성인 DB',audiobook:'오디오북 DB',video:'비디오 DB'};
+      tr.append($('<div class="doctor-gdrive-id"></div>').append($('<strong></strong>').text('#' + item.id), $('<small class="doctor-muted"></small>').text(dbLabel[item.db_type] || '미분류')));
+      var info = $('<div class="doctor-gdrive-info"></div>');
+      var action = String(item.action || '').toLowerCase();
+      var actionClass = /^(create|edit|delete|move|rename|restore)$/.test(action) ? action : 'edit';
+      info.append($('<span class="doctor-gdrive-action"></span>').addClass('doctor-gdrive-action-' + actionClass).text(action.toUpperCase()));
+      info.append($('<small class="doctor-muted"></small>').text(item.item_type === 'directory' ? '폴더' : '파일'));
+      info.append($('<span class="doctor-gdrive-status"></span>').addClass('doctor-gdrive-status-' + (Object.prototype.hasOwnProperty.call(labels, item.status) ? item.status : 'queued')).text(labels[item.status] || item.status || '미확인'));
+      info.append($('<small class="doctor-muted"></small>').text('시도 ' + (item.attempts || 0) + '회'));
+      tr.append(info);
+      var paths = $('<div class="doctor-gdrive-paths"></div>');
+      paths.append($('<div class="doctor-path"></div>').append($('<strong></strong>').text('경로 '), document.createTextNode(item.path || '')));
+      paths.append($('<div class="doctor-gdrive-library"></div>').text('보관함 ' + (item.library_name || '미분류') + (item.library_id ? ' (#' + item.library_id + ')' : '')));
+      if (item.error) paths.append($('<div class="doctor-gdrive-error text-danger"></div>').text(item.error));
+      tr.append(paths);
+      var times = $('<div class="doctor-gdrive-time"></div>');
+      times.append($('<div></div>').text('수신 ' + String(item.created_at || '-').replace('T', ' ')));
+      if (item.completed_at) times.append($('<div></div>').text('완료 ' + String(item.completed_at).replace('T', ' ')));
+      tr.append(times);
+      var actions = $('<div class="doctor-gdrive-actions"></div>');
       if (item.status === 'failed') actions.append($('<button class="btn btn-sm btn-outline-primary">재시도</button>').on('click', function() { localRequest('retry', {id:item.id}, localStatus); }));
       tr.append(actions); $('#local_events').append(tr);
     });
+    $('#local_empty').prop('hidden', !!(list.items || []).length);
     localPage = list.page || 1; localPages = list.pages || 1;
     $('#local_page').text(localPage + ' / ' + localPages);
     $('#local_prev').prop('disabled', localPage <= 1); $('#local_next').prop('disabled', localPage >= localPages);
@@ -141,6 +167,7 @@ $('#local_start').on('click', function() { if (confirm('저장된 설정으로 �
 $('#local_stop').on('click', function() { localRequest('stop', {}, localStatus); });
 $('#local_clear').on('click', function() { if (confirm('로컬 감지 대기·재시도 이벤트를 삭제할까요?')) localRequest('clear_pending', {}, localStatus); });
 $('#local_refresh, #local_filter').on('click change', function() { localPage = 1; localStatus(); });
+$('#local_reset').on('click', function() { $('#local_filter, #local_search').val(''); localPage = 1; localStatus(); });
 $('#local_prev').on('click', function() { localPage--; localStatus(); });
 $('#local_next').on('click', function() { localPage++; localStatus(); });
 $(function() {
