@@ -8,11 +8,12 @@
   <li class="nav-item"><a class="nav-link" id="local_changes_tab" data-toggle="tab" href="#local_changes" role="tab" aria-controls="local_changes" aria-selected="false">변경 이벤트</a></li>
   <li class="nav-item"><a class="nav-link" id="local_manual_tab" data-toggle="tab" href="#local_watch_manual" role="tab" aria-controls="local_watch_manual" aria-selected="false">매뉴얼</a></li>
 </ul>
-<div class="doctor-gdrive-summary flex-wrap align-items-center mb-3">
-  <span id="local_state" class="doctor-muted" role="status" aria-live="polite"></span>
-  <div><button id="local_start" class="btn btn-sm btn-outline-primary">새 기준으로 시작</button>
+<div class="doctor-gdrive-summary flex-wrap align-items-center justify-content-start mb-3">
+  <div class="d-flex flex-wrap" style="gap:4px"><button id="local_save" class="btn btn-sm btn-outline-primary">설정 저장</button>
+  <button id="local_start" class="btn btn-sm btn-outline-primary">새 기준으로 시작</button>
   <button id="local_stop" class="btn btn-sm btn-outline-danger">작업 중지</button></div>
-  <strong id="local_counts"></strong>
+  <span id="local_state" class="doctor-muted" role="status" aria-live="polite"></span>
+  <strong id="local_counts" class="ml-auto"></strong>
 </div>
 <p id="local_error" class="text-danger" role="alert"></p>
 <div class="tab-content">
@@ -22,7 +23,6 @@
   <p class="doctor-muted">로컬 디스크는 실시간, Windows Docker·CIFS/NFS·FUSE는 폴링으로 확인합니다. <a href="#local_watch_manual" id="local_manual_link">매뉴얼</a></p>
   <div id="local_roots_status"></div>
 </div>
-<div class="mb-3"><button id="local_save" class="btn btn-sm btn-outline-primary">설정 저장</button></div>
 <div class="doctor-section">
   <h4>감시 경로</h4>
   <p class="doctor-muted">두 경로 모두 각 컨테이너에서 보이는 절대 경로입니다. 설정 변경은 작업 중지 후 적용하세요.</p>
@@ -78,13 +78,28 @@ function localAddRoot(row) {
   if ($('#local_roots .local-root').length >= 10) return;
   row = row || {};
   var box = $('<div class="local-root doctor-card doctor-section"></div>');
-  var path = $('<input class="form-control local-path" placeholder="/watch/books">').val(row.path || '');
-  var target = $('<input class="form-control local-target" placeholder="/data/books">').val(row.target || '');
+  var path = $('<input class="form-control local-path" placeholder="/host/volume2/DATA/02.Ebook/02.IT서적">').val(row.path || '');
+  var target = $('<input class="form-control local-target" placeholder="/volume2/DATA/02.Ebook/02.IT서적">').val(row.target || '');
+  var picker = $('<button type="button" class="btn btn-sm btn-outline-primary ml-2 text-nowrap">경로 선택</button>').on('click', function() {
+    if (localRunning) return;
+    globalSelectLocalFolder('Mate 감시 폴더 선택', path.val().trim() || '/', function(result) {
+      if (!localRunning && typeof result === 'string' && result.trim() && document.documentElement.contains(path[0])) path.val(result.trim());
+    });
+  });
   var mode = $('<select class="form-control local-mode"><option value="auto">자동</option><option value="native">실시간 · Linux 로컬</option><option value="polling">폴링 · Windows Docker/CIFS/NFS/FUSE</option></select>').val(row.mode || 'auto');
   [['Mate 감시 경로', path], ['BookOasis 경로', target], ['감지 방식', mode]].forEach(function(field) {
-    var label = $('<label class="form-group row d-flex align-items-center"></label>');
+    var label = $('<div class="form-group row d-flex align-items-center"></div>');
     label.append($('<span class="col-md-3 text-md-right font-weight-bold"></span>').text(field[0]));
-    label.append($('<span class="col-md-9"></span>').append(field[1]));
+    field[1].attr('aria-label', field[0]);
+    var control = $('<div class="col-md-9"></div>');
+    if (field[1] === path) {
+      control.append($('<div class="d-flex align-items-center"></div>').append(path, picker));
+      control.append($('<small class="doctor-muted d-block mt-1"></small>').text('FF 컨테이너에서 보이는 경로입니다. 예: /host/volume2/DATA/02.Ebook/02.IT서적'));
+    } else {
+      control.append(field[1]);
+      if (field[1] === target) control.append($('<small class="doctor-muted d-block mt-1"></small>').text('BookOasis 컨테이너에서 보이는 경로입니다. 예: /volume2/DATA/02.Ebook/02.IT서적'));
+    }
+    label.append(control);
     box.append(label);
   });
   box.append($('<button type="button" class="btn btn-sm btn-outline-danger">삭제</button>').on('click', function() { if (!localRunning) box.remove(); }));
