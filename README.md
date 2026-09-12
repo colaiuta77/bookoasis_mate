@@ -19,6 +19,28 @@
 - GHCR 이미지 업데이트 감지, Docker 작업 실시간 로그와 Ubuntu·Synology 호스트 Docker 자동 호환.
 - 설정 화면에서 MariaDB 필수 구성요소 상태 확인 및 필요한 패키지만 선택 설치.
 
+## Linux 호스트 진단 스크립트
+
+NAS·Ubuntu 등 **Docker 호스트**에서 `scripts/mate_diagnose.py` 한 파일만 실행합니다. Python 3.8 이상과 Docker CLI 접근 권한이 필요하며 추가 Python 패키지는 설치하지 않습니다.
+
+```bash
+python3 mate_diagnose.py
+# 보고서 저장 위치 지정
+python3 mate_diagnose.py --output-dir ./mate-reports
+```
+
+저장소 루트에서 실행할 때는 `python3 scripts/mate_diagnose.py`를 사용하세요. 컨테이너와 증상을 번호로 선택하고, Mate 설치·DB 경로 및 필요한 검사값을 입력합니다. 기본 경로가 실제 설치와 다르면 수정하세요. Docker 권한이 없을 때 스크립트가 자동으로 sudo를 실행하지는 않습니다.
+
+- 컨테이너 상태·이미지 식별값, Python·의존성, Mate 버전, 마운트·경로 접근, Mate 허용 설정과 최신 최대 5,000건 이벤트 상태를 확인합니다.
+- 접속 검사는 인증 없이 URL 원점 `/`에 GET 1회만 요청합니다. 리디렉션·로그인·스캔을 실행하지 않으며 화면 지연의 원인을 확정하는 검사는 아닙니다.
+- 최근 1시간의 Docker 로그 최대 300줄에서 알려진 오류 패턴을 분류합니다. 원문 대신 유형·건수·확인 방법만 보고합니다. 파일에만 기록된 로그는 포함되지 않습니다.
+- 추가 SQLite `quick_check`는 선택 사항입니다. 읽기 전용으로 실행하지만 부하가 생길 수 있습니다. 검사별 시간 제한으로 건너뛰며 커널에서 멈춘 네트워크 I/O는 즉시 종료되지 않을 수 있습니다.
+- 결과는 `mate-diagnosis-날짜-시간.txt`로 저장합니다. 정상·주의·오류·확인 불가를 구분하며, 부분 실패·중단도 보고서에 남깁니다. Linux 보고서 권한은 소유자 읽기/쓰기 전용입니다.
+
+비밀번호·환경변수·전체 설정·원문 로그는 보고서에 넣지 않습니다. **컨테이너 이름·자료 경로·사용자 입력 설명은 공유 전 확인하세요.** 자동 업로드·서비스 재시작·설정 변경·DB 복구는 하지 않습니다. 실제 앱 사용자와 `docker exec` 사용자의 권한은 다를 수 있습니다.
+
+이 보고서는 초기 분류용입니다. Drive 실제 이벤트 API·Gitea 인증·MariaDB 내부 상태·Redis 데이터·브라우저 성능은 직접 검사하지 않으며 필요 시 별도 증거를 요청합니다.
+
 ## Docker 관리 사용 조건
 
 Docker 관리 기능은 FlaskFarm 컨테이너에서 호스트 Docker CLI·Compose와 BookOasis 경로에 접근해야 합니다. FlaskFarm의 Docker Compose 설정에 호스트 루트를 `/host`로 마운트하세요.
