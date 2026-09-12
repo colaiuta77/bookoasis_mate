@@ -38,10 +38,17 @@ class ModuleLocalWatch(PluginModuleBase):
     def model(self):
         return P.local_folder_model
 
+    def _settings(self):
+        with F.app.app_context():
+            values = P.ModelSetting.to_dict()
+        if not isinstance(values, dict):
+            raise RuntimeError("설정 DB를 읽지 못했습니다. FlaskFarm 로그를 확인해 주세요.")
+        return values
+
     def _config(self, overrides=None):
-        values = {**P.ModelSetting.to_dict(), **(overrides or {})}
+        values = {**self._settings(), **(overrides or {})}
         drive = []
-        if P.ModelSetting.get_bool("gdrive_scan_enabled") and values.get("gdrive_scan_input_mode") == "builtin":
+        if str(values.get("gdrive_scan_enabled")).lower() == "true" and values.get("gdrive_scan_input_mode") == "builtin":
             configured = json.loads(values.get("gdrive_scan_builtin_roots") or "[]")
             drive = [row.get("local_root", "") for row in configured]
             drive.append(values.get("gdrive_scan_builtin_local_root") or "")
@@ -54,12 +61,12 @@ class ModuleLocalWatch(PluginModuleBase):
     def plugin_load(self):
         if self.model:
             self.model.recover_processing()
-        if P.ModelSetting.get_bool("local_watch_enabled"):
-            try:
+        try:
+            if str(self._settings().get("local_watch_enabled")).lower() == "true":
                 self.start()
-            except Exception as error:
-                self._error = str(error)
-                P.logger.error(f"로컬 폴더 감지 시작 실패: {error}")
+        except Exception as error:
+            self._error = str(error)
+            P.logger.error(f"로컬 폴더 감지 시작 실패: {error}")
 
     def plugin_unload(self):
         self.stop()
@@ -94,15 +101,22 @@ class ModuleLocalWatch(PluginModuleBase):
 
     def stop(self):
         self._stop.set()
+        with self._lock:
+            for state in self._states.values():
+                state["status"] = "중지됨"
         process = self._process
         if process and process.poll() is None:
-            process.terminate()
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
         # 현재 BookOasis API 요청은 반환을 기다리고 다음 요청부터 중단합니다.
 
     def _read(self):
         process = self._process
-        extensions = parse_extensions(P.ModelSetting.get("local_watch_extensions"))
         try:
+            settings = self._settings()
+            extensions = parse_extensions(settings.get("local_watch_extensions"))
             for line in process.stdout:
                 if self._stop.is_set():
                     break
@@ -124,11 +138,13 @@ class ModuleLocalWatch(PluginModuleBase):
                     with self._lock:
                         if self._stop.is_set():
                             break
-                        self.model.enqueue_many(events, int(P.ModelSetting.get("local_watch_debounce") or 10))
+                        self.model.enqueue_many(events, int(settings.get("local_watch_debounce") or 10))
                     process.stdin.write("ok\n")
                     process.stdin.flush()
                 else:
                     with self._lock:
+                        if self._stop.is_set():
+                            break
                         key = message.get("path") or "service"
                         self._states[key] = {**self._states.get(key, {}), **message}
             if not self._stop.is_set():
@@ -197,7 +213,7 @@ class ModuleLocalWatch(PluginModuleBase):
                 events = ready
                 if not events:
                     continue
-                settings = P.ModelSetting.to_dict()
+                settings = self._settings()
                 settings["gdrive_scan_path_mappings"] = ""
                 settings["gdrive_scan_vfs_rules"] = ""
                 processor = GDriveScanProcessor(settings,
@@ -231,7 +247,7 @@ class ModuleLocalWatch(PluginModuleBase):
                 self._busy = False
 
     def process_menu(self, page, req):
-        return render_template(f"{P.package_name}_local_watch.html", arg=P.ModelSetting.to_dict())
+        return render_template(f"{P.package_name}_local_watch.html", arg=self._settings())
 
     def process_ajax(self, command, req):
         try:

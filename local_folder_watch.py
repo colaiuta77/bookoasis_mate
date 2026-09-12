@@ -147,8 +147,11 @@ def run(config):
                 if native:
                     if fstype not in local_types:
                         raise ValueError("이 파일시스템은 실시간 감지 대신 폴링을 선택해 주세요.")
-                    from watchdog.events import FileSystemEventHandler
-                    from watchdog.observers import Observer
+                    try:
+                        from watchdog.events import FileSystemEventHandler
+                        from watchdog.observers import Observer
+                    except ImportError as error:
+                        raise RuntimeError("실시간 감지에 watchdog이 필요합니다. FlaskFarm 컨테이너의 감지 Python에서 python -m pip install 'watchdog>=4,<7' 실행 후 다시 시작하세요. 폴링에는 필요하지 않습니다.") from error
 
                     class Handler(FileSystemEventHandler):
                         def __init__(self, target):
@@ -173,6 +176,8 @@ def run(config):
                 emit({"path": root["path"], "mode": state["mode"], "status": "기준 수집 중", "filesystem": fstype})
             except Exception as error:
                 emit({"path": root["path"], "status": "오류", "error": str(error)})
+        if not monitors:
+            return
         while True:
             if os.getppid() != parent_pid:
                 return
