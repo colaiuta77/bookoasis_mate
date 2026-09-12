@@ -31,6 +31,7 @@
   <div class="form-group row mt-4"><label for="local_interval" class="col-md-3 col-form-label text-md-right font-weight-bold">폴링 주기(초)</label><div class="col-md-9"><input id="local_interval" class="form-control" style="max-width:180px" type="number" min="30" max="86400" value="{{ arg.get('local_watch_interval', '300') }}"></div></div>
   <div class="form-group row"><label for="local_debounce" class="col-md-3 col-form-label text-md-right font-weight-bold">변경 대기시간(초)</label><div class="col-md-9"><input id="local_debounce" class="form-control" style="max-width:180px" type="number" min="2" max="120" value="{{ arg.get('local_watch_debounce', '10') }}"></div></div>
   <div class="form-group row"><label for="local_extensions" class="col-md-3 col-form-label text-md-right font-weight-bold">감시 확장자</label><div class="col-md-9"><input id="local_extensions" class="form-control" value="{{ arg.get('local_watch_extensions', '') }}"></div></div>
+  <div class="form-group row"><label for="local_ignore_patterns" class="col-md-3 col-form-label text-md-right font-weight-bold">감지 제외 패턴</label><div class="col-md-9"><textarea id="local_ignore_patterns" class="form-control" rows="7" placeholder="@eaDir/&#10;#recycle/&#10;*.tmp&#10;*.sample.cbz&#10;.DS_Store&#10;Thumbs.db&#10;desktop.ini">{{ arg.get('local_watch_ignore_patterns', '@eaDir/\n#recycle/') }}</textarea><small class="form-text text-muted">한 줄에 하나씩 입력합니다. 끝에 /를 붙이면 폴더와 하위 전체를 제외합니다. *.tmp 같은 파일 패턴도 지원하며, 비우면 제외하지 않습니다. 작업 중지 → 설정 저장 → 새 기준으로 시작 순서로 적용하세요.</small></div></div>
   <p class="doctor-muted mt-2">BookOasis 연결 및 Discord 웹훅은 기존 Mate 설정을 사용합니다. Google Drive 연동을 켤 필요는 없습니다.</p>
 </div>
 </div>
@@ -59,6 +60,7 @@
     <li>저장 후 시작합니다. 최초 조회는 기준만 만들며 기존 파일을 스캔하지 않습니다.</li>
   </ol>
   <ul>
+    <li>감지 제외 패턴은 Mate의 신규 이벤트 수집에 적용하며 기존 기록·대기열은 지우지 않습니다. BookOasis 스캔 제외 설정과 별개입니다. / 없는 패턴은 모든 깊이의 이름, / 포함 패턴은 감시 루트 기준 상대 경로에 대소문자를 구분하여 적용합니다. *, ?, []를 지원하며 #은 주석이 아닙니다. 폴더 제외 시 스냅샷 하위 탐색도 생략합니다.</li>
     <li>실시간 감지에는 FlaskFarm Python 환경의 <code>watchdog&gt;=4,&lt;7</code> 설치가 필요합니다. 없으면 오류를 표시하며 자동 설치하지 않습니다.</li>
     <li>실시간 모드는 watchdog 신호를 모아 변경 시 트리를 비교합니다. 폴링은 매 주기 파일 크기·수정시간을 비교합니다. 대규모 경로는 조회 비용이 크며 루트당 최대 20만 항목입니다.</li>
     <li>이동은 삭제+생성으로 기록합니다. 심볼릭 링크는 따라가지 않습니다. 감시 중지·재시작 사이의 변경은 자동 복구하지 않습니다.</li>
@@ -108,7 +110,7 @@ function localAddRoot(row) {
 function localValues() {
   var roots = [];
   $('#local_roots .local-root').each(function() { roots.push({path:$(this).find('.local-path').val(), target:$(this).find('.local-target').val(), mode:$(this).find('.local-mode').val()}); });
-  return {local_watch_roots:JSON.stringify(roots), local_watch_interval:$('#local_interval').val(), local_watch_debounce:$('#local_debounce').val(), local_watch_extensions:$('#local_extensions').val()};
+  return {local_watch_roots:JSON.stringify(roots), local_watch_interval:$('#local_interval').val(), local_watch_debounce:$('#local_debounce').val(), local_watch_extensions:$('#local_extensions').val(), local_watch_ignore_patterns:$('#local_ignore_patterns').val()};
 }
 function localRequest(command, data, done) {
   $.ajax({url:'/' + PACKAGE_NAME + '/ajax/local_watch/' + command, type:'POST', data:data || {}, dataType:'json', global:false,
@@ -125,7 +127,7 @@ function localStatus() {
     $('#local_state').text(data.stopping ? '중지 중 · 현재 요청 대기' : (localRunning ? '실행 중' : '중지됨'));
     $('#local_error').text(data.error || '');
     $('#local_start').prop('disabled', localRunning); $('#local_stop').prop('disabled', !localRunning);
-    $('#local_save, #local_add, #local_clear, #local_roots input, #local_roots select, #local_roots button, #local_interval, #local_debounce, #local_extensions').prop('disabled', localRunning);
+    $('#local_save, #local_add, #local_clear, #local_roots input, #local_roots select, #local_roots button, #local_interval, #local_debounce, #local_extensions, #local_ignore_patterns').prop('disabled', localRunning);
     $('#local_roots_status').empty();
     (data.roots || []).forEach(function(root) {
       var state = $('<div class="border-top pt-2 mt-2"></div>');

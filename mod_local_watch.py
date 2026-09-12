@@ -22,6 +22,7 @@ class ModuleLocalWatch(PluginModuleBase):
         self.db_default = {
             "local_watch_enabled": "False", "local_watch_roots": "[]",
             "local_watch_interval": "300", "local_watch_debounce": "10",
+            "local_watch_ignore_patterns": "@eaDir/\n#recycle/",
             "local_watch_extensions": ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json,.mp3,.m4b,.m4a,.flac,.aac,.wav,.ogg,.opus,.wma,.mp4,.mkv,.avi,.webm,.mov,.m4v,.ts,.smi,.srt,.vtt",
         }
         self._lock = threading.RLock()
@@ -56,6 +57,7 @@ class ModuleLocalWatch(PluginModuleBase):
             drive = [map_path(path, mappings) for path in drive if path]
         roots = validate_roots(values.get("local_watch_roots") or "[]", drive)
         return {"roots": roots, "interval": max(30, min(int(values.get("local_watch_interval") or 300), 86400)),
+                "ignore_patterns": [line.strip() for line in values.get("local_watch_ignore_patterns", "@eaDir/\n#recycle/").splitlines() if line.strip()],
                 "debounce": max(2, min(int(values.get("local_watch_debounce") or 10), 120))}
 
     def plugin_load(self):

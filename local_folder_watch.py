@@ -1,4 +1,5 @@
 # 로컬·네트워크 폴더 변경을 별도 프로세스에서 감지하고 검증된 이벤트를 전달합니다.
+import fnmatch
 import json
 import os
 import posixpath
@@ -54,8 +55,9 @@ def filesystem_type(path):
 
 
 class PollingRoot:
-    def __init__(self, root, max_entries=200000):
+    def __init__(self, root, max_entries=200000, ignore_patterns=()):
         self.root = root
+        self.ignore_patterns = tuple(ignore_patterns)
         self.max_entries = max_entries
         self.snapshot = None
         self.identity = None
@@ -76,11 +78,15 @@ class PollingRoot:
                 for entry in entries:
                     if entry.is_symlink():
                         continue
-                    st = entry.stat(follow_symlinks=False)
                     directory = entry.is_dir(follow_symlinks=False)
+                    relative = os.path.relpath(entry.path, root).replace(os.sep, "/")
+                    if any((directory or not pattern.endswith('/')) and
+                           fnmatch.fnmatchcase(relative if '/' in pattern.rstrip('/') else entry.name, pattern.rstrip('/'))
+                           for pattern in self.ignore_patterns):
+                        continue
                     if not directory and not entry.is_file(follow_symlinks=False):
                         continue
-                    relative = os.path.relpath(entry.path, root).replace(os.sep, "/")
+                    st = entry.stat(follow_symlinks=False)
                     current[relative] = (directory, st.st_size, st.st_mtime_ns)
                     if len(current) > self.max_entries:
                         raise ValueError("감시 항목 한도를 초과했습니다. 감시 범위를 줄여 주세요.")
@@ -139,7 +145,7 @@ def run(config):
 
     try:
         for root in roots:
-            monitor = PollingRoot(root)
+            monitor = PollingRoot(root, ignore_patterns=config.get("ignore_patterns", ()))
             state = {"monitor": monitor, "next": 0, "changed": 0, "first": 0, "lock": threading.Lock(), "mode": "polling"}
             try:
                 fstype = filesystem_type(root["path"])
