@@ -29,7 +29,17 @@ python3 mate_diagnose.py
 python3 mate_diagnose.py --output-dir ./mate-reports
 ```
 
-저장소 루트에서 실행할 때는 `python3 scripts/mate_diagnose.py`를 사용하세요. 컨테이너와 증상을 번호로 선택하고, Mate 설치·DB 경로 및 필요한 검사값을 입력합니다. 기본 경로가 실제 설치와 다르면 수정하세요. Docker 권한이 없을 때 스크립트가 자동으로 sudo를 실행하지는 않습니다.
+저장소 루트에서 실행할 때는 `bash scripts/mate_diagnose.sh` 또는 `python3 scripts/mate_diagnose.py`를 사용하세요. 셸 실행기는 Python 3.8+·Docker를 확인하고 같은 폴더의 본체를 실행합니다. 컨테이너와 증상을 번호로 선택하며, 선택 경로는 예시를 참고해 직접 입력하거나 Enter로 건너뜁니다. 자료 경로는 Mate에서는 `/host/volume2/DATA/02.Ebook`, BookOasis에서는 `/volume2/DATA/02.Ebook`처럼 다를 수 있습니다. 예시는 자동 입력하지 않습니다.
+
+화면에는 6단계 진행과 짧은 상태·다음 조치만 표시합니다. 상세 JSON·마운트·설정 근거는 TXT에만 저장하고, 마지막에 요약과 결과 파일 위치를 표시합니다. Docker 권한이 없을 때 자동 sudo나 패키지 설치를 하지 않습니다.
+
+아래 한 줄 실행은 **개선된 실행기와 Python 본체가 GitHub main에 모두 게시된 뒤** 사용할 수 있습니다. 원격 코드를 실행하므로 신뢰하는 저장소인지 확인하세요. 게시 전에는 위 로컬 명령을 사용하세요.
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/colaiuta77/bookoasis_mate/main/scripts/mate_diagnose.sh)"
+```
+
+셸 실행기는 임시 파일로 Python 본체를 받아 실행한 뒤 내려받은 임시 파일만 정리합니다. 원격 파일은 main 변경에 따라 달라지므로 고정 버전이 필요하면 실행기와 본체의 URL을 같은 릴리스 커밋에 고정해 사용하세요.
 
 - 컨테이너 상태·이미지 식별값, Python·의존성, Mate 버전, 마운트·경로 접근, Mate 허용 설정과 최신 최대 5,000건 이벤트 상태를 확인합니다.
 - 접속 검사는 인증 없이 URL 원점 `/`에 GET 1회만 요청합니다. 리디렉션·로그인·스캔을 실행하지 않으며 화면 지연의 원인을 확정하는 검사는 아닙니다.

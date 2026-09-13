@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 
-VERSION = "1.0"
+VERSION = "1.1"
 LIMIT = 2 * 1024 * 1024
 PATTERNS = (
     ("권한", r"PermissionError|Permission denied|EACCES", "실패한 경로의 실행 사용자·마운트 권한을 확인하세요."),
@@ -210,21 +210,39 @@ class Report:
     def add(self, state, name, evidence, advice=""):
         line = redact("[{}] {}\n  근거. {}{}".format(state, name, evidence, "\n  다음 확인. " + advice if advice else ""))
         self.lines.append(line)
-        print(line)
+        print(redact("[{}] {}".format(state, name)))
+        if advice and state != "정상":
+            print("  → " + redact(advice))
+    def summary(self):
+        return "검사 요약. " + " / ".join("{} {}건".format(state, sum(line.startswith("[" + state + "]") for line in self.lines))
+                                           for state in ("오류", "주의", "확인 불가", "건너뜀", "정상"))
     def save(self, directory):
         directory = Path(directory).expanduser()
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / ("mate-diagnosis-" + datetime.now().strftime("%Y%m%d-%H%M%S-%f") + ".txt")
         fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            summary = "검사 요약. " + " / ".join("{} {}건".format(state, sum(line.startswith("[" + state + "]") for line in self.lines))
-                                                   for state in ("오류", "주의", "확인 불가", "정상"))
+            summary = self.summary()
             stream.write("\n\n".join(self.lines[:4] + [summary] + self.lines[4:]) + "\n")
         return path.resolve()
 
 
 def ask(label, default=""):
-    return input(label + (" [" + default + "]" if default else "") + " > ").strip() or default
+    return input(label + (" [Enter = " + default + "]" if default else "") + " > ").strip() or default
+
+
+def ask_path(label, example):
+    print("\n" + label)
+    print("  예시. " + example + " (자동 입력되지 않습니다)")
+    while True:
+        value = ask("절대 경로 입력 (Enter = 건너뛰기)")
+        if not value or (value.startswith('/') and '\x00' not in value):
+            return value
+        print("/로 시작하는 컨테이너 내부 경로를 입력하거나 Enter로 건너뛰세요.")
+
+
+def section(number, title):
+    print("\n" + "-" * 54 + "\n[{} / 6] {}\n".format(number, title) + "-" * 54)
 
 
 def choose(label, options, optional=False):
@@ -293,6 +311,7 @@ def check_settings(report, settings):
 
 
 def diagnose(report):
+    section(1, "컨테이너와 증상 선택")
     report.add("정상", "호스트", "{} / {} / Python {}".format(platform.system(), platform.machine(), platform.python_version()))
     code, output = run_command(["docker", "ps", "-a", "--format", "{{.Names}}"])
     if code != 0:
@@ -310,6 +329,7 @@ def diagnose(report):
     if incident:
         report.add("주의", "사용자 설명 (검증 전)", incident)
     containers = {}
+    section(2, "컨테이너 상태와 실행 환경")
     for name in dict.fromkeys(n for n in (ff, book) if n):
         template = '{"State":{"Running":{{json .State.Running}},"Restarting":{{json .State.Restarting}},"OOMKilled":{{json .State.OOMKilled}},"StartedAt":{{json .State.StartedAt}}},"RestartCount":{{json .RestartCount}},"Image":{{json .Image}},"Config":{"Image":{{json .Config.Image}}},"HostConfig":{"NetworkMode":{{json .HostConfig.NetworkMode}}},"Mounts":{{json .Mounts}}}'
         code, output = run_command(["docker", "inspect", "--format", template, name])
@@ -340,25 +360,33 @@ def diagnose(report):
             continue
         containers[name] = (python, mounts)
         show_probe(report, name + " 런타임", probe(name, python, "runtime"))
+    section(3, "Mate 설치와 이벤트 DB")
     if ff in containers:
         python, _ = containers[ff]
-        plugin = ask("Mate 설치 경로 (FlaskFarm 내부)", "/data/plugins/bookoasis_mate")
-        show_probe(report, "Mate 설치", probe(ff, python, "plugin", path=plugin))
+        plugin = ask_path("Mate 프로그램 설치 폴더 (FlaskFarm 컨테이너 내부, 자료 폴더가 아닙니다)", "/data/plugins/bookoasis_mate")
+        if plugin:
+            show_probe(report, "Mate 설치", probe(ff, python, "plugin", path=plugin))
+        else:
+            report.add("건너뜀", "Mate 설치 경로 검사", "사용자가 Enter로 생략")
         report.add("주의", "업데이트/중복 설치 판단", ".git 존재만으로 버전 복귀를 확정할 수 없습니다.", "실제 로딩 경로·path_dev 중복과 자동 업데이트 설정을 대조하세요.")
-        db = ask("Mate SQLite DB 경로 (건너뛰기는 -)", "/data/db/bookoasis_mate.db")
-        if db != "-":
+        db = ask_path("Mate 설정·이벤트 SQLite DB 파일 (FlaskFarm 컨테이너 내부)", "/data/db/bookoasis_mate.db")
+        if db:
             result = probe(ff, python, "db", path=db, mate=True)
             settings = result.pop("settings", {})
             show_probe(report, "Mate DB/이벤트 (최신 최대 5000건 표본)", result)
             check_settings(report, settings)
+        else:
+            report.add("건너뜀", "Mate DB 검사", "사용자가 Enter로 생략")
+    section(4, "양쪽 컨테이너의 자료 경로 비교")
     if containers and ask("감시/자료 경로를 비교할까요? y/n", "y" if "감지" in symptom else "n").lower() == "y":
         mapped = []
         for role, name in (("Mate", ff), ("BookOasis", book)):
             if name not in containers:
                 continue
-            path = ask(role + " 컨테이너 내부 절대 경로 (건너뛰기는 -)")
-            if not path.startswith("/") or path == "-":
-                report.add("확인 불가", role + " 경로", "미입력/절대 경로 아님")
+            example = "/host/volume2/DATA/02.Ebook/02.IT서적" if role == "Mate" else "/volume2/DATA/02.Ebook/02.IT서적"
+            path = ask_path(role + "에서 보이는 감시/자료 폴더 (" + name + " 컨테이너 내부)", example)
+            if not path:
+                report.add("건너뜀", role + " 경로", "사용자가 Enter로 생략")
                 continue
             python, mounts = containers[name]
             show_probe(report, role + " 경로 " + path, probe(name, python, "path", path=path))
@@ -366,7 +394,8 @@ def diagnose(report):
         if len(mapped) == 2:
             report.add("정상" if mapped[0] and mapped[0] == mapped[1] else "주의", "호스트 마운트 매핑 비교", str(mapped),
                        "서로 다른 원본 경로도 같은 원격 자료를 가리킬 수 있습니다. 동일 경로 역시 내용 동일성을 보장하지 않습니다.")
-    url = ask("BookOasis 접속 URL 원점 (예 http://192.168.1.10:5000, 건너뛰기는 Enter)")
+    section(5, "접속과 선택 DB 검사")
+    url = ask("BookOasis 접속 주소 (예 http://192.168.1.10:5000, Enter = 건너뛰기)")
     if url:
         try:
             url = origin_url(url)
@@ -379,10 +408,11 @@ def diagnose(report):
             report.add("주의", "HTTP 검사 범위", "인증 없이 원점 / GET 1회. 리디렉션을 따라가지 않습니다.", "응답 시간은 API/브라우저 탭 전환 속도가 아닙니다. 401/403은 보호된 서비스의 정상 동작일 수도 있습니다.")
     if containers and ask("추가 SQLite DB quick_check를 실행할까요? 부하 발생 가능. y/N", "n").lower() == "y":
         name = choose("검사 DB가 보이는 컨테이너", list(containers))
-        path = ask("검사할 SQLite DB 절대 경로")
+        path = ask_path("선택한 컨테이너에서 보이는 SQLite DB 파일", "/app/db/media_general.db")
         if path.startswith("/"):
             show_probe(report, "선택 DB quick_check", probe(name, containers[name][0], "db", path=path, quick=True))
             report.add("주의", "DB 검사 한계", "읽기 전용 단일 DB 검사. WAL 크기는 기록하되 수정하지 않습니다.", "ok라도 다른 DB·FTS 쿼리·실제 앱 오류까지 정상임을 의미하지 않습니다.")
+    section(6, "최근 로그와 진단 마무리")
     if ask("최근 1시간 Docker 로그에서 오류 패턴을 검사할까요? y/n", "y").lower() == "y":
         for name in dict.fromkeys(n for n in (ff, book) if n):
             code, output = run_command(["docker", "logs", "--since", "1h", "--tail", "300", name])
@@ -416,7 +446,9 @@ def main():
     if sys.version_info < (3, 8):
         parser.error("Python 3.8 이상이 필요합니다.")
     report = Report()
-    print("읽기 전용 진단입니다. 보고서 파일만 생성합니다. Docker 권한이 필요하며 자동 sudo는 하지 않습니다.")
+    print("\nBookOasis Mate 환경 진단 v" + VERSION)
+    print("읽기 전용 · 서비스 변경 없음 · 자동 sudo/업로드 없음")
+    print("화면에는 요약만 표시하며 상세 근거는 결과 TXT 파일에 저장합니다.")
     try:
         if not shutil.which("docker"):
             report.add("확인 불가", "Docker", "CLI가 PATH에 없습니다.")
@@ -429,9 +461,10 @@ def main():
     try:
         path = report.save(args.output_dir)
     except OSError as error:
-        print("보고서 저장 실패. " + type(error).__name__ + ". 위 콘솔 결과를 확인하세요.", file=sys.stderr)
+        print("보고서 저장 실패. " + type(error).__name__ + ". 쓰기 가능한 --output-dir 경로로 다시 실행하세요. 상세 근거 파일은 저장되지 않았습니다.", file=sys.stderr)
         return 1
-    print("\n보고서 저장. " + str(path) + "\n공유 전 경로·컨테이너 이름을 확인하세요. 자동 업로드하지 않습니다.")
+    print("\n" + "=" * 54 + "\n" + report.summary())
+    print("공유할 진단 결과 파일\n  " + str(path) + "\n이 TXT 파일만 전달해 주세요. 공유 전 경로·컨테이너 이름을 확인하세요.")
     return 0
 
 
