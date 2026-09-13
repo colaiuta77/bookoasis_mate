@@ -199,8 +199,8 @@ def run(config):
     interval = max(30, min(int(config.get("interval", 300)), 86400))
     debounce = max(2, min(int(config.get("debounce", 10)), 120))
     max_entries = int(config.get("max_entries", 200000))
-    if not 1 <= max_entries <= 700000:
-        raise ValueError("감시 항목 한도는 1~700000 사이여야 합니다.")
+    if not 1 <= max_entries <= 1000000:
+        raise ValueError("감시 항목 한도는 1~1000000 사이여야 합니다.")
     monitors = []
     observers = []
     local_types = {"ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "tmpfs", "overlay"}
