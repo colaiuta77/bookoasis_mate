@@ -3,6 +3,7 @@ import fnmatch
 import json
 import os
 import posixpath
+import stat
 import sys
 import threading
 import time
@@ -55,14 +56,27 @@ def filesystem_type(path):
 
 
 class PollingRoot:
-    def __init__(self, root, max_entries=200000, ignore_patterns=()):
+    def __init__(self, root, max_entries=200000, ignore_patterns=(), extensions=None):
         self.root = root
         self.ignore_patterns = tuple(ignore_patterns)
+        self.extensions = None if extensions is None else frozenset(extensions)
         self.max_entries = max_entries
         self.snapshot = None
         self.identity = None
+        self.file_count = self.directory_count = 0
 
-    def collect(self, accept=None):
+    def included(self, relative, directory):
+        parts = relative.split('/')
+        for index, name in enumerate(parts):
+            is_directory = index < len(parts) - 1 or directory
+            prefix = '/'.join(parts[:index + 1])
+            if any((is_directory or not pattern.endswith('/')) and
+                   fnmatch.fnmatchcase(prefix if '/' in pattern.rstrip('/') else name, pattern.rstrip('/'))
+                   for pattern in self.ignore_patterns):
+                return False
+        return directory or self.extensions is None or parts[-1].lower() == '.bookoasisignore' or posixpath.splitext(relative)[1].lower() in self.extensions
+
+    def collect(self, accept=None, paths=None):
         root = self.root["path"]
         if os.path.islink(root) or not os.path.isdir(root):
             raise OSError("감시 루트에 접근할 수 없습니다. 마운트와 권한을 확인하세요.")
@@ -70,8 +84,53 @@ class PollingRoot:
         identity = (info.st_dev, info.st_ino)
         if self.identity is not None and self.identity != identity:
             raise ValueError("루트 식별 정보가 변경되었습니다. 마운트 확인 후 기준을 재설정하세요.")
+        full = paths is None or self.snapshot is None
+        scopes = set()
+        if not full:
+            for path in paths:
+                if path == '':
+                    full = True
+                    break
+                if path.startswith('/') or '\\' in path or any(part in {'', '.', '..'} for part in path.split('/')):
+                    raise ValueError('감시 범위 밖 변경 경로를 거부했습니다.')
+                scopes.add(path)
+            scopes = {path for path in scopes if not any('/'.join(path.split('/')[:i]) in scopes for i in range(1, len(path.split('/'))))}
+        old = self.snapshot or {}
+        if not full:
+            previous = {}
+            for path in scopes:
+                if path in old:
+                    previous[path] = old[path]
+                    if old[path][0]:
+                        prefix = path + '/'
+                        previous.update((key, value) for key, value in old.items() if key.startswith(prefix))
+            old = previous
         current = {}
-        stack = [root]
+        stack = [root] if full else []
+        base_size = 0 if full else len(self.snapshot) - len(old)
+
+        def record(path, relative, directory, info):
+            current[relative] = (directory, info.st_size, info.st_mtime_ns)
+            if base_size + len(current) > self.max_entries:
+                raise ValueError('감시 항목 한도를 초과했습니다 ({} / {} 항목). 대상 파일·폴더 기준이며 감시 범위나 한도 설정을 확인하세요.'.format(base_size + len(current), self.max_entries))
+            if directory:
+                stack.append(path)
+
+        if not full:
+            for relative in scopes:
+                path = root
+                try:
+                    for part in relative.split('/'):
+                        path = os.path.join(path, part)
+                        entry_info = os.lstat(path)
+                        if stat.S_ISLNK(entry_info.st_mode):
+                            break
+                    else:
+                        directory = stat.S_ISDIR(entry_info.st_mode)
+                        if (directory or stat.S_ISREG(entry_info.st_mode)) and self.included(relative, directory):
+                            record(path, relative, directory, entry_info)
+                except (FileNotFoundError, NotADirectoryError):
+                    pass
         while stack:
             parent = stack.pop()
             with os.scandir(parent) as entries:
@@ -80,42 +139,48 @@ class PollingRoot:
                         continue
                     directory = entry.is_dir(follow_symlinks=False)
                     relative = os.path.relpath(entry.path, root).replace(os.sep, "/")
-                    if any((directory or not pattern.endswith('/')) and
-                           fnmatch.fnmatchcase(relative if '/' in pattern.rstrip('/') else entry.name, pattern.rstrip('/'))
-                           for pattern in self.ignore_patterns):
+                    if not self.included(relative, directory):
                         continue
                     if not directory and not entry.is_file(follow_symlinks=False):
                         continue
                     st = entry.stat(follow_symlinks=False)
-                    current[relative] = (directory, st.st_size, st.st_mtime_ns)
-                    if len(current) > self.max_entries:
-                        raise ValueError("감시 항목 한도를 초과했습니다. 감시 범위를 줄여 주세요.")
-                    if directory:
-                        stack.append(entry.path)
+                    record(entry.path, relative, directory, st)
         after = os.stat(root, follow_symlinks=False)
         if identity != (after.st_dev, after.st_ino):
             raise OSError("조회 중 마운트가 변경되었습니다. 기준은 유지합니다.")
         events = []
         if self.snapshot is not None:
-            removed = self.snapshot.keys() - current.keys()
-            if removed and (not current or len(removed) >= 100 or (len(removed) >= 20 and len(removed) >= len(self.snapshot) * .2)):
+            removed = old.keys() - current.keys()
+            if removed and (base_size + len(current) == 0 or len(removed) >= 100 or (len(removed) >= 20 and len(removed) >= len(self.snapshot) * .2)):
                 raise ValueError("대량 삭제 또는 빈 마운트 의심. 확인 후 기준 재설정 또는 수동 스캔이 필요합니다.")
             for path in sorted(removed):
-                events.append(self.event("delete", path, self.snapshot[path][0]))
+                events.append(self.event("delete", path, old[path][0]))
             for path, signature in current.items():
-                old = self.snapshot.get(path)
-                if old is None:
+                previous = old.get(path)
+                if previous is None:
                     events.append(self.event("create", path, signature[0]))
-                elif old[0] != signature[0]:
-                    events.append(self.event("delete", path, old[0]))
+                elif previous[0] != signature[0]:
+                    events.append(self.event("delete", path, previous[0]))
                     events.append(self.event("create", path, signature[0]))
-                elif old != signature and not signature[0]:
+                elif previous != signature and not signature[0]:
                     events.append(self.event("edit", path, False))
+                if len(events) > 10000:
+                    raise ValueError("한 번에 10,000건을 초과한 변경입니다. 수동 스캔 후 기준을 재설정하세요.")
         if events and accept:
             if len(events) > 10000:
                 raise ValueError("한 번에 10,000건을 초과한 변경입니다. 범위를 줄이거나 수동 스캔 후 기준을 재설정하세요.")
             accept(events)
-        self.snapshot, self.identity = current, identity
+        directories = sum(value[0] for value in current.values())
+        old_directories = sum(value[0] for value in old.values())
+        self.directory_count = (0 if full else self.directory_count - old_directories) + directories
+        self.file_count = base_size + len(current) - self.directory_count
+        if full:
+            self.snapshot = current
+        else:
+            for path in old:
+                self.snapshot.pop(path, None)
+            self.snapshot.update(current)
+        self.identity = identity
         return events
 
     def event(self, action, path, directory):
@@ -133,6 +198,9 @@ def run(config):
     roots = validate_roots(config["roots"])
     interval = max(30, min(int(config.get("interval", 300)), 86400))
     debounce = max(2, min(int(config.get("debounce", 10)), 120))
+    max_entries = int(config.get("max_entries", 200000))
+    if not 1 <= max_entries <= 700000:
+        raise ValueError("감시 항목 한도는 1~700000 사이여야 합니다.")
     monitors = []
     observers = []
     local_types = {"ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "tmpfs", "overlay"}
@@ -145,8 +213,8 @@ def run(config):
 
     try:
         for root in roots:
-            monitor = PollingRoot(root, ignore_patterns=config.get("ignore_patterns", ()))
-            state = {"monitor": monitor, "next": 0, "changed": 0, "first": 0, "lock": threading.Lock(), "mode": "polling"}
+            monitor = PollingRoot(root, max_entries=max_entries, ignore_patterns=config.get("ignore_patterns", ()), extensions=config.get("extensions"))
+            state = {"monitor": monitor, "next": 0, "changed": 0, "first": 0, "lock": threading.Lock(), "mode": "polling", "pending": set(), "full": True, "reconcile": 0}
             try:
                 fstype = filesystem_type(root["path"])
                 native = root["mode"] == "native" or (root["mode"] == "auto" and fstype in local_types)
@@ -169,6 +237,19 @@ def run(config):
                             if event.event_type == "modified" and event.is_directory:
                                 return
                             with self.target["lock"]:
+                                for path in (event.src_path, getattr(event, 'dest_path', '')):
+                                    if not path:
+                                        continue
+                                    relative = os.path.relpath(path, self.target["monitor"].root["path"]).replace(os.sep, '/')
+                                    if relative == '..' or relative.startswith('../') or os.path.isabs(relative):
+                                        continue
+                                    if relative == '.':
+                                        self.target["full"] = True
+                                    elif self.target["monitor"].included(relative, event.is_directory) and not self.target["full"]:
+                                        self.target["pending"].add(relative)
+                                    if len(self.target["pending"]) > 10000:
+                                        self.target["full"] = True
+                                        self.target["pending"].clear()
                                 now = time.monotonic()
                                 self.target["changed"] = now
                                 self.target["first"] = self.target["first"] or now
@@ -177,9 +258,10 @@ def run(config):
                     observer.schedule(Handler(state), root["path"], recursive=True)
                     observer.start()
                     observers.append(observer)
+                    state["observer"] = observer
                     state["mode"] = "native"
                 monitors.append(state)
-                emit({"path": root["path"], "mode": state["mode"], "status": "기준 수집 중", "filesystem": fstype})
+                emit({"path": root["path"], "mode": state["mode"], "status": "기준 수집 중", "filesystem": fstype, "max_entries": max_entries})
             except Exception as error:
                 emit({"path": root["path"], "status": "오류", "error": str(error)})
         if not monitors:
@@ -192,20 +274,35 @@ def run(config):
                 monitor = state["monitor"]
                 with state["lock"]:
                     dirty = state["changed"] and (now - state["changed"] >= debounce or now - state["first"] >= 30)
-                    due = now >= state["next"] and (state["mode"] == "polling" or dirty or monitor.snapshot is None)
+                    full = state["full"] or state["mode"] == "polling" or now >= state["reconcile"] or monitor.snapshot is None
+                    due = now >= state["next"] and (full or dirty)
                     if not due:
                         continue
                     state["changed"] = state["first"] = 0
+                    pending = state["pending"]
+                    state["pending"] = set()
+                    state["full"] = False
                 try:
-                    emit({"path": monitor.root["path"], "status": "확인 중"})
-                    monitor.collect(accept)
-                    emit({"path": monitor.root["path"], "mode": state["mode"], "status": "감시 중", "entries": len(monitor.snapshot), "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"), "error": ""})
+                    if state.get("observer") and not state["observer"].is_alive():
+                        raise RuntimeError("실시간 감지 작업이 종료되었습니다. inotify 한도·권한 확인 후 재시작하세요.")
+                    emit({"path": monitor.root["path"], "status": "확인 중", "scan_scope": "전체" if full else "변경 범위"})
+                    if full:
+                        monitor.collect(accept)
+                        state["reconcile"] = time.monotonic() + 3600
+                    else:
+                        monitor.collect(accept, paths=pending)
+                    emit({"path": monitor.root["path"], "mode": state["mode"], "status": "감시 중", "entries": len(monitor.snapshot), "file_count": monitor.file_count, "directory_count": monitor.directory_count, "max_entries": max_entries, "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"), "error": ""})
                     state["next"] = now + (interval if state["mode"] == "polling" else 2)
                 except Exception as error:
                     emit({"path": monitor.root["path"], "status": "보류", "error": str(error)})
                     state["next"] = now + interval
                     with state["lock"]:
                         state["changed"] = state["first"] = now
+                        state["full"] = state["full"] or full
+                        state["pending"].update(pending)
+                        if state["full"] or len(state["pending"]) > 10000:
+                            state["full"] = True
+                            state["pending"].clear()
             time.sleep(1)
     finally:
         for observer in observers:
