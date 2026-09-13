@@ -58,8 +58,8 @@ class ModuleLocalWatch(PluginModuleBase):
         if not 1 <= int(values.get("local_watch_retention_days", 30)) <= 3650:
             raise ValueError("이벤트 보관 기간은 1~3650일로 입력해 주세요.")
         max_entries = int(values.get("local_watch_max_entries", 200000))
-        if not 1 <= max_entries <= 1000000:
-            raise ValueError("감시 항목 한도는 1~1000000으로 입력해 주세요.")
+        if not 1 <= max_entries <= 1200000:
+            raise ValueError("감시 항목 한도는 1~1200000으로 입력해 주세요.")
         drive = []
         if str(values.get("gdrive_scan_enabled")).lower() == "true" and values.get("gdrive_scan_input_mode") == "builtin":
             configured = json.loads(values.get("gdrive_scan_builtin_roots") or "[]")
