@@ -300,7 +300,7 @@ def run(config):
                     state["observer"] = observer
                     state["mode"] = "native"
                 monitors.append(state)
-                emit({"path": root["path"], "mode": state["mode"], "status": "기준 수집 중", "filesystem": fstype, "max_entries": max_entries})
+                emit({"path": root["path"], "mode": state["mode"], "status": "조회 대기", "filesystem": fstype, "max_entries": max_entries})
             except Exception as error:
                 emit({"path": root["path"], "status": "오류", "error": str(error)})
         if not monitors:
@@ -324,7 +324,7 @@ def run(config):
                 try:
                     if state.get("observer") and not state["observer"].is_alive():
                         raise RuntimeError("실시간 감지 작업이 종료되었습니다. inotify 한도·권한 확인 후 재시작하세요.")
-                    emit({"path": monitor.root["path"], "status": "확인 중", "scan_scope": "전체" if full else "변경 범위"})
+                    emit({"path": monitor.root["path"], "status": "최초 기준 수집" if monitor.snapshot is None else "저장 기준 대조", "scan_scope": "전체" if full else "변경 범위"})
                     if full:
                         monitor.collect(accept)
                         state["reconcile"] = time.monotonic() + 3600

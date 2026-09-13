@@ -170,7 +170,11 @@ function localStatus() {
       var state = $('<div class="border-top pt-2 mt-2"></div>');
       state.append($('<strong class="doctor-path"></strong>').text(root.path || '감지 서비스'));
       state.append($('<p class="doctor-muted mb-0"></p>').text(({native:'실시간',polling:'폴링'}[root.mode] || root.mode || '') + ' · ' + root.status + (root.checked_at ? ' · 마지막 확인 ' + root.checked_at : '')));
-      if (root.max_entries) state.append($('<p class="doctor-muted mb-0"></p>').text('파일 ' + Number(root.file_count || 0).toLocaleString() + ' · 폴더 ' + Number(root.directory_count || 0).toLocaleString() + ' · 합계 ' + Number(root.entries || 0).toLocaleString() + ' / 한도 ' + Number(root.max_entries).toLocaleString() + (root.scan_scope ? ' · ' + root.scan_scope + ' 비교' : '')));
+      if (root.max_entries) {
+        var counted = root.entries != null && root.file_count != null && root.directory_count != null;
+        var summary = counted ? '파일 ' + Number(root.file_count).toLocaleString() + ' · 폴더 ' + Number(root.directory_count).toLocaleString() + ' · 합계 ' + Number(root.entries).toLocaleString() : '집계 중';
+        state.append($('<p class="doctor-muted mb-0"></p>').text(summary + ' / 한도 ' + Number(root.max_entries).toLocaleString() + (root.scan_scope ? ' · ' + root.scan_scope + ' 비교' : '')));
+      }
       if (root.error) state.append($('<p class="text-danger mb-0"></p>').text(root.error));
       $('#local_roots_status').append(state);
     });
