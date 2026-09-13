@@ -1777,12 +1777,13 @@ class BookOasisPluginManager:
             (spec, self.normalized_settings(settings), True),
         )
 
-    def start_github_inspect(self, repository, ref, plugin_id, settings):
+    def start_github_inspect(self, repository, ref, plugin_id, settings, allow_shell_scripts=False):
         owner, repo = self.parse_github_url(repository)
         normalized_url = f"https://github.com/{owner}/{repo}"
         spec = {
             "kind": "github",
             "repository": normalized_url,
+            "allow_shell_scripts": allow_shell_scripts is True,
             "ref": self._validate_ref(ref),
             "plugin_id": self._validate_plugin_id(plugin_id or repo),
             "trusted": False,
@@ -1922,7 +1923,7 @@ class BookOasisPluginManager:
         )
 
     @classmethod
-    def _validate_archive_member(cls, info, ignored_root_files=None):
+    def _validate_archive_member(cls, info, ignored_root_files=None, allow_shell_scripts=False):
         path = PurePosixPath(info.filename.replace("\\", "/"))
         if path.is_absolute() or not path.parts or any(part in {"", ".", ".."} for part in path.parts):
             raise PluginManagerError(f"ZIP에 허용되지 않은 경로가 있습니다: {info.filename}")
@@ -1945,12 +1946,12 @@ class BookOasisPluginManager:
             and path.name in ignored_root_files
         ):
             return None
-        if not info.is_dir() and path.suffix.lower() in cls.REJECTED_SUFFIXES:
+        if not info.is_dir() and path.suffix.lower() in cls.REJECTED_SUFFIXES and not (allow_shell_scripts is True and path.suffix.lower() == ".sh"):
             raise PluginManagerError(f"ZIP 안의 중첩 압축·실행 파일은 허용하지 않습니다: {info.filename}")
         return path
 
     def _extract_archive(
-        self, archive_path, destination, settings, job_id, ignored_root_files=None
+        self, archive_path, destination, settings, job_id, ignored_root_files=None, allow_shell_scripts=False
     ):
         try:
             archive = zipfile.ZipFile(archive_path)
@@ -1964,7 +1965,7 @@ class BookOasisPluginManager:
             members = []
             ignored_count = 0
             for info in infos:
-                safe_path = self._validate_archive_member(info, ignored_root_files)
+                safe_path = self._validate_archive_member(info, ignored_root_files, allow_shell_scripts)
                 if safe_path is None:
                     ignored_count += 1
                     continue
@@ -2044,7 +2045,7 @@ class BookOasisPluginManager:
     def _ignored_copy(cls, directory, names):
         return [name for name in names if name in cls.IGNORED_NAMES or name.endswith((".pyc", ".pyo"))]
 
-    def _validate_plugin(self, candidate, plugin_id, settings):
+    def _validate_plugin(self, candidate, plugin_id, settings, allow_shell_scripts=False):
         candidate = Path(candidate).resolve()
         if candidate.is_symlink() or not (candidate / "__init__.py").is_file():
             raise PluginManagerError("플러그인 루트에 __init__.py 파일이 필요합니다.")
@@ -2059,7 +2060,7 @@ class BookOasisPluginManager:
                 raise PluginManagerError(f"플러그인 심볼릭 링크는 허용하지 않습니다: {relative}")
             if not path.is_file():
                 continue
-            if path.suffix.lower() in self.REJECTED_SUFFIXES:
+            if path.suffix.lower() in self.REJECTED_SUFFIXES and not (allow_shell_scripts is True and path.suffix.lower() == ".sh"):
                 raise PluginManagerError(f"플러그인 패키지에 허용되지 않은 파일이 있습니다: {relative}")
             total += path.stat().st_size
             if total > settings["max_extracted_bytes"]:
@@ -2142,13 +2143,13 @@ class BookOasisPluginManager:
         )
         self._check_stop()
         shutil.copytree(candidate, incoming, symlinks=False, ignore=self._ignored_copy)
-        self._validate_plugin(incoming, plugin_id, settings)
+        self._validate_plugin(incoming, plugin_id, settings, allow_shell_scripts=manifest.get("allow_shell_scripts", False))
         self._set_job(job_id, percent=82, message="검증한 플러그인을 설치 경로에 적용하고 있습니다.")
         try:
             if existed:
                 target.rename(previous)
             incoming.rename(target)
-            self._validate_plugin(target, plugin_id, settings)
+            self._validate_plugin(target, plugin_id, settings, allow_shell_scripts=manifest.get("allow_shell_scripts", False))
         except Exception:
             if target.exists():
                 shutil.rmtree(target, ignore_errors=True)
@@ -2258,24 +2259,27 @@ class BookOasisPluginManager:
             self._check_stop()
             self._set_job(job_id, percent=28, message="ZIP 구조와 안전 제한을 검사하고 있습니다.")
             extracted = job_dir / "extracted"
+            allow_shell_scripts = spec.get("trusted") is True or (spec["kind"] == "github" and spec.get("allow_shell_scripts") is True)
             archive_info = self._extract_archive(
                 archive_path,
                 extracted,
                 settings,
                 job_id,
                 ignored_root_files=spec.get("ignored_archive_files"),
+                allow_shell_scripts=allow_shell_scripts,
             )
             archive_path.unlink(missing_ok=True)
             self._set_job(job_id, percent=58, message="BookOasis 플러그인 구조와 Python 문법을 검사하고 있습니다.")
             plugin_id = self._validate_plugin_id(spec["plugin_id"])
             candidate = self._find_candidate(extracted, plugin_id)
-            manifest = self._validate_plugin(candidate, plugin_id, settings)
+            manifest = self._validate_plugin(candidate, plugin_id, settings, allow_shell_scripts=allow_shell_scripts)
             manifest.update(archive_info)
             manifest.update(
                 {
                     "source": spec.get("repository") or spec.get("filename") or "ZIP",
                     "ref": spec.get("ref", ""),
                     "trusted": bool(spec.get("trusted")),
+                    "allow_shell_scripts": allow_shell_scripts,
                 }
             )
             self._append_log(
@@ -2337,6 +2341,7 @@ class BookOasisPluginManager:
                 candidate,
                 prepared["manifest"]["plugin_id"],
                 settings,
+                allow_shell_scripts=prepared["manifest"].get("allow_shell_scripts", False),
             )
             manifest.update(
                 {

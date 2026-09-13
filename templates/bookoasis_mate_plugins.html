@@ -146,6 +146,7 @@
         <div class="form-group"><label for="plugin_github_id">플러그인 ID</label><input id="plugin_github_id" class="form-control" placeholder="repository_name"></div>
       </div>
       <button id="plugin_github_inspect" type="button" class="btn btn-sm btn-primary">저장소 패키지 검사</button>
+      <div class="mt-3"><label><input id="plugin_allow_shell_scripts" type="checkbox"> 이번 GitHub 검사·설치에서 .sh 파일 포함 허용</label><p class="text-warning">기본은 차단입니다. 저장소와 코드를 신뢰할 때만 선택하세요. 셸 스크립트는 실행 시 서버 파일 변경·삭제 및 외부 명령 실행이 가능합니다. Mate는 파일을 설치할 뿐 스크립트를 직접 실행하지 않습니다. 직접 입력한 Gitea·ZIP에는 이 예외를 적용하지 않습니다.</p></div>
     </div>
   </div>
 
@@ -643,6 +644,7 @@ function pluginManagerRenderManifest(result) {
   box.appendChild(pluginManagerText('strong', '', title));
   box.appendChild(pluginManagerText('p', 'doctor-muted', '파일 ' + Number(result.file_count || 0).toLocaleString() + '개 · ' + bookoasisMateBytes(result.total_bytes || 0) + (result.ref ? ' · ref ' + result.ref : '')));
   if (result.requirements && result.requirements.length) box.appendChild(pluginManagerText('p', 'doctor-plugin-requirements', 'Python 의존성 · ' + result.requirements.join(', ')));
+  if (result.allow_shell_scripts) box.appendChild(pluginManagerText('p', 'text-warning', '.sh 포함 허용 · ' + (result.trusted ? '신뢰 카탈로그' : '이번 GitHub 검사에서 사용자 명시 동의') + ' · Mate에서 자동 실행하지 않음'));
   if (result.action) box.appendChild(pluginManagerText('p', 'doctor-plugin-action-result', result.action === 'updated' ? '기존 플러그인을 백업하고 업데이트했습니다.' : '새 플러그인을 설치했습니다.'));
   var details = document.createElement('details');
   var summary = pluginManagerText('summary', '', '검사한 파일 목록'); details.appendChild(summary);
@@ -790,7 +792,10 @@ $('#plugin_history_refresh').click(pluginManagerLoadHistory);
 
 $('#plugin_github_inspect').click(function() {
   var command = $('#plugin_repository_source').val() === 'gitea' ? 'gitea_inspect' : 'github_inspect';
-  bookoasisMateAjax('plugins', command, {repository:$('#plugin_github_repository').val(), ref:$('#plugin_github_ref').val(), plugin_id:$('#plugin_github_id').val(), gitea_server_id:$('#plugin_repository_gitea_server').val()}, function(ret) {
+  var allowShell = command === 'github_inspect' && $('#plugin_allow_shell_scripts').prop('checked');
+  if (allowShell && !confirm('이 GitHub 저장소의 .sh 파일 포함을 명시적으로 허용할까요? 저장소와 스크립트를 직접 확인한 경우에만 진행하세요.')) return;
+  $('#plugin_allow_shell_scripts').prop('checked', false);
+  bookoasisMateAjax('plugins', command, {repository:$('#plugin_github_repository').val(), ref:$('#plugin_github_ref').val(), plugin_id:$('#plugin_github_id').val(), gitea_server_id:$('#plugin_repository_gitea_server').val(), allow_shell_scripts:allowShell ? 'true' : 'false'}, function(ret) {
     pluginManagerRenderJob(ret.data || {}, true); pluginManagerStartPolling();
   });
 });
