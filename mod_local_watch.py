@@ -90,7 +90,7 @@ class ModuleLocalWatch(PluginModuleBase):
         return bool((self._process and self._process.poll() is None) or
                     (self._reader and self._reader.is_alive()) or (self._worker and self._worker.is_alive()))
 
-    def start(self):
+    def start(self, reset=False):
         with self._lock:
             if self.running():
                 raise ValueError("이미 실행 중이거나 중지 중입니다.")
@@ -100,6 +100,12 @@ class ModuleLocalWatch(PluginModuleBase):
             if self.model is None:
                 raise ValueError("로컬 이벤트 DB를 초기화하지 못했습니다.")
             config = self._config()
+            with F.app.app_context():
+                engine = db.session.get_bind(mapper=self.model)
+                if engine.url.get_backend_name() != 'sqlite' or not engine.url.database:
+                    raise ValueError('감시 기준 저장에는 파일 기반 Mate SQLite DB가 필요합니다.')
+                config['state_path'] = os.path.join(os.path.dirname(os.path.abspath(engine.url.database)), 'bookoasis_mate_local_baseline.db')
+            config['reset_baseline'] = reset
             self._stop.clear()
             self._error = ""
             self._states = {}
@@ -271,8 +277,8 @@ class ModuleLocalWatch(PluginModuleBase):
 
     def process_ajax(self, command, req):
         try:
-            if command == "start":
-                self.start()
+            if command in {"start", "resume"}:
+                self.start(reset=command == 'start')
                 P.ModelSetting.set("local_watch_enabled", "True")
             elif command == "validate":
                 if self.running():

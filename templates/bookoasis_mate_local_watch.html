@@ -10,6 +10,7 @@
 </ul>
 <div class="doctor-gdrive-summary flex-wrap align-items-center justify-content-start mb-3">
   <div class="d-flex flex-wrap" style="gap:4px"><button id="local_save" class="btn btn-sm btn-outline-primary">설정 저장</button>
+  <button id="local_resume" class="btn btn-sm btn-outline-primary">이어서 시작</button>
   <button id="local_start" class="btn btn-sm btn-outline-primary">새 기준으로 시작</button>
   <button id="local_stop" class="btn btn-sm btn-outline-danger">작업 중지</button></div>
   <span id="local_state" class="doctor-muted" role="status" aria-live="polite"></span>
@@ -65,7 +66,9 @@
     <li>감시 폴더를 FlaskFarm 컨테이너에 마운트하고, 동일 자료를 BookOasis 보관함에도 연결합니다.</li>
     <li>Mate 경로와 BookOasis 경로를 입력합니다. 예를 들어 <code>/watch/books</code> → <code>/data/books</code>입니다.</li>
     <li>Linux 실제 디스크는 자동 또는 실시간, Windows Docker·SMB/CIFS·NFS·FUSE는 폴링을 선택합니다.</li>
-    <li>저장 후 시작합니다. 최초 조회는 기준만 만들며 기존 파일을 스캔하지 않습니다.</li>
+    <li>이어서 시작은 저장된 기준과 현재 상태를 전체 비교해 중지 중 변경을 수집합니다. 기준이 없는 최초 실행은 기존 파일을 스캔하지 않고 기준만 저장합니다. 감지가 활성화된 채 재시작하면 자동으로 이어서 시작합니다.</li>
+    <li>새 기준으로 시작은 성공한 전체 수집 후 기준을 교체하며 중지 중 변경을 스캔하지 않습니다. 감시 기준은 Mate DB 옆 bookoasis_mate_local_baseline.db에 저장하므로 해당 데이터 볼륨을 유지하세요. 이벤트 기록 자동 삭제와 별개입니다.</li>
+    <li>재시작에도 전체 파일 확인과 inotify 재등록은 필요합니다. 경로 매핑·제외 패턴·확장자 또는 루트 식별 정보가 바뀌면 이어서 시작을 보류합니다. 마운트를 확인하고 필요하면 수동 스캔 후 새 기준으로 시작하세요. 큐 저장 후 기준 저장 전에 종료되면 일부 이벤트가 재전달될 수 있습니다.</li>
   </ol>
   <ul>
     <li>감지 제외 패턴은 Mate의 신규 이벤트 수집에 적용하며 기존 기록·대기열은 지우지 않습니다. BookOasis 스캔 제외 설정과 별개입니다. / 없는 패턴은 모든 깊이의 이름, / 포함 패턴은 감시 루트 기준 상대 경로에 대소문자를 구분하여 적용합니다. *, ?, []를 지원하며 #은 주석이 아닙니다. 폴더 제외 시 스냅샷 하위 탐색도 생략합니다.</li>
@@ -157,7 +160,7 @@ function localStatus() {
     localRunning = !!data.running;
     $('#local_state').text(data.stopping ? '중지 중 · 현재 요청 대기' : (localRunning ? '실행 중' : '중지됨'));
     $('#local_error').text(data.error || '');
-    $('#local_start').prop('disabled', localRunning); $('#local_stop').prop('disabled', !localRunning);
+    $('#local_start, #local_resume').prop('disabled', localRunning); $('#local_stop').prop('disabled', !localRunning);
     $('#local_save, #local_add, #local_clear, #local_roots input, #local_roots select, #local_roots button, #local_interval, #local_debounce, #local_extensions, #local_ignore_patterns, #local_discord_webhook').prop('disabled', localRunning);
     $('#local_auto_cleanup, #local_retention_days').prop('disabled', localRunning);
     $('#local_max_entries').prop('disabled', localRunning);
@@ -167,7 +170,11 @@ function localStatus() {
       var state = $('<div class="border-top pt-2 mt-2"></div>');
       state.append($('<strong class="doctor-path"></strong>').text(root.path || '감지 서비스'));
       state.append($('<p class="doctor-muted mb-0"></p>').text(({native:'실시간',polling:'폴링'}[root.mode] || root.mode || '') + ' · ' + root.status + (root.checked_at ? ' · 마지막 확인 ' + root.checked_at : '')));
-      if (root.max_entries) state.append($('<p class="doctor-muted mb-0"></p>').text('파일 ' + Number(root.file_count || 0).toLocaleString() + ' · 폴더 ' + Number(root.directory_count || 0).toLocaleString() + ' · 합계 ' + Number(root.entries || 0).toLocaleString() + ' / 한도 ' + Number(root.max_entries).toLocaleString() + (root.scan_scope ? ' · ' + root.scan_scope + ' 비교' : '')));
+      if (root.max_entries) {
+        var counted = root.entries != null && root.file_count != null && root.directory_count != null;
+        var summary = counted ? '파일 ' + Number(root.file_count).toLocaleString() + ' · 폴더 ' + Number(root.directory_count).toLocaleString() + ' · 합계 ' + Number(root.entries).toLocaleString() : '집계 중';
+        state.append($('<p class="doctor-muted mb-0"></p>').text(summary + ' / 한도 ' + Number(root.max_entries).toLocaleString() + (root.scan_scope ? ' · ' + root.scan_scope + ' 비교' : '')));
+      }
       if (root.error) state.append($('<p class="text-danger mb-0"></p>').text(root.error));
       $('#local_roots_status').append(state);
     });
@@ -229,7 +236,8 @@ $('#local_save').on('click', function() {
     $.ajax({url:'/' + PACKAGE_NAME + '/ajax/setting_save', type:'POST', data:values, dataType:'json', success:function(saved) { notify(saved ? '설정을 저장했습니다.' : '저장 실패', saved ? 'success' : 'warning'); }});
   });
 });
-$('#local_start').on('click', function() { if (confirm('저장된 설정으로 새 기준을 만듭니다. 기존 파일과 중지 중 변경은 자동 스캔하지 않습니다. 시작할까요?')) localRequest('start', {}, localStatus); });
+$('#local_resume').on('click', function() { localRequest('resume', {}, localStatus); });
+$('#local_start').on('click', function() { if (confirm('저장된 감시 기준을 새 기준으로 교체합니다. 기존 파일과 중지 중 변경은 자동 스캔하지 않습니다. 시작할까요?')) localRequest('start', {}, localStatus); });
 $('#local_stop').on('click', function() { localRequest('stop', {}, localStatus); });
 $('#local_clear').on('click', function() { if (confirm('로컬 감지 대기·재시도 이벤트를 삭제할까요?')) localRequest('clear_pending', {}, localStatus); });
 $('#local_refresh').on('click', function() { localPage = 1; localStatus(); });
