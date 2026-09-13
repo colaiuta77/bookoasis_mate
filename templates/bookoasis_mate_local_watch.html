@@ -40,12 +40,16 @@
 </div>
 <div class="tab-pane fade" id="local_changes" role="tabpanel" aria-labelledby="local_changes_tab">
 <div class="doctor-section">
-  <div class="form-inline mb-2">
-    <label class="mr-2" for="local_filter">상태</label>
-    <select id="local_filter" class="form-control mr-2"><option value="">전체</option><option value="queued">대기</option><option value="retry">재시도</option><option value="processing">처리 중</option><option value="completed">요청 완료</option><option value="failed">실패</option></select>
-    <label class="sr-only" for="local_search">경로·보관함·오류 검색</label><input id="local_search" class="form-control mr-2" placeholder="경로·보관함·오류 검색">
+  <div class="doctor-gdrive-filter" id="local_filters">
+    <select id="local_order" class="form-control form-control-sm" aria-label="정렬"><option value="desc">최근순</option><option value="asc">오래된순</option></select>
+    <select id="local_db_type" class="form-control form-control-sm" aria-label="DB 종류"><option value="">전체 DB</option><option value="general">일반 DB</option><option value="adult">성인 DB</option><option value="audiobook">오디오북 DB</option><option value="video">비디오북 DB</option></select>
+    <select id="local_library" class="form-control form-control-sm" aria-label="보관함"><option value="">전체 보관함</option><option value="unassigned">미분류</option></select>
+    <select id="local_filter" class="form-control form-control-sm" aria-label="상태"><option value="">전체 상태</option><option value="queued">대기</option><option value="retry">재시도</option><option value="processing">처리 중</option><option value="completed">요청 완료</option><option value="failed">실패</option></select>
+    <select id="local_action" class="form-control form-control-sm" aria-label="변경 유형"><option value="">전체 변경</option><option value="create">CREATE</option><option value="edit">EDIT</option><option value="delete">DELETE</option></select>
+    <select id="local_page_size" class="form-control form-control-sm" aria-label="표시 건수"><option value="20">20건</option><option value="50" selected>50건</option><option value="100">100건</option><option value="200">200건</option></select>
+    <div class="doctor-gdrive-search"><input id="local_search" class="form-control form-control-sm" aria-label="경로·보관함·오류 검색" placeholder="경로·보관함·오류 검색">
     <button id="local_refresh" class="btn btn-sm btn-primary">검색</button>
-    <button id="local_reset" class="btn btn-sm btn-outline-secondary ml-1">리셋</button>
+    <button id="local_reset" class="btn btn-sm btn-outline-secondary">리셋</button></div>
   </div>
   <div class="table-responsive"><div id="local_events" class="doctor-gdrive-list" role="list" aria-label="변경 이벤트"></div></div>
   <div id="local_empty" class="doctor-empty" hidden>조건에 맞는 변경 이벤트가 없습니다.</div>
@@ -146,7 +150,7 @@ function localRequest(command, data, done) {
 function localStatus() {
   if (localLoading) return;
   localLoading = true;
-  localRequest('status', {page:localPage,status:$('#local_filter').val(),search:$('#local_search').val()}, function(ret) {
+  localRequest('status', {page:localPage,status:$('#local_filter').val(),search:$('#local_search').val(),order:$('#local_order').val(),db_type:$('#local_db_type').val(),library_id:$('#local_library').val(),action:$('#local_action').val(),page_size:$('#local_page_size').val()}, function(ret) {
     var data = ret.data || {}, list = data.events || {};
     localRunning = !!data.running;
     $('#local_state').text(data.stopping ? '중지 중 · 현재 요청 대기' : (localRunning ? '실행 중' : '중지됨'));
@@ -164,7 +168,14 @@ function localStatus() {
       $('#local_roots_status').append(state);
     });
     var counts = data.counts || {};
-    $('#local_counts').text('대기 ' + (counts.queued || 0) + ' · 재시도 ' + (counts.retry || 0) + ' · 처리 중 ' + (counts.processing || 0) + ' · 요청 완료 ' + (counts.completed || 0) + ' · 실패 ' + (counts.failed || 0));
+    $('#local_counts').text('검색 ' + ((data.events || {}).total || 0) + '건 · 대기 ' + (counts.queued || 0) + ' · 재시도 ' + (counts.retry || 0) + ' · 처리 중 ' + (counts.processing || 0) + ' · 요청 완료 ' + (counts.completed || 0) + ' · 실패 ' + (counts.failed || 0));
+    var selectedLibrary = $('#local_library').val(), selectedDb = $('#local_db_type').val();
+    $('#local_library').empty().append($('<option value="">전체 보관함</option>'), $('<option value="unassigned">미분류</option>'));
+    (data.libraries || []).forEach(function(library) {
+      if (!selectedDb || library.db_type === selectedDb) $('#local_library').append($('<option></option>').val(library.db_type + ':' + library.library_id).text(library.library_name + ' (' + library.db_type + ' #' + library.library_id + ')'));
+    });
+    if (selectedLibrary && !$('#local_library option').toArray().some(function(option) { return option.value === selectedLibrary; })) $('#local_library').append($('<option></option>').val(selectedLibrary).text(selectedLibrary));
+    $('#local_library').val(selectedLibrary);
     $('#local_events').empty();
     var labels = {queued:'대기',retry:'재시도',processing:'처리 중',completed:'요청 완료',failed:'실패'};
     (list.items || []).forEach(function(item) {
@@ -217,8 +228,10 @@ $('#local_save').on('click', function() {
 $('#local_start').on('click', function() { if (confirm('저장된 설정으로 새 기준을 만듭니다. 기존 파일과 중지 중 변경은 자동 스캔하지 않습니다. 시작할까요?')) localRequest('start', {}, localStatus); });
 $('#local_stop').on('click', function() { localRequest('stop', {}, localStatus); });
 $('#local_clear').on('click', function() { if (confirm('로컬 감지 대기·재시도 이벤트를 삭제할까요?')) localRequest('clear_pending', {}, localStatus); });
-$('#local_refresh, #local_filter').on('click change', function() { localPage = 1; localStatus(); });
-$('#local_reset').on('click', function() { $('#local_filter, #local_search').val(''); localPage = 1; localStatus(); });
+$('#local_refresh').on('click', function() { localPage = 1; localStatus(); });
+$('#local_filters select').on('change', function() { if (this.id === 'local_db_type') $('#local_library').val(''); localPage = 1; localStatus(); });
+$('#local_search').on('keydown', function(event) { if (event.key === 'Enter') { event.preventDefault(); localPage = 1; localStatus(); } });
+$('#local_reset').on('click', function() { $('#local_filter, #local_search, #local_db_type, #local_library, #local_action').val(''); $('#local_order').val('desc'); $('#local_page_size').val('50'); localPage = 1; localStatus(); });
 $('#local_prev').on('click', function() { localPage--; localStatus(); });
 $('#local_next').on('click', function() { localPage++; localStatus(); });
 $(function() {

@@ -283,7 +283,10 @@ class ModuleLocalWatch(PluginModuleBase):
                 return jsonify({"ret": "success", "data": {"running": self.running(), "stopping": self._stop.is_set() and self.running(),
                     "busy": self._busy, "error": self._error, "roots": roots,
                     "counts": self.model.counts() if self.model else {},
-                    "events": self.model.list_page(page=req.form.get("page", 1), status=req.form.get("status", ""), search=req.form.get("search", "")) if self.model else {}}})
+                    "libraries": self.model.filter_options() if self.model else [],
+                    "events": self.model.list_page(page=req.form.get("page", 1), page_size=req.form.get("page_size", 50),
+                        order=req.form.get("order", "desc"), db_type=req.form.get("db_type", ""), library_id=req.form.get("library_id", ""),
+                        action=req.form.get("action", ""), status=req.form.get("status", ""), search=req.form.get("search", "")) if self.model else {}}})
             elif command == "retry":
                 self.model.retry_many([int(req.form["id"])])
             elif command == "delete":
