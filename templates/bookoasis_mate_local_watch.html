@@ -15,10 +15,10 @@
   <span id="local_state" class="doctor-muted" role="status" aria-live="polite"></span>
   <strong id="local_counts" class="ml-auto"></strong>
 </div>
-<p id="local_error" class="text-danger" role="alert"></p>
+<p id="local_error" class="text-danger mb-0" role="alert"></p>
 <div class="tab-content">
 <div class="tab-pane fade show active" id="local_settings" role="tabpanel" aria-labelledby="local_settings_tab">
-<div class="doctor-card doctor-section">
+<div class="doctor-card mt-0">
   <h3>로컬 폴더 감지</h3>
   <p class="doctor-muted">로컬 디스크는 실시간, Windows Docker·CIFS/NFS·FUSE는 폴링으로 확인합니다. <a href="#local_watch_manual" id="local_manual_link">매뉴얼</a></p>
   <div id="local_roots_status"></div>
@@ -80,7 +80,7 @@ function localAddRoot(row) {
   if ($('#local_roots .local-root').length >= 10) return;
   row = row || {};
   var box = $('<div class="local-root doctor-card doctor-section"></div>');
-  var fields = $('<div class="row"></div>').appendTo(box);
+  var fields = $('<div></div>').appendTo(box);
   var path = $('<input class="form-control local-path" placeholder="/host/volume2/DATA/02.Ebook/02.IT서적">').val(row.path || '');
   var target = $('<input class="form-control local-target" placeholder="/volume2/DATA/02.Ebook/02.IT서적">').val(row.target || '');
   var picker = $('<button type="button" class="btn btn-sm btn-outline-primary ml-2 text-nowrap">경로 선택</button>').on('click', function() {
@@ -90,14 +90,18 @@ function localAddRoot(row) {
     });
   });
   var mode = $('<select class="form-control local-mode"><option value="auto">자동</option><option value="native">실시간 · Linux 로컬</option><option value="polling">폴링 · Windows Docker/CIFS/NFS/FUSE</option></select>').val(row.mode || 'auto');
+  var remove = $('<button type="button" class="btn btn-sm btn-outline-danger ml-2 text-nowrap">삭제</button>').on('click', function() { if (!localRunning) box.remove(); });
   [['Mate 감시 경로', path], ['BookOasis 경로', target], ['감지 방식', mode]].forEach(function(field) {
-    var label = $('<div class="form-group col-lg-4"></div>');
-    label.append($('<span class="d-block font-weight-bold mb-1"></span>').text(field[0]));
+    var label = $('<div class="form-group row align-items-center"></div>');
+    label.append($('<span class="col-md-3 text-md-right font-weight-bold"></span>').text(field[0]));
     field[1].attr('aria-label', field[0]);
-    var control = $('<div></div>');
+    var control = $('<div class="col-md-9"></div>');
     if (field[1] === path) {
       control.append($('<div class="d-flex align-items-center"></div>').append(path, picker));
       control.append($('<small class="doctor-muted d-block mt-1"></small>').text('FF 컨테이너에서 보이는 경로입니다. 예: /host/volume2/DATA/02.Ebook/02.IT서적'));
+    } else if (field[1] === mode) {
+      control.append($('<div class="d-flex align-items-center"></div>').append(mode, remove));
+      label.addClass('mb-0');
     } else {
       control.append(field[1]);
       if (field[1] === target) control.append($('<small class="doctor-muted d-block mt-1"></small>').text('BookOasis 컨테이너에서 보이는 경로입니다. 예: /volume2/DATA/02.Ebook/02.IT서적'));
@@ -105,7 +109,6 @@ function localAddRoot(row) {
     label.append(control);
     fields.append(label);
   });
-  box.append($('<button type="button" class="btn btn-sm btn-outline-danger">삭제</button>').on('click', function() { if (!localRunning) box.remove(); }));
   $('#local_roots').append(box);
 }
 function localValues() {
