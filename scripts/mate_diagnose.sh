@@ -38,6 +38,6 @@ temporary=$(mktemp -d)
 trap 'rm -rf -- "$temporary"' EXIT
 printf '%s\n' '공식 저장소에서 진단 스크립트를 내려받습니다. 서비스 설정은 변경하지 않습니다.'
 curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 60 \
-  'https://raw.githubusercontent.com/colaiuta77/bookoasis_mate/main/scripts/mate_diagnose.py' \
+  'https://raw.githubusercontent.com/colaiuta77/bookoasis_mate/69c3236aae4e3c9723caaf8bbe23935fd63f82fc/scripts/mate_diagnose.py' \
   --output "$temporary/mate_diagnose.py"
 "$python_bin" -B "$temporary/mate_diagnose.py" "$@"
