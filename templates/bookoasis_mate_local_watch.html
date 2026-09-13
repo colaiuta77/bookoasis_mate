@@ -28,6 +28,7 @@
   <p class="doctor-muted">두 경로 모두 각 컨테이너에서 보이는 절대 경로입니다. 설정 변경은 작업 중지 후 적용하세요.</p>
   <div id="local_roots"></div>
   <div class="form-group row mt-4"><label for="local_interval" class="col-md-3 col-form-label text-md-right font-weight-bold">폴링 주기(초)</label><div class="col-md-9"><input id="local_interval" class="form-control" style="max-width:180px" type="number" min="30" max="86400" value="{{ arg.get('local_watch_interval', '300') }}"></div></div>
+  <div class="form-group row"><label for="local_max_entries" class="col-md-3 col-form-label text-md-right font-weight-bold">경로당 감시 항목 한도</label><div class="col-md-9"><input id="local_max_entries" class="form-control" style="max-width:180px" type="number" min="1" max="1000000" value="{{ arg.get('local_watch_max_entries', '200000') }}"><small class="form-text text-muted">기본 200,000 · 최대 1,000,000. 권수가 아니라 감시 확장자 파일과 폴더 합계입니다. 제외 패턴·비대상 파일은 집계하지 않습니다. 60만 권도 폴더·메타데이터를 더하면 한도를 넘을 수 있습니다. 높일수록 최초·정기 전체 조회의 시간과 메모리가 늘어납니다. 작업 중지 후 저장하고 새 기준으로 시작하세요.</small></div></div>
   <div class="form-group row"><label for="local_debounce" class="col-md-3 col-form-label text-md-right font-weight-bold">변경 대기시간(초)</label><div class="col-md-9"><input id="local_debounce" class="form-control" style="max-width:180px" type="number" min="2" max="120" value="{{ arg.get('local_watch_debounce', '10') }}"></div></div>
   <div class="form-group row"><label for="local_extensions" class="col-md-3 col-form-label text-md-right font-weight-bold">감시 확장자</label><div class="col-md-9"><input id="local_extensions" class="form-control" value="{{ arg.get('local_watch_extensions', '') }}"></div></div>
   <div class="form-group row"><label for="local_ignore_patterns" class="col-md-3 col-form-label text-md-right font-weight-bold">감지 제외 패턴</label><div class="col-md-9"><textarea id="local_ignore_patterns" class="form-control" rows="7" placeholder="@eaDir/&#10;#recycle/&#10;*.tmp&#10;*.sample.cbz&#10;.DS_Store&#10;Thumbs.db&#10;desktop.ini">{{ arg.get('local_watch_ignore_patterns', '@eaDir/\n#recycle/') }}</textarea><small class="form-text text-muted">한 줄에 하나씩 입력합니다. 끝에 /를 붙이면 폴더와 하위 전체를 제외합니다. *.tmp 같은 파일 패턴도 지원하며, 비우면 제외하지 않습니다. 작업 중지 → 설정 저장 → 새 기준으로 시작 순서로 적용하세요.</small></div></div>
@@ -69,7 +70,8 @@
   <ul>
     <li>감지 제외 패턴은 Mate의 신규 이벤트 수집에 적용하며 기존 기록·대기열은 지우지 않습니다. BookOasis 스캔 제외 설정과 별개입니다. / 없는 패턴은 모든 깊이의 이름, / 포함 패턴은 감시 루트 기준 상대 경로에 대소문자를 구분하여 적용합니다. *, ?, []를 지원하며 #은 주석이 아닙니다. 폴더 제외 시 스냅샷 하위 탐색도 생략합니다.</li>
     <li>실시간 감지에는 FlaskFarm Python 환경의 <code>watchdog&gt;=4,&lt;7</code> 설치가 필요합니다. 작업 중지 후 설정의 구성요소 설치 버튼을 사용하세요. 설치 완료 후 새 기준으로 시작합니다.</li>
-    <li>실시간 모드는 watchdog 신호를 모아 변경 시 트리를 비교합니다. 폴링은 매 주기 파일 크기·수정시간을 비교합니다. 대규모 경로는 조회 비용이 크며 루트당 최대 20만 항목입니다.</li>
+    <li>실시간 모드는 최초 전체 수집 후 변경된 파일·폴더 범위만 비교합니다. 신호 누락 보완을 위해 1시간마다, 변경 경로가 1만 개를 넘으면 전체 비교합니다. 폴링은 매 주기 전체 비교합니다. 큰 폴더 이동·삭제는 해당 하위 기준을 대조하며 대량 삭제 보호를 유지합니다.</li>
+    <li>한도는 경로당 기본 20만·최대 100만 대상 파일+폴더입니다. 비대상 확장자는 기준에서 제외하되 .bookoasisignore는 포함합니다. 최초·전체 비교 시 이전/현재 기준 메모리와 디스크 조회 비용이 필요합니다. Linux inotify 감시 한도는 별개이며 폴더 수가 많으면 OS 한도 오류가 날 수 있습니다. Mate가 OS 설정을 자동 변경하지 않습니다.</li>
     <li>이동은 삭제+생성으로 기록합니다. 심볼릭 링크는 따라가지 않습니다. 감시 중지·재시작 사이의 변경은 자동 복구하지 않습니다.</li>
     <li>루트 변경·조회 오류·빈 트리·대량 삭제는 기준을 유지하고 보류합니다. 정상 삭제임을 확인했다면 BookOasis 수동 스캔 후 중지·시작으로 새 기준을 만드세요.</li>
     <li>같은 경로의 네이티브 플러그인·gd-poller 감시는 직접 꺼 주세요. Mate 내 Drive 자체 감지와 겹치는 대상은 시작할 수 없습니다.</li>
@@ -139,7 +141,7 @@ function localAddRoot(row) {
 function localValues() {
   var roots = [];
   $('#local_roots .local-root').each(function() { roots.push({path:$(this).find('.local-path').val(), target:$(this).find('.local-target').val(), mode:$(this).find('.local-mode').val()}); });
-  return {local_watch_roots:JSON.stringify(roots), local_watch_interval:$('#local_interval').val(), local_watch_debounce:$('#local_debounce').val(), local_watch_extensions:$('#local_extensions').val(), local_watch_ignore_patterns:$('#local_ignore_patterns').val(), local_watch_discord_webhook_url:$('#local_discord_webhook').val(), local_watch_auto_cleanup:$('#local_auto_cleanup').val(), local_watch_retention_days:$('#local_retention_days').val()};
+  return {local_watch_roots:JSON.stringify(roots), local_watch_interval:$('#local_interval').val(), local_watch_debounce:$('#local_debounce').val(), local_watch_max_entries:$('#local_max_entries').val(), local_watch_extensions:$('#local_extensions').val(), local_watch_ignore_patterns:$('#local_ignore_patterns').val(), local_watch_discord_webhook_url:$('#local_discord_webhook').val(), local_watch_auto_cleanup:$('#local_auto_cleanup').val(), local_watch_retention_days:$('#local_retention_days').val()};
 }
 function localRequest(command, data, done) {
   $.ajax({url:'/' + PACKAGE_NAME + '/ajax/local_watch/' + command, type:'POST', data:data || {}, dataType:'json', global:false,
@@ -158,12 +160,14 @@ function localStatus() {
     $('#local_start').prop('disabled', localRunning); $('#local_stop').prop('disabled', !localRunning);
     $('#local_save, #local_add, #local_clear, #local_roots input, #local_roots select, #local_roots button, #local_interval, #local_debounce, #local_extensions, #local_ignore_patterns, #local_discord_webhook').prop('disabled', localRunning);
     $('#local_auto_cleanup, #local_retention_days').prop('disabled', localRunning);
+    $('#local_max_entries').prop('disabled', localRunning);
     $('#local_watchdog_install').prop('disabled', localRunning || localInstalling);
     $('#local_roots_status').empty();
     (data.roots || []).forEach(function(root) {
       var state = $('<div class="border-top pt-2 mt-2"></div>');
       state.append($('<strong class="doctor-path"></strong>').text(root.path || '감지 서비스'));
       state.append($('<p class="doctor-muted mb-0"></p>').text(({native:'실시간',polling:'폴링'}[root.mode] || root.mode || '') + ' · ' + root.status + (root.checked_at ? ' · 마지막 확인 ' + root.checked_at : '')));
+      if (root.max_entries) state.append($('<p class="doctor-muted mb-0"></p>').text('파일 ' + Number(root.file_count || 0).toLocaleString() + ' · 폴더 ' + Number(root.directory_count || 0).toLocaleString() + ' · 합계 ' + Number(root.entries || 0).toLocaleString() + ' / 한도 ' + Number(root.max_entries).toLocaleString() + (root.scan_scope ? ' · ' + root.scan_scope + ' 비교' : '')));
       if (root.error) state.append($('<p class="text-danger mb-0"></p>').text(root.error));
       $('#local_roots_status').append(state);
     });
