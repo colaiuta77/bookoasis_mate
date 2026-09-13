@@ -4,6 +4,8 @@ import json
 import os
 import posixpath
 import stat
+import sqlite3
+from contextlib import closing
 import sys
 import threading
 import time
@@ -56,7 +58,7 @@ def filesystem_type(path):
 
 
 class PollingRoot:
-    def __init__(self, root, max_entries=200000, ignore_patterns=(), extensions=None):
+    def __init__(self, root, max_entries=200000, ignore_patterns=(), extensions=None, state_path=None, reset=False):
         self.root = root
         self.ignore_patterns = tuple(ignore_patterns)
         self.extensions = None if extensions is None else frozenset(extensions)
@@ -64,6 +66,41 @@ class PollingRoot:
         self.snapshot = None
         self.identity = None
         self.file_count = self.directory_count = 0
+        self.state_path = state_path
+        self.state_config = json.dumps([root['target'], sorted(self.ignore_patterns),
+                                       None if self.extensions is None else sorted(self.extensions)])
+        if state_path:
+            with closing(sqlite3.connect(state_path)) as connection, connection:
+                connection.execute('CREATE TABLE IF NOT EXISTS roots (root TEXT PRIMARY KEY, config TEXT NOT NULL, identity TEXT NOT NULL)')
+                connection.execute('CREATE TABLE IF NOT EXISTS entries (root TEXT NOT NULL, path TEXT NOT NULL, directory INTEGER NOT NULL, size INTEGER NOT NULL, mtime INTEGER NOT NULL, PRIMARY KEY(root, path))')
+                saved = connection.execute('SELECT config, identity FROM roots WHERE root=?', (root['path'],)).fetchone()
+                if saved and not reset:
+                    if saved[0] != self.state_config:
+                        raise ValueError('저장 기준과 경로 매핑·제외 패턴·확장자가 다릅니다. 확인 후 새 기준으로 시작하세요.')
+                    count = connection.execute('SELECT count(*) FROM entries WHERE root=?', (root['path'],)).fetchone()[0]
+                    if count > max_entries:
+                        raise ValueError('저장 기준이 현재 감시 한도를 초과합니다. 한도를 확인하세요.')
+                    self.snapshot = {path: (bool(directory), size, mtime) for path, directory, size, mtime in
+                                     connection.execute('SELECT path, directory, size, mtime FROM entries WHERE root=?', (root['path'],))}
+                    self.identity = tuple(json.loads(saved[1]))
+                    self.directory_count = sum(value[0] for value in self.snapshot.values())
+                    self.file_count = len(self.snapshot) - self.directory_count
+
+    def save(self, old, current, identity):
+        if not self.state_path:
+            return
+        root = self.root['path']
+        with closing(sqlite3.connect(self.state_path)) as connection, connection:
+            if self.snapshot is None:
+                connection.execute('DELETE FROM entries WHERE root=?', (root,))
+            else:
+                connection.executemany('DELETE FROM entries WHERE root=? AND path=?',
+                                       ((root, path) for path in old if path not in current))
+            connection.executemany('INSERT OR REPLACE INTO entries VALUES (?, ?, ?, ?, ?)',
+                                   ((root, path, *value) for path, value in current.items()
+                                    if self.snapshot is None or old.get(path) != value))
+            connection.execute('INSERT OR REPLACE INTO roots VALUES (?, ?, ?)',
+                               (root, self.state_config, json.dumps(identity)))
 
     def included(self, relative, directory):
         parts = relative.split('/')
@@ -170,6 +207,8 @@ class PollingRoot:
             if len(events) > 10000:
                 raise ValueError("한 번에 10,000건을 초과한 변경입니다. 범위를 줄이거나 수동 스캔 후 기준을 재설정하세요.")
             accept(events)
+        # 큐 확인 후 저장하므로 중간 종료 시 재전달될 수 있지만 미전달 변경을 건너뛰지 않습니다.
+        self.save(old, current, identity)
         directories = sum(value[0] for value in current.values())
         old_directories = sum(value[0] for value in old.values())
         self.directory_count = (0 if full else self.directory_count - old_directories) + directories
@@ -213,9 +252,9 @@ def run(config):
 
     try:
         for root in roots:
-            monitor = PollingRoot(root, max_entries=max_entries, ignore_patterns=config.get("ignore_patterns", ()), extensions=config.get("extensions"))
-            state = {"monitor": monitor, "next": 0, "changed": 0, "first": 0, "lock": threading.Lock(), "mode": "polling", "pending": set(), "full": True, "reconcile": 0}
             try:
+                monitor = PollingRoot(root, max_entries=max_entries, ignore_patterns=config.get("ignore_patterns", ()), extensions=config.get("extensions"), state_path=config.get('state_path'), reset=config.get('reset_baseline', False))
+                state = {"monitor": monitor, "next": 0, "changed": 0, "first": 0, "lock": threading.Lock(), "mode": "polling", "pending": set(), "full": True, "reconcile": 0}
                 fstype = filesystem_type(root["path"])
                 native = root["mode"] == "native" or (root["mode"] == "auto" and fstype in local_types)
                 if native:
