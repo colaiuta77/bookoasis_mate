@@ -439,6 +439,7 @@ class ModulePlugins(PluginModuleBase):
                     req.form.get("ref"),
                     req.form.get("plugin_id"),
                     settings,
+                    allow_shell_scripts=req.form.get("allow_shell_scripts") == "true",
                 )
                 return jsonify(
                     {

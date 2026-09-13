@@ -566,6 +566,13 @@ class GoogleDriveChangesWatcher:
                     )
                     if not validated["relevant"]:
                         validated = None
+                if validated is not None:
+                    source = change.get("file") or {}
+                    validated["drive"] = event.get("drive") or {
+                        "file_id": file_id,
+                        "name": str(source.get("name") or posixpath.basename(validated["path"])),
+                        "mime_type": str(source.get("mimeType") or (current or {}).get("mime_type") or ""),
+                    }
                 self.item_model.record_change(
                     self.client.item_scope, file_id, previous, None if removed else current,
                     validated, self.event_model, self.buffer_seconds,

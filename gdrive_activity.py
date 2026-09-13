@@ -134,6 +134,8 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
         # 경로를 추측해 스캔하지 않고 실패 행과 receipt를 함께 저장합니다.
         return previous, {"action": kind, "item_type": "directory" if "driveFolder" in target else "file",
                           "path": "", "removed_path": "", "activity_hold": metadata,
+                          "drive": {"file_id": change["fileId"], "name": str(target.get("title") or ""),
+                                    "mime_type": str(target.get("mimeType") or "")},
                           "ingestion_error": f"Activity 경로 확인 보류 ({kind}, 파일 ID {change['fileId']}): {reason} 경로 수정 후 재시도해 주세요. 다른 활동 수집은 계속합니다."}
 
     def _resolve_activity_event(self, change, previous):
@@ -178,5 +180,7 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
         if not new_path:
             kind = "delete"
         event = {"action": kind, "item_type": item_type, "path": new_path or old_path,
-                 "removed_path": old_path if kind in {"move", "rename", "delete"} else ""}
+                 "removed_path": old_path if kind in {"move", "rename", "delete"} else "",
+                 "drive": {"file_id": file_id, "name": str((data or {}).get("name") or target.get("title") or ""),
+                           "mime_type": str((data or {}).get("mimeType") or target.get("mimeType") or "")}}
         return current, event

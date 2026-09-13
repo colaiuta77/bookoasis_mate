@@ -1,4 +1,4 @@
-# FF 컨테이너의 MariaDB 필수 패키지 상태와 설치 작업을 관리합니다.
+# FF 컨테이너의 MariaDB·로컬 감지 패키지 상태와 설치 작업을 관리합니다.
 import copy
 import os
 import shutil
@@ -98,15 +98,23 @@ class DependencyInstaller:
             "message": "" if installed else "mariadb와 mariadb-dump 명령이 모두 필요합니다.",
         }
 
-    def status(self):
+    def status(self, key=None):
         manager = self._package_manager()
         with self._lock:
             job = copy.deepcopy(self._job)
+        packages = {
+            "pymysql": self._python_package_status(),
+            "mariadb-client": self._client_package_status(),
+        } if key != "watchdog" else {}
+        if key == "watchdog":
+            try:
+                version = metadata.version("watchdog")
+            except metadata.PackageNotFoundError:
+                version = ""
+            packages["watchdog"] = {"name": "watchdog", "spec": "watchdog>=4,<7", "version": version,
+                                   "ready": (4,) <= self._version_tuple(version) < (7,)}
         return {
-            "packages": {
-                "pymysql": self._python_package_status(),
-                "mariadb-client": self._client_package_status(),
-            },
+            "packages": packages,
             "platform": {
                 "python": sys.executable,
                 "package_manager": manager,
@@ -118,6 +126,8 @@ class DependencyInstaller:
 
     def install_commands(self, key):
         key = str(key or "").strip().lower()
+        if key == "watchdog":
+            return [[sys.executable, "-m", "pip", "install", "--no-cache-dir", "--force-reinstall", "watchdog>=4,<7"]]
         if key == "pymysql":
             return [[
                 sys.executable,

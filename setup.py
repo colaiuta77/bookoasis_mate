@@ -54,6 +54,7 @@ setting = {
                     {"uri": "manual", "name": "연동 매뉴얼"},
                 ],
             },
+            {"uri": "local_watch", "name": "로컬 폴더 감지"},
             {"uri": "sql", "name": "SQL 도구"},
             {"uri": "plugins", "name": "플러그인 관리"},
             {"uri": "font", "name": "커스텀 폰트"},
@@ -79,6 +80,7 @@ except Exception as error:
     P.logger.error(traceback.format_exc())
 
 P.gdrive_scan_model = None
+P.local_folder_model = None
 P.gdrive_scan_state_model = None
 P.gdrive_item_state_model = None
 try:
@@ -86,9 +88,11 @@ try:
         ModelGDriveItemState,
         ModelGDriveScanEvent,
         ModelGDriveScanState,
+        ModelLocalFolderEvent,
     )
 
     P.gdrive_scan_model = ModelGDriveScanEvent
+    P.local_folder_model = ModelLocalFolderEvent
     P.gdrive_scan_state_model = ModelGDriveScanState
     P.gdrive_item_state_model = ModelGDriveItemState
 except Exception as error:
@@ -116,6 +120,7 @@ except Exception as error:
 from .mod_main import ModuleMain
 from .mod_database_migration import ModuleDatabaseMigration
 from .mod_gdrive_scan import ModuleGDriveScan
+from .mod_local_watch import ModuleLocalWatch
 from .mod_font import ModuleFont
 from .mod_migration import ModuleMigration
 from .mod_manual import ModuleManual
@@ -134,6 +139,7 @@ P.set_module_list(
         ModuleSetting,
         ModuleFont,
         ModuleManual,
+        ModuleLocalWatch,
     ]
 )
 logger = P.logger

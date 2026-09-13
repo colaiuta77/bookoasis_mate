@@ -2,7 +2,7 @@
 import json
 from collections import Counter
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 
@@ -15,11 +15,6 @@ class DiscordWebhookNotifier:
     MAX_EMBEDS = 10
     MAX_EMBED_CHARACTERS = 5800
     MAX_FIELD_VALUE = 1024
-    SIDECAR_NAMES = {
-        "comicinfo.xml",
-        "kavita.yaml",
-        "metadata.json",
-    }
     ALLOWED_HOSTS = {
         "discord.com",
         "discordapp.com",
@@ -49,7 +44,8 @@ class DiscordWebhookNotifier:
     }
     DEFAULT_COLOR = 0x95A5A6
 
-    def __init__(self, webhook_url, timeout=5, sender=None):
+    def __init__(self, webhook_url, timeout=5, sender=None, source_name="Google Drive"):
+        self.source_name = source_name
         self.webhook_url = str(webhook_url or "").strip()
         self.timeout = max(1, min(int(timeout or 5), 30))
         self.sender = sender or self._send
@@ -121,16 +117,9 @@ class DiscordWebhookNotifier:
 
     @classmethod
     def _book_title(cls, event):
+        drive = (event.get("result") or {}).get("drive") or {}
         path = str(event.get("path") or event.get("removed_path") or "")
-        normalized = path.replace("\\", "/").rstrip("/")
-        basename = cls._basename(normalized)
-        if basename.lower() in cls.SIDECAR_NAMES:
-            parent = normalized.rsplit("/", 1)[0]
-            basename = cls._basename(parent)
-        elif str(event.get("item_type") or "").lower() != "directory":
-            stem, separator, suffix = basename.rpartition(".")
-            if separator and stem and suffix:
-                basename = stem
+        basename = str(drive.get("name") or cls._basename(path))
         return cls._truncate(basename or "제목 확인 불가", 256)
 
     @staticmethod
@@ -181,6 +170,20 @@ class DiscordWebhookNotifier:
                 }
             )
 
+        drive = (event.get("result") or {}).get("drive") or {}
+        # 제목 한도를 넘는 파일명도 필드에서 최대한 표시합니다.
+        name = str(drive.get("name") or self._basename(path))
+        if len(name) > 256:
+            fields.append({"name": "파일명", "value": self._truncate(name, self.MAX_FIELD_VALUE), "inline": False})
+        for label, key in (("ID", "file_id"), ("MIME", "mime_type")):
+            if drive.get(key):
+                fields.append({"name": label, "value": self._truncate(drive[key], self.MAX_FIELD_VALUE), "inline": False})
+        if drive.get("file_id"):
+            file_id = quote(str(drive["file_id"]), safe="")
+            is_folder = event.get("item_type") == "directory" or drive.get("mime_type") == "application/vnd.google-apps.folder"
+            link = f"https://drive.google.com/drive/folders/{file_id}" if is_folder else f"https://drive.google.com/file/d/{file_id}/view"
+            fields.append({"name": "Google Drive", "value": f"[Google Drive에서 열기]({link})", "inline": False})
+
         libraries = []
         for library in result.get("libraries") or []:
             name = str(library.get("name") or "").strip()
@@ -220,7 +223,7 @@ class DiscordWebhookNotifier:
             "title": self._book_title(event),
             "color": self.ACTION_COLORS.get(action, self.DEFAULT_COLOR),
             "fields": fields,
-            "footer": {"text": "BookOasis Mate · Google Drive 변경 감지"},
+            "footer": {"text": f"BookOasis Mate · {self.source_name} 변경 감지"},
         }
 
     def _content(self, events, statuses, omitted=0):
@@ -230,17 +233,20 @@ class DiscordWebhookNotifier:
         )
 
         action_text = " · ".join(
-            f"{self.ACTION_LABELS.get(action, action)} {count}"
+            f"{self.ACTION_LABELS.get(action, action)} {count}건"
             for action, count in sorted(actions.items())
         )
         state_text = " · ".join(
-            f"{self.STATUS_LABELS.get(status, status)} {count}"
+            f"{self.STATUS_LABELS.get(status, status)} {count}건"
             for status, count in sorted(state_counts.items())
         )
         lines = [
-            "**BookOasis Google Drive 변경 처리**",
-            f"총 {len(events)}건 · {action_text or '변경 정보 없음'}",
-            state_text or "처리 상태 없음",
+            f"**BookOasis {self.source_name} 변경 처리**",
+            "```text",
+            f"전체  {len(events)}건",
+            f"변경  {action_text or '변경 정보 없음'}",
+            f"결과  {state_text or '처리 상태 없음'}",
+            "```",
         ]
         if omitted:
             lines.append(f"카드 {len(events) - omitted}건 표시 · 외 {omitted}건 생략")
