@@ -59,6 +59,8 @@ class ModuleSetting(PluginModuleBase):
                     "data": self.installer.status(),
                 })
             if command == "install_dependency":
+                if str(req.form.get("key") or "").strip().lower() == "watchdog":
+                    raise ValueError("watchdog은 로컬 폴더 감지 설정에서 설치해 주세요.")
                 if req.form.get("confirm_install") != "true":
                     return jsonify({
                         "ret": "warning",

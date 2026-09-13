@@ -33,6 +33,9 @@
   <div class="form-group row"><label for="local_ignore_patterns" class="col-md-3 col-form-label text-md-right font-weight-bold">감지 제외 패턴</label><div class="col-md-9"><textarea id="local_ignore_patterns" class="form-control" rows="7" placeholder="@eaDir/&#10;#recycle/&#10;*.tmp&#10;*.sample.cbz&#10;.DS_Store&#10;Thumbs.db&#10;desktop.ini">{{ arg.get('local_watch_ignore_patterns', '@eaDir/\n#recycle/') }}</textarea><small class="form-text text-muted">한 줄에 하나씩 입력합니다. 끝에 /를 붙이면 폴더와 하위 전체를 제외합니다. *.tmp 같은 파일 패턴도 지원하며, 비우면 제외하지 않습니다. 작업 중지 → 설정 저장 → 새 기준으로 시작 순서로 적용하세요.</small></div></div>
   <div class="form-group row"><label for="local_discord_webhook" class="col-md-3 col-form-label text-md-right font-weight-bold">로컬 감지 Discord 웹훅</label><div class="col-md-9"><input id="local_discord_webhook" type="password" autocomplete="new-password" class="form-control" placeholder="https://discord.com/api/webhooks/..." value="{{ arg.get('local_watch_discord_webhook_url', '') }}"><small class="form-text text-muted">로컬 폴더 변경 처리 알림 전용입니다. 비워 두면 보내지 않으며 Google Drive 알림 주소는 사용하지 않습니다.</small></div></div>
   <p class="doctor-muted mt-2">BookOasis 연결은 기존 Mate 설정을 사용합니다. Google Drive 연동을 켤 필요는 없습니다.</p>
+  <div class="form-group row"><label for="local_auto_cleanup" class="col-md-3 col-form-label text-md-right font-weight-bold">이벤트 DB 자동 삭제</label><div class="col-md-9"><select id="local_auto_cleanup" class="form-control" style="max-width:180px"><option value="True" {% if arg.get('local_watch_auto_cleanup', 'True') == 'True' %}selected{% endif %}>On</option><option value="False" {% if arg.get('local_watch_auto_cleanup') == 'False' %}selected{% endif %}>Off</option></select></div></div>
+  <div class="form-group row"><label for="local_retention_days" class="col-md-3 col-form-label text-md-right font-weight-bold">이벤트 보관 기간(일)</label><div class="col-md-9"><input id="local_retention_days" class="form-control" style="max-width:180px" type="number" min="1" max="3650" value="{{ arg.get('local_watch_retention_days', '30') }}"><small class="form-text text-muted">감지 작업자 실행 중 매시간 완료·최종 실패 기록을 정리합니다. 대기·재시도·처리 중 기록과 실제 파일은 유지합니다.</small></div></div>
+  <div class="doctor-card doctor-section"><div class="d-flex justify-content-between align-items-center"><h4>실시간 감지 구성요소</h4><button id="local_watchdog_refresh" class="btn btn-sm btn-outline-primary">상태 새로고침</button></div><p class="doctor-muted">현재 FlaskFarm Python에 watchdog&gt;=4,&lt;7을 설치합니다. 폴링에는 필요하지 않습니다. 컨테이너 재생성 시 재설치가 필요할 수 있습니다.</p><strong>watchdog</strong><p id="local_watchdog_status" role="status">상태 확인 중</p><button id="local_watchdog_install" class="btn btn-sm btn-outline-primary">설치 / 재설치</button><pre id="local_watchdog_output" class="doctor-gdrive-json" hidden></pre></div>
 </div>
 </div>
 <div class="tab-pane fade" id="local_changes" role="tabpanel" aria-labelledby="local_changes_tab">
@@ -61,21 +64,39 @@
   </ol>
   <ul>
     <li>감지 제외 패턴은 Mate의 신규 이벤트 수집에 적용하며 기존 기록·대기열은 지우지 않습니다. BookOasis 스캔 제외 설정과 별개입니다. / 없는 패턴은 모든 깊이의 이름, / 포함 패턴은 감시 루트 기준 상대 경로에 대소문자를 구분하여 적용합니다. *, ?, []를 지원하며 #은 주석이 아닙니다. 폴더 제외 시 스냅샷 하위 탐색도 생략합니다.</li>
-    <li>실시간 감지에는 FlaskFarm Python 환경의 <code>watchdog&gt;=4,&lt;7</code> 설치가 필요합니다. 없으면 오류를 표시하며 자동 설치하지 않습니다.</li>
+    <li>실시간 감지에는 FlaskFarm Python 환경의 <code>watchdog&gt;=4,&lt;7</code> 설치가 필요합니다. 작업 중지 후 설정의 구성요소 설치 버튼을 사용하세요. 설치 완료 후 새 기준으로 시작합니다.</li>
     <li>실시간 모드는 watchdog 신호를 모아 변경 시 트리를 비교합니다. 폴링은 매 주기 파일 크기·수정시간을 비교합니다. 대규모 경로는 조회 비용이 크며 루트당 최대 20만 항목입니다.</li>
     <li>이동은 삭제+생성으로 기록합니다. 심볼릭 링크는 따라가지 않습니다. 감시 중지·재시작 사이의 변경은 자동 복구하지 않습니다.</li>
     <li>루트 변경·조회 오류·빈 트리·대량 삭제는 기준을 유지하고 보류합니다. 정상 삭제임을 확인했다면 BookOasis 수동 스캔 후 중지·시작으로 새 기준을 만드세요.</li>
     <li>같은 경로의 네이티브 플러그인·gd-poller 감시는 직접 꺼 주세요. Mate 내 Drive 자체 감지와 겹치는 대상은 시작할 수 없습니다.</li>
     <li>로컬 스캔은 rclone VFS를 갱신하지 않습니다. FUSE 캐시에 아직 보이지 않는 변경은 감지할 수 없습니다.</li>
-    <li>중지 시 감지는 종료하고 현재 API 요청 이후 스캔을 멈춥니다. 대기열은 유지되며 별도로 삭제할 수 있습니다. 처리 이력은 30일 보관합니다.</li>
+    <li>중지 시 감지는 종료하고 현재 API 요청 이후 스캔을 멈춥니다. 대기열은 유지되며 별도로 삭제할 수 있습니다. 자동 삭제와 보관 기간은 설정에서 변경하며 기본은 On·30일입니다. 개별 삭제는 완료·최종 실패 기록에만 적용합니다.</li>
     <li>요청 완료는 BookOasis가 스캔 요청을 수락했다는 뜻입니다. 최종 스캔 완료 여부는 BookOasis에서 확인하세요.</li>
     <li>Windows 네이티브 FlaskFarm 실행은 지원 범위 밖입니다. Windows PC 공유 폴더는 NAS/컨테이너에 CIFS로 마운트해야 합니다.</li>
   </ul>
 </div>
 </div>
 </div>
+<dialog id="local_json_dialog" class="doctor-card" style="width:90%;max-width:1000px;max-height:85vh" aria-labelledby="local_json_title"><form method="dialog" class="d-flex justify-content-between align-items-center"><h4 id="local_json_title">로컬 변경 이벤트 JSON</h4><button class="btn btn-sm btn-outline-primary">닫기</button></form><pre id="local_json_content" class="doctor-gdrive-json"></pre></dialog>
 <script>
-var localPage = 1, localPages = 1, localRunning = false, localLoading = false;
+var localPage = 1, localPages = 1, localRunning = false, localLoading = false, localInstalling = false;
+function localWatchdogStatus() {
+  localRequest('watchdog_status', {}, function(ret) {
+    if (ret.ret !== 'success') return;
+    var data = ret.data, pkg = data.packages.watchdog, job = data.job || {};
+    localInstalling = job.status === 'ready' || job.status === 'running';
+    $('#local_watchdog_status').text((pkg.ready ? '사용 가능' : '설치 필요') + (pkg.version ? ' · ' + pkg.version : '') + (job.key === 'watchdog' ? ' · ' + job.status_label + ' · ' + job.message : ''));
+    $('#local_watchdog_install').prop('disabled', localRunning || localInstalling).text(pkg.ready ? '재설치' : '설치');
+    $('#local_watchdog_output').text(job.key === 'watchdog' ? job.output || '' : '').prop('hidden', job.key !== 'watchdog' || !job.output);
+    if (localInstalling) setTimeout(localWatchdogStatus, 2000);
+  });
+}
+$('#local_watchdog_refresh').on('click', localWatchdogStatus);
+$('#local_watchdog_install').on('click', function() {
+  if (localRunning || localInstalling || !confirm('현재 FlaskFarm Python에 watchdog을 설치·재설치할까요? 네트워크와 패키지 설치 권한이 필요합니다.')) return;
+  $(this).prop('disabled', true);
+  localRequest('install_watchdog', {confirm_install:'true'}, localWatchdogStatus);
+});
 function localAddRoot(row) {
   if ($('#local_roots .local-root').length >= 10) return;
   row = row || {};
@@ -114,7 +135,7 @@ function localAddRoot(row) {
 function localValues() {
   var roots = [];
   $('#local_roots .local-root').each(function() { roots.push({path:$(this).find('.local-path').val(), target:$(this).find('.local-target').val(), mode:$(this).find('.local-mode').val()}); });
-  return {local_watch_roots:JSON.stringify(roots), local_watch_interval:$('#local_interval').val(), local_watch_debounce:$('#local_debounce').val(), local_watch_extensions:$('#local_extensions').val(), local_watch_ignore_patterns:$('#local_ignore_patterns').val(), local_watch_discord_webhook_url:$('#local_discord_webhook').val()};
+  return {local_watch_roots:JSON.stringify(roots), local_watch_interval:$('#local_interval').val(), local_watch_debounce:$('#local_debounce').val(), local_watch_extensions:$('#local_extensions').val(), local_watch_ignore_patterns:$('#local_ignore_patterns').val(), local_watch_discord_webhook_url:$('#local_discord_webhook').val(), local_watch_auto_cleanup:$('#local_auto_cleanup').val(), local_watch_retention_days:$('#local_retention_days').val()};
 }
 function localRequest(command, data, done) {
   $.ajax({url:'/' + PACKAGE_NAME + '/ajax/local_watch/' + command, type:'POST', data:data || {}, dataType:'json', global:false,
@@ -132,6 +153,8 @@ function localStatus() {
     $('#local_error').text(data.error || '');
     $('#local_start').prop('disabled', localRunning); $('#local_stop').prop('disabled', !localRunning);
     $('#local_save, #local_add, #local_clear, #local_roots input, #local_roots select, #local_roots button, #local_interval, #local_debounce, #local_extensions, #local_ignore_patterns, #local_discord_webhook').prop('disabled', localRunning);
+    $('#local_auto_cleanup, #local_retention_days').prop('disabled', localRunning);
+    $('#local_watchdog_install').prop('disabled', localRunning || localInstalling);
     $('#local_roots_status').empty();
     (data.roots || []).forEach(function(root) {
       var state = $('<div class="border-top pt-2 mt-2"></div>');
@@ -166,6 +189,13 @@ function localStatus() {
       if (item.completed_at) times.append($('<div></div>').text('완료 ' + String(item.completed_at).replace('T', ' ')));
       tr.append(times);
       var actions = $('<div class="doctor-gdrive-actions"></div>');
+      actions.append($('<button class="btn btn-sm btn-outline-primary">JSON</button>').on('click', function() {
+        $('#local_json_content').text(JSON.stringify(item, null, 2));
+        document.getElementById('local_json_dialog').showModal();
+      }));
+      if (item.status === 'completed' || item.status === 'failed') actions.append($('<button class="btn btn-sm btn-outline-danger">삭제</button>').on('click', function() {
+        if (confirm('#' + item.id + ' 이벤트 기록만 삭제할까요? 실제 파일은 삭제하지 않습니다.')) localRequest('delete', {id:item.id}, localStatus);
+      }));
       if (item.status === 'failed') actions.append($('<button class="btn btn-sm btn-outline-primary">재시도</button>').on('click', function() { localRequest('retry', {id:item.id}, localStatus); }));
       tr.append(actions); $('#local_events').append(tr);
     });
@@ -196,6 +226,7 @@ $(function() {
   try { roots = JSON.parse({{ arg.get('local_watch_roots', '[]')|tojson }}); } catch (e) { roots = []; }
   (roots.length ? roots : [{}]).forEach(localAddRoot);
   localStatus();
+  localWatchdogStatus();
   var timer = setInterval(function() { if (!document.hidden) localStatus(); }, 5000);
   $(window).on('beforeunload', function() { clearInterval(timer); });
 });

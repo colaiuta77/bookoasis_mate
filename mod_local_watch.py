@@ -24,6 +24,7 @@ class ModuleLocalWatch(PluginModuleBase):
             "local_watch_interval": "300", "local_watch_debounce": "10",
             "local_watch_ignore_patterns": "@eaDir/\n#recycle/",
             "local_watch_discord_webhook_url": "",
+            "local_watch_auto_cleanup": "True", "local_watch_retention_days": "30",
             "local_watch_extensions": ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json,.mp3,.m4b,.m4a,.flac,.aac,.wav,.ogg,.opus,.wma,.mp4,.mkv,.avi,.webm,.mov,.m4v,.ts,.smi,.srt,.vtt",
         }
         self._lock = threading.RLock()
@@ -35,6 +36,10 @@ class ModuleLocalWatch(PluginModuleBase):
         self._error = ""
         self._busy = False
         self._active_roots = []
+
+    @property
+    def installer(self):
+        return next(module.installer for module in P.module_list if module.name == "setting")
 
     @property
     def model(self):
@@ -49,6 +54,8 @@ class ModuleLocalWatch(PluginModuleBase):
 
     def _config(self, overrides=None):
         values = {**self._settings(), **(overrides or {})}
+        if not 1 <= int(values.get("local_watch_retention_days", 30)) <= 3650:
+            raise ValueError("이벤트 보관 기간은 1~3650일로 입력해 주세요.")
         drive = []
         if str(values.get("gdrive_scan_enabled")).lower() == "true" and values.get("gdrive_scan_input_mode") == "builtin":
             configured = json.loads(values.get("gdrive_scan_builtin_roots") or "[]")
@@ -82,6 +89,9 @@ class ModuleLocalWatch(PluginModuleBase):
         with self._lock:
             if self.running():
                 raise ValueError("이미 실행 중이거나 중지 중입니다.")
+            job = self.installer.status("watchdog").get("job") or {}
+            if job.get("key") == "watchdog" and job.get("status") in {"ready", "running"}:
+                raise ValueError("watchdog 설치 완료 후 시작해 주세요.")
             if self.model is None:
                 raise ValueError("로컬 이벤트 DB를 초기화하지 못했습니다.")
             config = self._config()
@@ -197,6 +207,11 @@ class ModuleLocalWatch(PluginModuleBase):
             try:
                 if self._config()["roots"] != self._active_roots:
                     raise ValueError("설정이 변경되었습니다. 중지 후 다시 시작해 주세요.")
+                if time.monotonic() - last_cleanup > 3600:
+                    cleanup_settings = self._settings()
+                    if str(cleanup_settings.get("local_watch_auto_cleanup", "True")).lower() == "true":
+                        self.model.cleanup_terminal(int(cleanup_settings.get("local_watch_retention_days", 30)))
+                    last_cleanup = time.monotonic()
                 with self._lock:
                     if self._stop.is_set():
                         break
@@ -237,9 +252,6 @@ class ModuleLocalWatch(PluginModuleBase):
                         DiscordWebhookNotifier(settings.get("local_watch_discord_webhook_url"), source_name="로컬 폴더").send_batch(events, results, statuses)
                     except Exception as error:
                         P.logger.warning(f"로컬 폴더 Discord 알림 실패: {error}")
-                if time.monotonic() - last_cleanup > 3600:
-                    self.model.cleanup_terminal(30)
-                    last_cleanup = time.monotonic()
             except Exception as error:
                 self._error = str(error)
                 for event in events:
@@ -274,6 +286,19 @@ class ModuleLocalWatch(PluginModuleBase):
                     "events": self.model.list_page(page=req.form.get("page", 1), status=req.form.get("status", ""), search=req.form.get("search", "")) if self.model else {}}})
             elif command == "retry":
                 self.model.retry_many([int(req.form["id"])])
+            elif command == "delete":
+                if not self.model.delete_terminal(int(req.form["id"])):
+                    raise ValueError("완료·최종 실패 이벤트만 삭제할 수 있습니다. 상태를 새로 확인해 주세요.")
+            elif command == "watchdog_status":
+                return jsonify({"ret": "success", "data": self.installer.status("watchdog")})
+            elif command == "install_watchdog":
+                with self._lock:
+                    if self.running():
+                        raise ValueError("감지·스캔 작업을 중지한 뒤 설치해 주세요.")
+                    if req.form.get("confirm_install") != "true":
+                        raise ValueError("설치 확인이 필요합니다.")
+                    job = self.installer.start("watchdog")
+                return jsonify({"ret": "success", "data": job})
             elif command == "clear_pending":
                 with self._lock:
                     if self.running():
