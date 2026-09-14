@@ -36,7 +36,7 @@
           <input id="mate_work_dir" type="text" class="form-control" value="{{ arg.get('mate_work_dir', '') }}">
           <div class="input-group-append"><button id="select_mate_work_dir_btn" type="button" class="btn btn-outline-primary">경로 선택</button></div>
         </div>
-        <small class="doctor-muted">FF 컨테이너에서 보이는 절대 경로입니다. 기본값은 /data/plugins/bookoasis_mate/work입니다(FlaskFarm 데이터 경로에 따라 변경). migration에는 이관·백업·임시 파일, jobs에는 유지보수 상태·로그를 저장합니다. 작업 종료 후 변경하세요. 기존 파일은 자동 이동·삭제하지 않습니다. 플러그인 삭제 전 필요한 백업은 별도 보관하세요.</small>
+        <small class="doctor-muted">FF 컨테이너에서 보이는 절대 경로입니다. 기본값은 /data/plugins/bookoasis_mate/work입니다(FlaskFarm 데이터 경로에 따라 변경). migration에는 이관·백업·임시 파일, jobs에는 유지보수 상태·로그, plugins에는 플러그인 다운로드·검사·백업·캐시를 저장합니다. 작업 종료 후 변경하세요. 기존 파일은 자동 이동·삭제하지 않습니다. 플러그인 삭제 전 필요한 백업은 별도 보관하세요.</small>
       </div>
       <div class="doctor-section doctor-card">
         <h4>BookOasis API 연결</h4>

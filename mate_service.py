@@ -2536,6 +2536,9 @@ class BookOasisMateService:
             roots = [self._maintenance_state_root(), self.mate_work_dir() / "jobs", Path(self.migration_work_dir())]
             running = any(isinstance(value, dict) and value.get("is_working") == "run"
                           for key, value in vars(self).items() if key.endswith("_status"))
+            manager = getattr(self.P, "bookoasis_plugin_manager", None)
+            if manager is not None and manager.work_dir_busy():
+                running = True
             if running or self._active_legacy_root(roots):
                 raise ValueError("Mate 작업 실행 중에는 작업 디렉터리를 변경할 수 없습니다. 작업 종료 후 다시 저장해 주세요.")
             settings = self.settings()
