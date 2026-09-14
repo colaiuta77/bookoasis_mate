@@ -21,7 +21,8 @@
   <div class="doctor-section doctor-card">
     <h4>공통 설정</h4>
     <p class="doctor-muted">내보낸 패키지, 가져올 패키지와 DB 백업을 같은 작업 디렉터리에서 관리합니다.</p>
-    {{ macros.setting_input_text_and_buttons('migration_work_dir', '이관 작업 디렉터리', [['select_migration_work_dir_btn', '경로 선택']], value=arg['migration_work_dir'], desc=['FlaskFarm 컨테이너에서 보이는 경로입니다.']) }}
+    <p>공통 이관 경로 <code>{{ arg['migration_work_dir'] }}</code> · <a href="/bookoasis_mate/setting">기본 설정의 Mate 작업 디렉터리에서 변경</a></p>
+    <input id="migration_work_dir" type="hidden" value="{{ arg['migration_work_dir'] }}">
   </div>
 
   <div id="migration_export_panel" class="doctor-section doctor-card">
@@ -251,13 +252,6 @@ $('#migration_import_db_type').change(function() {
 $('#migration_merge_library_select').change(migrationSyncValues);
 $('#migration_package_refresh_btn').click(migrationLoadPackages);
 $('#migration_import_package_select').change(migrationSyncValues);
-$("body").on('click', '#select_migration_work_dir_btn', function(e) {
-  e.preventDefault();
-  migrationSelectFolder('카테고리 이관 작업 폴더 선택', $('#migration_work_dir').val().trim(), function(path) {
-    $('#migration_work_dir').val(path);
-    migrationLoadPackages();
-  });
-});
 $("body").on('click', '#add_migration_import_target_path_btn', function(e) {
   e.preventDefault();
   var paths = migrationTargetPaths();

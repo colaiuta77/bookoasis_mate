@@ -30,6 +30,15 @@
   <div class="tab-content doctor-setting-content">
     <div class="tab-pane fade show active" id="setting-basic" role="tabpanel" aria-labelledby="setting-basic-tab">
       <div class="doctor-section doctor-card">
+        <h4>Mate 작업 디렉터리</h4>
+        <label for="mate_work_dir">공통 작업 경로</label>
+        <div class="input-group">
+          <input id="mate_work_dir" type="text" class="form-control" value="{{ arg.get('mate_work_dir', '') }}">
+          <div class="input-group-append"><button id="select_mate_work_dir_btn" type="button" class="btn btn-outline-primary">경로 선택</button></div>
+        </div>
+        <small class="doctor-muted">FF 컨테이너에서 보이는 절대 경로입니다. 기본값은 FlaskFarm 데이터 경로 아래 bookoasis_mate/work입니다. migration에는 이관·백업·임시 파일, jobs에는 유지보수 상태·로그를 저장합니다. 작업 종료 후 변경하세요. 기존 파일은 자동 이동·삭제하지 않습니다.</small>
+      </div>
+      <div class="doctor-section doctor-card">
         <h4>BookOasis API 연결</h4>
         <p class="doctor-muted">API 연결 정보를 입력합니다. <a href="/bookoasis_mate/manual#manual-connection" target="_blank" rel="noopener">연결 매뉴얼 ↗</a></p>
         {{ macros.setting_input_text('bookoasis_url', 'BookOasis URL', value=arg['bookoasis_url'], desc=['예: http://172.17.0.1:5930 또는 HTTPS 대표 주소']) }}
@@ -1077,10 +1086,20 @@ $("body").on('click', '#general_db_libraries_btn,#adult_db_libraries_btn,#audiob
 
 $('#setting_save_btn').click(function(e) {
   e.preventDefault();
+  bookoasisMateAjax('setting', 'work_dir_save', {mate_work_dir:$('#mate_work_dir').val()}, function(result) {
+    if (result.ret !== 'success') { notify(result.msg || '작업 경로를 저장하지 못했습니다.', 'warning'); return; }
   $.ajax({url:'/' + PACKAGE_NAME + '/ajax/setting_save', type:'POST', data:currentSettings(), dataType:'json', success:function(ret) {
     notify(ret ? '설정을 저장했습니다.' : '설정 저장에 실패했습니다.', ret ? 'success' : 'warning');
     if (ret) { refreshComposeOptions(true, loadConfiguredComposeEditors); loadDockerStatus(true); }
   }});
+  });
+});
+
+$('#select_mate_work_dir_btn').click(function(e) {
+  e.preventDefault();
+  globalSelectLocalFolder('Mate 작업 폴더 선택', $('#mate_work_dir').val().trim() || '/', function(result) {
+    if (typeof result === 'string' && result.trim()) $('#mate_work_dir').val(result.trim());
+  });
 });
 
 $('#connection_test_btn').click(function(e) {

@@ -2,6 +2,7 @@
 import json
 import time
 import traceback
+from pathlib import Path
 
 from flask import Response, jsonify, render_template
 
@@ -14,6 +15,7 @@ class ModuleMain(PluginModuleBase):
     def __init__(self, plugin):
         super().__init__(plugin, name="main", first_menu="dashboard", scheduler_desc="BookOasis 라이브러리 자동 진단")
         self.db_default = {
+            "mate_work_dir": "",
             "db_engine": "sqlite",
             "bookoasis_root_path": "",
             "bookoasis_docker_path": "",
@@ -55,6 +57,7 @@ class ModuleMain(PluginModuleBase):
             "main_auto_start": "False",
             "main_interval": "60",
         }
+        P.mate_default_work_dir = str(Path(getattr(F, "path_data", None) or "/data") / "bookoasis_mate" / "work")
         P.bookoasis_mate_service = BookOasisMateService(P)
 
     @property

@@ -53,6 +53,16 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/colaiuta77/bookoasis_mat
 
 이 보고서는 초기 분류용입니다. Drive 실제 이벤트 API·Gitea 인증·MariaDB 내부 상태·Redis 데이터·브라우저 성능은 직접 검사하지 않으며 필요 시 별도 증거를 요청합니다.
 
+## Mate 공통 작업 경로
+
+기본 설정의 **Mate 작업 디렉터리**에서 FF 컨테이너에 보이는 절대 경로를 지정합니다. 기본값은 FlaskFarm 데이터 경로 아래 `bookoasis_mate/work`입니다. 일반적인 `/data` 설치에서는 `/data/bookoasis_mate/work`입니다.
+
+- `migration` 하위는 카테고리·통DB 이관 패키지, 백업과 임시 파일에 사용합니다.
+- `jobs` 하위는 상태 요약·라이브러리 통계·표지 검사·일괄 재스캔·고아 표지 정리의 상태와 로그에 사용합니다.
+- 관련 작업 실행 중에는 경로를 변경할 수 없으며 표지 폴더 내부는 지정할 수 없습니다.
+- 기존 이관 경로와 DB·표지 옆 작업 파일은 자동 이동·삭제하지 않습니다. 실행 중인 이전 작업은 종료까지 기존 경로에서 추적합니다. 기존 패키지를 계속 사용하려면 파일 선택으로 지정하거나 작업 종료 후 사용자가 새 이관 경로로 옮겨 주세요.
+- 이벤트 DB와 로컬 감시 기준 DB의 저장 위치는 변경하지 않습니다. 백업과 대형 이관 임시 파일을 저장할 충분한 여유 공간이 필요합니다.
+
 ## Docker 관리 사용 조건
 
 Docker 관리 기능은 FlaskFarm 컨테이너에서 호스트 Docker CLI·Compose와 BookOasis 경로에 접근해야 합니다. FlaskFarm의 Docker Compose 설정에 호스트 루트를 `/host`로 마운트하세요.
