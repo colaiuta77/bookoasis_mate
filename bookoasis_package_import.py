@@ -30,6 +30,19 @@ MAX_ARCHIVE_UNCOMPRESSED = 2 * 1024**4
 COPY_CHUNK_SIZE = 1024 * 1024
 DB_BATCH_SIZE = 1000
 PACKAGE_EXTENSIONS = (".tar.gz", ".tgz")
+UNSAFE_COVER_SUFFIXES = {
+    ".sh", ".bash", ".zsh", ".fish", ".bat", ".cmd", ".ps1", ".psm1",
+    ".py", ".pyc", ".pyo", ".js", ".mjs", ".cjs", ".ts", ".vbs",
+    ".vbe", ".wsf", ".wsh", ".php", ".phtml", ".pl", ".rb", ".lua",
+    ".exe", ".dll", ".com", ".scr", ".msi", ".so", ".dylib", ".bin",
+    ".jar", ".class", ".html", ".htm", ".xhtml", ".svg", ".desktop",
+}
+
+
+def is_mate_job_member(name):
+    return name == "covers/.bookoasis_mate_jobs" or name.startswith(
+        "covers/.bookoasis_mate_jobs/"
+    )
 
 
 @contextmanager
@@ -364,6 +377,8 @@ class BookOasisPackageImportEngine:
         ):
             self._check_stop()
             directories.sort()
+            if Path(current_root) == self.target_cover_root:
+                directories[:] = [name for name in directories if name != ".bookoasis_mate_jobs"]
             filenames.sort()
             for name in directories:
                 if (Path(current_root) / name).is_symlink():
@@ -397,6 +412,8 @@ class BookOasisPackageImportEngine:
             ):
                 self._check_stop()
                 directories.sort()
+                if Path(current_root) == self.target_cover_root:
+                    directories[:] = [name for name in directories if name != ".bookoasis_mate_jobs"]
                 filenames.sort()
                 root = Path(current_root)
                 for name in directories:
@@ -596,14 +613,12 @@ class BookOasisPackageImportEngine:
                         if kind == "covers":
                             if not name.startswith("covers/"):
                                 raise ValueError(f"표지 패키지 경로가 올바르지 않습니다: {name}")
-                            if name not in {"covers/.gitkeep", "covers/fake_screen.png"} and not name.lower().endswith(
-                                ".webp"
-                            ):
+                            if not is_mate_job_member(name) and PurePosixPath(name).suffix.lower() in UNSAFE_COVER_SUFFIXES:
                                 raise ValueError(f"표지 패키지 파일 형식이 올바르지 않습니다: {name}")
                             relative_name = name[len("covers/") :]
                             if relative_name in cover_names:
                                 raise ValueError(f"중복된 압축 항목입니다: {name}")
-                            if name != "covers/.gitkeep":
+                            if name != "covers/.gitkeep" and not is_mate_job_member(name):
                                 cover_names.add(relative_name)
                         else:
                             if name in regular_names:
@@ -660,6 +675,8 @@ class BookOasisPackageImportEngine:
                     destination.relative_to(Path(target_root).resolve())
                 except ValueError:
                     raise ValueError(f"안전하지 않은 압축 경로입니다: {name}")
+                if kind == "covers" and is_mate_job_member(name):
+                    continue
                 if member.isdir():
                     destination.mkdir(parents=True, exist_ok=True)
                     continue
