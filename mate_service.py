@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime
@@ -397,6 +398,7 @@ class BookOasisMateService:
     def settings(self):
         model = self.P.ModelSetting
         values = {
+            "mate_work_dir": str(self.mate_work_dir()),
             "db_engine": model.get("db_engine") or "sqlite",
             "bookoasis_root_path": model.get("bookoasis_root_path"),
             "bookoasis_docker_path": model.get("bookoasis_docker_path"),
@@ -2188,7 +2190,7 @@ class BookOasisMateService:
 
     def _cover_inspection_paths(self, settings=None):
         settings = settings or self.settings()
-        state_root = self._maintenance_state_root(settings)
+        state_root = self._maintenance_state_root(settings, "cover_inspection")
         if state_root is None:
             return None
         paths = self._maintenance_worker_paths(
@@ -2493,37 +2495,71 @@ class BookOasisMateService:
             "launch_lock": root / f"{prefix}_launch.lock",
         }
 
-    def _maintenance_state_root(self, settings=None):
+    def _maintenance_state_root(self, settings=None, job_name=None):
         settings = settings or self.settings()
-        if self.engine(settings).database_adapter.engine == "sqlite":
-            db_path = str(
-                settings.get("general_db_path")
-                or settings.get("adult_db_path")
-                or ""
-            ).strip()
-            if db_path:
-                return (
-                    Path(db_path).expanduser().resolve().parent
-                    / ".bookoasis_mate_jobs"
-                )
-        for candidate in (
-            settings.get("cover_root_path"),
-            settings.get("bookoasis_root_path"),
-            Path(str(settings.get("general_db_path") or "")).parent
-            if str(settings.get("general_db_path") or "").strip()
-            else "",
-        ):
-            value = str(candidate or "").strip()
-            if value:
-                return Path(value).expanduser().resolve() / ".bookoasis_mate_jobs"
+        candidates = [Path(settings[key]).parent / ".bookoasis_mate_jobs"
+                      for key in ("general_db_path", "adult_db_path") if settings.get(key)]
+        candidates += [Path(settings[key]) / ".bookoasis_mate_jobs"
+                       for key in ("cover_root_path", "bookoasis_root_path") if settings.get(key)]
+        return self._active_legacy_root(candidates, (job_name,) if job_name else None) or self.mate_work_dir() / "jobs"
+
+    def mate_work_dir(self):
+        value = self.P.ModelSetting.get("mate_work_dir") or getattr(
+            self.P, "mate_default_work_dir", "/data/plugins/bookoasis_mate/work"
+        )
+        return Path(str(value)).expanduser().resolve()
+
+    def _active_legacy_root(self, candidates, job_names=None):
+        # 실행 중인 이전 작업만 원래 위치에서 추적하며 완료 파일은 이동하지 않습니다.
+        for root in candidates:
+            root = Path(root).expanduser().resolve()
+            for name in job_names or ("summary_report", "library_statistics", "cover_inspection",
+                         "batch_book_rescan", "orphan_cleanup", "category_migration", "database_migration"):
+                status = self._read_database_migration_json(root / f".bookoasis_mate_{name}_status.json")
+                if status and status.get("is_working") == "run" and self._worker_pid_alive(status.get("worker_pid")) is not False:
+                    return root
         return None
 
+    def migration_work_dir(self):
+        legacy = self.P.ModelSetting.get("migration_work_dir")
+        return str(self._active_legacy_root([legacy] if legacy else []) or self.mate_work_dir() / "migration")
+
+    def save_mate_work_dir(self, value):
+        raw = str(value or "").strip()
+        path = Path(raw).expanduser()
+        if not raw or not path.is_absolute():
+            raise ValueError("Mate 작업 디렉터리는 FF 컨테이너에서 보이는 절대 경로로 지정해 주세요.")
+        path = path.resolve()
+        with self._lock:
+            if path == self.mate_work_dir():
+                return str(path)
+            roots = [self._maintenance_state_root(), self.mate_work_dir() / "jobs", Path(self.migration_work_dir())]
+            running = any(isinstance(value, dict) and value.get("is_working") == "run"
+                          for key, value in vars(self).items() if key.endswith("_status"))
+            manager = getattr(self.P, "bookoasis_plugin_manager", None)
+            if manager is not None and manager.work_dir_busy():
+                running = True
+            if running or self._active_legacy_root(roots):
+                raise ValueError("Mate 작업 실행 중에는 작업 디렉터리를 변경할 수 없습니다. 작업 종료 후 다시 저장해 주세요.")
+            settings = self.settings()
+            cover = str(settings.get("cover_root_path") or "").strip()
+            if cover and (path == Path(cover).resolve() or Path(cover).resolve() in path.parents):
+                raise ValueError("표지 디렉터리 내부는 Mate 작업 경로로 사용할 수 없습니다.")
+            path.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryFile(dir=str(path)):
+                pass
+            self.P.ModelSetting.set("mate_work_dir", str(path))
+            for key in list(vars(self)):
+                if key.endswith(("_status_path", "_stop_path")):
+                    setattr(self, key, None)
+            return str(path)
+
     def _summary_report_paths(self, settings=None):
-        root = self._maintenance_state_root(settings)
+        root = self._maintenance_state_root(settings, "summary_report")
         return self._maintenance_worker_paths(root, "summary_report") if root else None
 
     def _library_statistics_paths(self, settings=None):
-        root = self._maintenance_state_root(settings)
+        root = self._maintenance_state_root(settings, "library_statistics")
         return self._maintenance_worker_paths(root, "library_statistics") if root else None
 
     @staticmethod
@@ -2679,7 +2715,7 @@ class BookOasisMateService:
 
     def _batch_rescan_paths(self, settings=None):
         settings = settings or self.settings()
-        state_root = self._maintenance_state_root(settings)
+        state_root = self._maintenance_state_root(settings, "batch_book_rescan")
         if state_root is None:
             return None
         return self._maintenance_worker_paths(
@@ -2926,7 +2962,7 @@ class BookOasisMateService:
         if not root:
             return None
         return self._maintenance_worker_paths(
-            Path(root) / ".bookoasis_mate_jobs",
+            self._active_legacy_root([Path(root) / ".bookoasis_mate_jobs"], ("orphan_cleanup",)) or self.mate_work_dir() / "jobs",
             "orphan_cleanup",
         )
 
@@ -3082,7 +3118,7 @@ class BookOasisMateService:
     def migration_config(self):
         model = self.P.ModelSetting
         config = {
-            "work_dir": str(model.get("migration_work_dir") or "").strip(),
+            "work_dir": self.migration_work_dir(),
             "operation": str(model.get("migration_operation") or "export").strip(),
             "export_db_type": str(
                 model.get("migration_export_db_type") or "general"
@@ -3133,16 +3169,12 @@ class BookOasisMateService:
 
     def migration_packages(self, work_dir=None):
         config = self.migration_config()
-        if str(work_dir or "").strip():
-            config["work_dir"] = str(work_dir).strip()
         packages = self._migration_engine(config).list_packages()
         self._debug("이관 패키지 목록 조회", count=len(packages))
         return packages
 
     def inspect_migration_package(self, package_path=None, work_dir=None):
         config = self.migration_config()
-        if str(work_dir or "").strip():
-            config["work_dir"] = str(work_dir).strip()
         selected = str(package_path or config.get("import_package") or "").strip()
         data = self._migration_engine(config).inspect_package(selected)
         self._debug(
@@ -3429,7 +3461,7 @@ class BookOasisMateService:
             "bookoasis_confirm_stopped": _as_bool(
                 raw.get("bookoasis_confirm_stopped"), False
             ),
-            "work_dir": str(raw.get("migration_work_dir") or "").strip(),
+            "work_dir": self.migration_work_dir(),
         }
 
     def _database_migration_engine(self, config, on_progress=None):
@@ -3590,9 +3622,7 @@ class BookOasisMateService:
     def _external_database_migration_status(self):
         status_path = self._database_migration_status_path
         if status_path is None:
-            work_dir = str(
-                self.settings().get("migration_work_dir") or ""
-            ).strip()
+            work_dir = self.migration_work_dir()
             if not work_dir:
                 return None
             status_path = self._database_migration_worker_paths(work_dir)[
@@ -3843,9 +3873,7 @@ class BookOasisMateService:
             }:
                 stop_path = self._database_migration_stop_path
                 if stop_path is None:
-                    work_dir = str(
-                        self.settings().get("migration_work_dir") or ""
-                    ).strip()
+                    work_dir = self.migration_work_dir()
                     if work_dir:
                         worker_paths = self._database_migration_worker_paths(
                             work_dir

@@ -35,6 +35,7 @@ class ModulePlugins(PluginModuleBase):
             "plugins_interval": "720",
         }
         self.manager = BookOasisPluginManager(P.logger)
+        P.bookoasis_plugin_manager = self.manager
 
     def _settings(self):
         keys = (
@@ -48,6 +49,7 @@ class ModulePlugins(PluginModuleBase):
             if value is None and key in self.db_default:
                 value = self.db_default[key]
             settings[key] = value
+        settings["plugin_manager_work_dir"] = str(P.bookoasis_mate_service.mate_work_dir() / "plugins")
         return settings
 
     def _catalog_overview(self, settings, refresh_remote=False):
@@ -211,7 +213,6 @@ class ModulePlugins(PluginModuleBase):
             if command == "manager_settings_save":
                 allowed = (
                     "plugin_manager_plugins_path",
-                    "plugin_manager_work_dir",
                     "plugin_manager_backup_keep",
                     "plugin_manager_max_archive_mb",
                     "plugin_manager_max_extracted_mb",

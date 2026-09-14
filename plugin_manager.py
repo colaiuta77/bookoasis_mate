@@ -1622,6 +1622,12 @@ class BookOasisPluginManager:
         with self._lock:
             return copy.deepcopy(self._job) if self._job else self._empty_status()
 
+    def work_dir_busy(self):
+        with self._lock:
+            return any(job and job.get("status") == "running" for job in (
+                self._job, self._discovery_job, self._installed_update_job,
+            ))
+
     @staticmethod
     def _empty_status():
         return {

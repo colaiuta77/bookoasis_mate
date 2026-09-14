@@ -29,6 +29,7 @@ class ModuleSetting(PluginModuleBase):
         arg["mate_repository_url"] = REPOSITORY_URL
         arg["dependency_status"] = self.installer.status()
         for key in (
+            "mate_work_dir",
             "bookoasis_root_path",
             "bookoasis_docker_path",
             "bookoasis_compose_file",
@@ -50,6 +51,12 @@ class ModuleSetting(PluginModuleBase):
         P.logger.debug(f"[BookOasisMate] 설정 AJAX 시작 command={safe_command} db_type={db_type}")
         try:
             values = req.form.to_dict()
+            if command == "work_dir_save":
+                try:
+                    path = self.service.save_mate_work_dir(values.get("mate_work_dir"))
+                    return jsonify({"ret": "success", "data": {"path": path}})
+                except (ValueError, OSError) as error:
+                    return jsonify({"ret": "warning", "msg": str(error)}), 400
             if command == "release_status":
                 return jsonify({"ret": "success", "msg": "", "data": release_status()})
             if command == "dependency_status":
