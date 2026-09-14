@@ -596,7 +596,7 @@ class BookOasisPackageImportEngine:
                         if kind == "covers":
                             if not name.startswith("covers/"):
                                 raise ValueError(f"표지 패키지 경로가 올바르지 않습니다: {name}")
-                            if name != "covers/.gitkeep" and not name.lower().endswith(
+                            if name not in {"covers/.gitkeep", "covers/fake_screen.png"} and not name.lower().endswith(
                                 ".webp"
                             ):
                                 raise ValueError(f"표지 패키지 파일 형식이 올바르지 않습니다: {name}")
