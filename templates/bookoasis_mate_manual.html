@@ -18,10 +18,11 @@
 <div class="tab-content doctor-manual-tab-content">
 <div class="tab-pane fade show active" id="manual-guide-pane" role="tabpanel" aria-labelledby="manual-guide-tab">
 <div class="doctor-section doctor-card">
-  <h4>Mate 전체 구조</h4>
+  <h4>Mate 메뉴와 핵심 기능</h4>
   <figure class="doctor-manual-diagram">
-    <img src="{{ url_for('bookoasis_mate.static', filename='img/manual/mate-architecture.svg') }}" alt="Mate 전체 구조" loading="lazy">
-    <figcaption>현재 Mate 버전 기준 개념도입니다. 세부 설정과 제약은 아래 안내를 확인하세요.</figcaption>
+    <a href="{{ url_for('bookoasis_mate.static', filename='img/manual/mate-menu-org.svg') }}" target="_blank" rel="noopener">메뉴 구성도 원본 열기</a>
+    <div style="overflow-x:auto" tabindex="0" role="region" aria-label="Mate 메뉴 구성도 가로 스크롤"><img src="{{ url_for('bookoasis_mate.static', filename='img/manual/mate-menu-org.svg') }}" alt="BookOasis Mate의 11개 메뉴와 핵심 기능을 기능별로 묶은 조직도" style="width:100%;min-width:1100px;height:auto" loading="lazy"></div>
+    <figcaption>묶음은 설명용이며 실제 메뉴 계층이나 실행 순서가 아닙니다. 기능별 절차는 해당 메뉴의 매뉴얼을 확인하세요.</figcaption>
   </figure>
 </div>
 <div class="doctor-section doctor-card">
