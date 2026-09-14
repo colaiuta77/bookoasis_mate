@@ -48,7 +48,8 @@
       </div>
       <form id="plugin_manager_settings">
         {{ macros.setting_input_text_and_buttons('plugin_manager_plugins_path', 'plugins/metadata 경로', [['plugin_root_select_btn', '경로 선택']], value=arg.get('plugin_manager_plugins_path', ''), desc=['비우면 <BookOasis 기본 경로>/plugins/metadata를 사용합니다.', 'FF 컨테이너에서 쓰기 가능한 경로여야 합니다.']) }}
-        {{ macros.setting_input_text('plugin_manager_work_dir', '작업·백업 경로', value=arg.get('plugin_manager_work_dir', ''), desc=['기본 설정의 Mate 작업 디렉터리 아래 plugins 폴더를 공통 사용합니다.', '다운로드·검사·백업·캐시를 저장하며 실제 plugins/metadata 설치 경로는 변경하지 않습니다.', '기존 작업·백업 파일은 자동 이동·삭제하지 않습니다. <a href="/bookoasis_mate/setting">Mate 작업 디렉터리 설정</a>']) }}
+        {{ macros.setting_input_text('plugin_manager_work_dir', '작업·백업 경로', value=arg.get('plugin_manager_work_dir', ''), desc=['기본 설정의 Mate 작업 디렉터리 아래 plugins 폴더를 공통 사용합니다.', '다운로드·검사·백업·캐시를 저장하며 실제 plugins/metadata 설치 경로는 변경하지 않습니다.', '기존 작업·백업 파일은 자동 이동·삭제하지 않습니다.']) }}
+        <div class="row mb-3"><div class="col-md-9 offset-md-3"><a href="/bookoasis_mate/setting">Mate 작업 디렉터리 설정</a></div></div>
         {{ macros.setting_input_int('plugin_manager_backup_keep', '플러그인별 백업 보관 수', value=arg.get('plugin_manager_backup_keep', '5'), desc=['1~30개']) }}
         {{ macros.setting_input_int('plugin_manager_max_archive_mb', 'ZIP 최대 크기(MB)', value=arg.get('plugin_manager_max_archive_mb', '100'), desc=['업로드와 저장소 다운로드 압축 파일에 적용합니다.']) }}
         {{ macros.setting_input_int('plugin_manager_max_extracted_mb', '해제 후 최대 크기(MB)', value=arg.get('plugin_manager_max_extracted_mb', '500'), desc=['ZIP 폭탄과 비정상 패키지를 차단합니다.']) }}
