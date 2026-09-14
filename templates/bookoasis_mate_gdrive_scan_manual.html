@@ -7,6 +7,11 @@
     <img src="{{ url_for('bookoasis_mate.static', filename='img/manual/gdrive-change-workflow.svg') }}" alt="변경 감지 흐름" loading="lazy">
     <figcaption>현재 Mate 버전 기준 개념도입니다. 세부 설정과 제약은 아래 안내를 확인하세요.</figcaption>
   </figure>
+  <details class="mt-3">
+    <summary>상세 흐름 보기 · 입력 방식 / 이벤트 큐 / 스캔 처리</summary>
+    <p class="mt-2"><a href="{{ url_for('bookoasis_mate.static', filename='img/manual/gdrive-change-detail.svg') }}" target="_blank" rel="noopener">상세 구성도 원본 열기</a></p>
+    <div style="overflow-x:auto" tabindex="0" role="region" aria-label="Google Drive 상세 구성도 가로 스크롤"><img src="{{ url_for('bookoasis_mate.static', filename='img/manual/gdrive-change-detail.svg') }}" alt="Google Drive 입력 방식별 이벤트 수집, 영속 큐, 경로 검증, BookOasis 스캔의 담당 영역별 상세 흐름" style="width:100%;min-width:1100px;height:auto" loading="lazy"></div>
+  </details>
 </div>
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <div class="doctor-section doctor-card">
