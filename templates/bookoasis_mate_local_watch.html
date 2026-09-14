@@ -62,6 +62,12 @@
 <div class="tab-pane fade" id="local_watch_manual" role="tabpanel" aria-labelledby="local_manual_tab">
 <div class="doctor-card doctor-section">
   <h4>사용 매뉴얼</h4>
+  <details class="mb-3">
+    <summary>상세 흐름 보기 · 감지 / 저장 기준 / 이벤트 큐 / 스캔</summary>
+    <p class="mt-2"><a href="{{ url_for('bookoasis_mate.static', filename='img/manual/local-watch-detail.svg') }}" target="_blank" rel="noopener">상세 구성도 원본 열기</a></p>
+    <div style="overflow-x:auto" tabindex="0" role="region" aria-label="로컬 감지 상세 구성도 가로 스크롤"><img src="{{ url_for('bookoasis_mate.static', filename='img/manual/local-watch-detail.svg') }}" alt="로컬 감지 프로세스, 저장 기준 복원, 이벤트 큐 저장 확인, BookOasis 스캔의 담당 영역별 상세 흐름" style="width:100%;min-width:1100px;height:auto" loading="lazy"></div>
+  </details>
+  <a href="{{ url_for('bookoasis_mate.static', filename='img/manual/local-watch-workflow.svg') }}" target="_blank" rel="noopener"><img src="{{ url_for('bookoasis_mate.static', filename='img/manual/local-watch-workflow.svg') }}" alt="로컬 폴더 감지와 저장 기준 복원 흐름. 클릭하면 원본을 엽니다." style="width:100%;height:auto" loading="lazy"></a>
   <ol>
     <li>감시 폴더를 FlaskFarm 컨테이너에 마운트하고, 동일 자료를 BookOasis 보관함에도 연결합니다.</li>
     <li>Mate 경로와 BookOasis 경로를 입력합니다. 예를 들어 <code>/watch/books</code> → <code>/data/books</code>입니다.</li>
@@ -218,7 +224,21 @@ function localStatus() {
       if (item.status === 'completed' || item.status === 'failed') actions.append($('<button class="btn btn-sm btn-outline-danger">삭제</button>').on('click', function() {
         if (confirm('#' + item.id + ' 이벤트 기록만 삭제할까요? 실제 파일은 삭제하지 않습니다.')) localRequest('delete', {id:item.id}, localStatus);
       }));
-      if (item.status === 'failed') actions.append($('<button class="btn btn-sm btn-outline-primary">재시도</button>').on('click', function() { localRequest('retry', {id:item.id}, localStatus); }));
+      if (item.status === 'failed') {
+        actions.append($('<button class="btn btn-sm btn-outline-primary">재시도</button>').on('click', function() { localRequest('retry', {id:item.id}, localStatus); }));
+        actions.append($('<button class="btn btn-sm btn-outline-primary">동일 오류 일괄 재시도</button>').on('click', function() {
+          localRequest('failed_retry_preview', {id:item.id}, function(ret) {
+            if (ret.ret !== 'success') return;
+            var data = ret.data || {};
+            if (!data.eligible) { alert('현재 감시 경로에 재시도할 대상이 없습니다.'); return; }
+            if (!confirm('검색·페이지와 관계없이 동일 오류 ' + data.matched + '건 중 ' + data.eligible + '건을 재시도합니다. 제외 ' + data.excluded + '건.\n시간 초과 건은 서버에서 스캔이 계속 진행 중일 수 있습니다. BookOasis 작업·로그를 확인하셨나요? 중복 스캔될 수 있습니다.')) return;
+            localRequest('failed_retry_batch', {id:item.id,confirm:'true'}, function(result) {
+              if (result.ret === 'success') alert(((result.data || {}).updated || 0) + '건을 재시도 큐에 등록했습니다. 작업이 중지 상태면 이어서 시작하세요.');
+              localStatus();
+            });
+          });
+        }));
+      }
       tr.append(actions); $('#local_events').append(tr);
     });
     $('#local_empty').prop('hidden', !!(list.items || []).length);

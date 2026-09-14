@@ -300,6 +300,26 @@ class ModuleLocalWatch(PluginModuleBase):
                         action=req.form.get("action", ""), status=req.form.get("status", ""), search=req.form.get("search", "")) if self.model else {}}})
             elif command == "retry":
                 self.model.retry_many([int(req.form["id"])])
+            elif command in {"failed_retry_preview", "failed_retry_batch"}:
+                seed = self.model.failed(req.form.get('id'))
+                if not seed or not seed.get('error'):
+                    raise ValueError('최종 실패 이벤트와 오류 내용을 확인해 주세요.')
+                config = self._config()
+                candidates = self.model.failed_matching_error(seed['error'])
+                ids = []
+                for event in candidates:
+                    try:
+                        checked = validate_event(event['action'], event['item_type'], event['path'], event.get('removed_path'), config['extensions'])
+                        if checked['relevant'] and any(event['path'] == root['target'] or event['path'].startswith(root['target'] + '/') for root in config['roots']):
+                            ids.append(event['id'])
+                    except (ValueError, KeyError):
+                        continue
+                data = {'matched': len(candidates), 'eligible': len(ids), 'excluded': len(candidates) - len(ids)}
+                if command == 'failed_retry_batch':
+                    if req.form.get('confirm') != 'true':
+                        raise ValueError('중복 스캔 가능성을 확인한 뒤 일괄 재시도해 주세요.')
+                    data['updated'] = self.model.retry_many(ids)
+                return jsonify({'ret': 'success', 'data': data})
             elif command == "delete":
                 if not self.model.delete_terminal(int(req.form["id"])):
                     raise ValueError("완료·최종 실패 이벤트만 삭제할 수 있습니다. 상태를 새로 확인해 주세요.")
