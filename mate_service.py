@@ -2505,7 +2505,7 @@ class BookOasisMateService:
 
     def mate_work_dir(self):
         value = self.P.ModelSetting.get("mate_work_dir") or getattr(
-            self.P, "mate_default_work_dir", "/data/bookoasis_mate/work"
+            self.P, "mate_default_work_dir", "/data/plugins/bookoasis_mate/work"
         )
         return Path(str(value)).expanduser().resolve()
 

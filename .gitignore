@@ -25,6 +25,10 @@ data/
 logs/
 backups/
 
+# 작업 폴더만 배포하고 실제 작업 데이터는 추적하지 않습니다.
+/work/*
+!/work/.gitkeep
+
 # Codex 로컬 개발 기록
 plan.md
 checklist.md

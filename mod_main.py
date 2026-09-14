@@ -57,7 +57,7 @@ class ModuleMain(PluginModuleBase):
             "main_auto_start": "False",
             "main_interval": "60",
         }
-        P.mate_default_work_dir = str(Path(getattr(F, "path_data", None) or "/data") / "bookoasis_mate" / "work")
+        P.mate_default_work_dir = str(Path(getattr(F, "path_data", None) or "/data") / "plugins" / "bookoasis_mate" / "work")
         P.bookoasis_mate_service = BookOasisMateService(P)
 
     @property

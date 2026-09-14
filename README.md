@@ -55,7 +55,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/colaiuta77/bookoasis_mat
 
 ## Mate 공통 작업 경로
 
-기본 설정의 **Mate 작업 디렉터리**에서 FF 컨테이너에 보이는 절대 경로를 지정합니다. 기본값은 FlaskFarm 데이터 경로 아래 `bookoasis_mate/work`입니다. 일반적인 `/data` 설치에서는 `/data/bookoasis_mate/work`입니다.
+기본 설정의 **Mate 작업 디렉터리**에서 FF 컨테이너에 보이는 절대 경로를 지정합니다. 기본값은 FlaskFarm 데이터 경로 아래 `plugins/bookoasis_mate/work`입니다. 일반적인 `/data` 설치에서는 `/data/plugins/bookoasis_mate/work`입니다. 저장소에는 `work/.gitkeep`만 포함하여 내려받을 때 폴더가 생성되며 실제 작업 파일은 Git에서 제외합니다. 플러그인 삭제·재설치 시 이 폴더도 지워질 수 있으므로 필요한 백업은 별도 보관하세요.
 
 - `migration` 하위는 카테고리·통DB 이관 패키지, 백업과 임시 파일에 사용합니다.
 - `jobs` 하위는 상태 요약·라이브러리 통계·표지 검사·일괄 재스캔·고아 표지 정리의 상태와 로그에 사용합니다.
