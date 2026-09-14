@@ -5,6 +5,7 @@ import copy
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import ssl
@@ -21,8 +22,10 @@ from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_ope
 
 try:
     from .plugin_discovery import GitHubPluginDiscovery
+    from .bookoasis_env import read_env_file
 except ImportError:
     from plugin_discovery import GitHubPluginDiscovery
+    from bookoasis_env import read_env_file
 
 
 class PluginManagerError(RuntimeError):
@@ -30,6 +33,10 @@ class PluginManagerError(RuntimeError):
 
 
 class PluginManagerStopped(PluginManagerError):
+    pass
+
+
+class PluginInstallConfigurationError(PluginManagerError):
     pass
 
 
@@ -109,6 +116,14 @@ class GiteaClient:
         except (UnicodeError, json.JSONDecodeError) as error:
             raise PluginManagerError("Gitea API 응답을 해석할 수 없습니다.") from error
         return {"success": True, "server": urlparse(self.base_url).netloc, "username": str(data.get("login") or self.username or "")}
+
+    def repository_topics(self, owner, repository):
+        path = f"/api/v1/repos/{quote(owner, safe='')}/{quote(repository, safe='')}/topics"
+        with self._open(path) as response:
+            payload = response.read(262145)
+        if len(payload) > 262144:
+            raise ValueError("Repository response too large")
+        return json.loads(payload.decode("utf-8"))["topics"]
 
     def search_repositories(self, topic):
         query = urlencode(
@@ -430,6 +445,7 @@ class BookOasisPluginManager:
         )[:5]
         return {
             "plugin_root": plugin_root,
+            "bookoasis_root_path": root,
             "work_dir": work_dir,
             "backup_keep": cls._as_int(
                 raw.get("plugin_manager_backup_keep"), 5, 1, 30
@@ -2120,7 +2136,43 @@ class BookOasisPluginManager:
             shutil.rmtree(stale, ignore_errors=True)
         return str(backup)
 
+    def _repository_topics(self, source, settings):
+        kind = source.get("repository_kind")
+        repository = source.get("source")
+        if kind == "github":
+            owner, repo = self.parse_github_url(repository)
+            data = self._discovery._fetch_json(f"https://api.github.com/repos/{owner}/{repo}/topics")
+            topics = data["names"]
+        elif kind == "gitea":
+            owner, repo = self.parse_gitea_repository(repository)
+            topics = self._gitea_client(settings, source.get("gitea_server_id")).repository_topics(owner, repo)
+        else:
+            raise ValueError("Unknown repository type")
+        if not isinstance(topics, list) or not all(isinstance(topic, str) for topic in topics):
+            raise ValueError("Invalid repository topics")
+        return topics
+
+    def _check_install_configuration(self, source, settings):
+        if source.get("repository_kind") == "zip":
+            return
+        try:
+            topics = self._repository_topics(source, settings)
+            if "security-bookoasis-plugin" not in topics:
+                return
+            content = read_env_file(settings.get("bookoasis_root_path"))["content"]
+            value = ""
+            for line in content.splitlines():
+                match = re.match(r"^\s*(?:export\s+)?ADD_PLUGIN\s*=(.*)$", line)
+                if match:
+                    value = " ".join(shlex.split(match.group(1), comments=True, posix=True))
+            allowed = "security-bookoasis-plugin" in re.split(r"[,;\s]+", value)
+        except Exception:
+            raise PluginInstallConfigurationError("설치에 필요한 서버 구성을 확인할 수 없습니다. 관리자에게 문의해 주세요.") from None
+        if not allowed:
+            raise PluginInstallConfigurationError("설치에 필요한 서버 구성을 확인할 수 없습니다. 관리자에게 문의해 주세요.") from None
+
     def _install_candidate(self, candidate, manifest, settings, job_id):
+        self._check_install_configuration(manifest, settings)
         plugin_root = self._safe_resolve(settings["plugin_root"], "BookOasis plugins/metadata 경로", create=True)
         work_root = self._safe_resolve(settings["work_dir"], "플러그인 작업 디렉터리", create=True)
         try:
@@ -2245,6 +2297,11 @@ class BookOasisPluginManager:
         job_dir = None
         try:
             self._set_job(job_id, status="running", status_label="진행 중", percent=2)
+            if install:
+                self._check_install_configuration({
+                    "repository_kind": spec["kind"], "source": spec.get("repository"),
+                    "gitea_server_id": spec.get("gitea_server_id", ""),
+                }, settings)
             work_root = self._safe_resolve(settings["work_dir"], "플러그인 작업 디렉터리", create=True)
             job_dir = work_root / "jobs" / job_id
             job_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -2283,6 +2340,8 @@ class BookOasisPluginManager:
             manifest.update(
                 {
                     "source": spec.get("repository") or spec.get("filename") or "ZIP",
+                    "repository_kind": spec["kind"],
+                    "gitea_server_id": spec.get("gitea_server_id", ""),
                     "ref": spec.get("ref", ""),
                     "trusted": bool(spec.get("trusted")),
                     "allow_shell_scripts": allow_shell_scripts,
@@ -2320,7 +2379,7 @@ class BookOasisPluginManager:
                 shutil.rmtree(job_dir, ignore_errors=True)
             self._finish_job(job_id, settings, "stopped", str(error), error=str(error))
         except Exception as error:
-            if self.logger:
+            if self.logger and not isinstance(error, PluginInstallConfigurationError):
                 self.logger.exception("[BookOasisMate] 플러그인 패키지 작업 실패")
             self._append_log(job_id, str(error))
             if job_dir:
@@ -2367,7 +2426,7 @@ class BookOasisPluginManager:
         except PluginManagerStopped as error:
             self._finish_job(job_id, settings, "stopped", str(error), error=str(error))
         except Exception as error:
-            if self.logger:
+            if self.logger and not isinstance(error, PluginInstallConfigurationError):
                 self.logger.exception("[BookOasisMate] 검사 완료 플러그인 설치 실패")
             self._append_log(job_id, str(error))
             self._finish_job(
