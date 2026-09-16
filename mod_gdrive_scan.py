@@ -71,6 +71,8 @@ class ModuleGDriveScan(PluginModuleBase):
         self._last_cleanup_monotonic = 0.0
         self._last_builtin_poll_monotonic = 0.0
         self._builtin_retry = {}
+        self._scan_client = None
+        self._scan_client_config = None
         self._worker_state = {
             "running": False,
             "last_started_at": None,
@@ -838,14 +840,17 @@ class ModuleGDriveScan(PluginModuleBase):
 
     def _path_scan_callback(self, db_type, library_id, library_name, relative_path):
         settings = self._settings()
-        client = BookOasisClient(
-            settings["bookoasis_url"],
-            settings["api_timeout"],
-            username=settings["bookoasis_username"],
-            password=settings["bookoasis_password"],
+        config = (
+            settings["bookoasis_url"], settings["api_timeout"],
+            settings["bookoasis_username"], settings["bookoasis_password"],
         )
+        # 단일 Drive 작업자에서 세션을 재사용하되 접속 설정 변경 시 교체합니다.
+        if self._scan_client is None or self._scan_client_config != config:
+            self._scan_client = BookOasisClient(*config)
+            self._scan_client.should_stop = self._stop_event.is_set
+            self._scan_client_config = config
+        client = self._scan_client
         if settings["bookoasis_username"] and settings["bookoasis_password"]:
-            client.should_stop = self._stop_event.is_set
             response = client.scan_library_path(
                 library_id,
                 relative_path,
@@ -855,8 +860,12 @@ class ModuleGDriveScan(PluginModuleBase):
             )
             response = {**response, "mode": "admin_scan_path"}
         else:
-            response = {"success": False, "http_status": 404}
-        if not response.get("success") and response.get("http_status") in {404, 405} and not response.get("outcome_unknown"):
+            response = {"success": False, "http_status": 404, "message": "HTTP 오류 404"}
+        # 경로/보관함 없음 등 구체적인 404는 API 미지원이 아니므로 재전송하지 않습니다.
+        unsupported_api = response.get("http_status") == 405 or (
+            response.get("http_status") == 404 and response.get("message") == "HTTP 오류 404"
+        )
+        if not response.get("success") and unsupported_api and not response.get("outcome_unknown"):
             if self._stop_event.is_set():
                 return {"success": False, "cancelled": True, "message": "작업 중지"}
             response = client.request_scan_path(
