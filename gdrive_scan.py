@@ -539,12 +539,14 @@ class GDriveScanProcessor:
         )
         self.logger = logger
         self.should_stop = should_stop or (lambda: False)
-        self.refresh_vfs = refresh_vfs
+        builtin = self.settings.get("gdrive_scan_input_mode") == "builtin"
+        # 자체 감지는 이미 BookOasis 경로를 전달하며 VFS 갱신도 스캔 엔진에 맡깁니다.
+        self.refresh_vfs = refresh_vfs and not builtin
         self.path_mappings = parse_path_mappings(
-            self.settings.get("gdrive_scan_path_mappings", "")
+            "" if builtin else self.settings.get("gdrive_scan_path_mappings", "")
         )
         self.vfs_rules = parse_vfs_rules(
-            self.settings.get("gdrive_scan_vfs_rules", "")
+            self.settings.get("gdrive_scan_vfs_rules", "") if self.refresh_vfs else ""
         )
         self.libraries = self._load_libraries()
 
@@ -586,7 +588,7 @@ class GDriveScanProcessor:
             warning = self._duplicate_prefix_error(mapped_path, repeated_prefix)
         elif library is None:
             warning = "변환 경로에 해당하는 BookOasis 보관함을 찾을 수 없습니다."
-        elif vfs_rule is None:
+        elif self.refresh_vfs and vfs_rule is None:
             warning = "변환 경로에 일치하는 rclone VFS 규칙이 없습니다."
         return {
             "received_path": received_path,

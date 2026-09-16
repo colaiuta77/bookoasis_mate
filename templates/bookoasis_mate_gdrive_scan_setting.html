@@ -13,7 +13,7 @@
   <div id="gdrive_scan_basic_intro">
   <div class="doctor-section doctor-card">
     <h3>Google Drive 변경 감지 연동</h3>
-    <p class="doctor-muted">gd-poller 이벤트를 먼저 FlaskFarm DB에 저장하고 버퍼 시간이 지난 뒤 BookOasis 개별 경로 스캔을 실행합니다. 삭제·이동의 이전 경로만 rclone VFS에서 제거하며 현재 경로 갱신은 BookOasis가 담당합니다.</p>
+    <p class="doctor-muted">변경 이벤트를 먼저 FlaskFarm DB에 저장하고 버퍼 시간이 지난 뒤 BookOasis 스캔을 요청합니다. Mate 자체 감지(Changes·Activity)는 VFS 갱신을 BookOasis에 맡기며, 삭제·이동의 이전 경로도 상위 폴더를 스캔 대상으로 전달합니다. BookOasis 보관함의 원격 경로·VFS 갱신 설정을 확인해 주세요. 외부 연동은 이전 경로의 VFS 캐시 제거에 Mate의 VFS 규칙을 사용합니다.</p>
   </div>
 
   {{ macros.setting_checkbox('gdrive_scan_enabled', '연동 사용', value=arg['gdrive_scan_enabled'], desc=['꺼져 있으면 외부 이벤트 API가 503으로 응답합니다.']) }}
