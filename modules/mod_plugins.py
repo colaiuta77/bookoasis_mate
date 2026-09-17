@@ -354,7 +354,10 @@ class ModulePlugins(PluginModuleBase):
                 )
                 return jsonify({"ret": "success" if data.get("success") else "warning", "msg": data.get("message") or data.get("error") or "", "data": data})
             if command == "runtime_update":
-                data = P.bookoasis_mate_service.sample_update_plugin(req.form.get("plugin_id"))
+                data = self.manager.run_runtime_update(
+                    req.form.get("plugin_id"),
+                    P.bookoasis_mate_service.sample_update_plugin,
+                )
                 return jsonify({"ret": "success" if data.get("success") else "warning", "msg": data.get("message") or data.get("error") or "", "data": data})
             if command == "discovery":
                 return jsonify({"ret": "success", "data": self.manager.discovery(settings)})

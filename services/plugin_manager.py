@@ -328,6 +328,7 @@ class BookOasisPluginManager:
         self._lock = threading.RLock()
         self._job = None
         self._auto_update_running = False
+        self._runtime_update_running = False
         self._stop_event = threading.Event()
         self._prepared = {}
         self._discovery = GitHubPluginDiscovery()
@@ -1387,7 +1388,7 @@ class BookOasisPluginManager:
             raise PluginManagerError("BookOasis Mate 자체 플러그인은 이 화면에서 삭제할 수 없습니다.")
         normalized = self.normalized_settings(settings)
         with self._lock:
-            if self._auto_update_running or (self._job and self._job.get("status") in self.ACTIVE_STATES):
+            if self._runtime_update_running or self._auto_update_running or (self._job and self._job.get("status") in self.ACTIVE_STATES):
                 raise PluginManagerError("다른 플러그인 작업이 진행 중입니다.")
             root_input = Path(normalized["plugin_root"]).expanduser()
             if root_input.is_symlink():
@@ -1650,13 +1651,28 @@ class BookOasisPluginManager:
         with self._lock:
             data = copy.deepcopy(self._job) if self._job else self._empty_status()
             data["auto_update_running"] = self._auto_update_running
+            data["runtime_update_running"] = self._runtime_update_running
             return data
 
     def work_dir_busy(self):
         with self._lock:
-            return self._auto_update_running or any(job and job.get("status") == "running" for job in (
+            return self._runtime_update_running or self._auto_update_running or any(job and job.get("status") == "running" for job in (
                 self._job, self._discovery_job, self._installed_update_job,
             ))
+
+    def run_runtime_update(self, plugin_id, updater):
+        plugin_id = self._validate_plugin_id(plugin_id)
+        with self._lock:
+            if self._runtime_update_running or self._auto_update_running or (
+                self._job and self._job.get("status") in self.ACTIVE_STATES
+            ):
+                raise PluginManagerError("다른 플러그인 작업이 진행 중입니다.")
+            self._runtime_update_running = True
+        try:
+            return updater(plugin_id)
+        finally:
+            with self._lock:
+                self._runtime_update_running = False
 
     @staticmethod
     def _empty_status():
@@ -1708,7 +1724,7 @@ class BookOasisPluginManager:
 
     def _begin_job(self, operation, source, runner, args):
         with self._lock:
-            if self._auto_update_running or (self._job and self._job.get("status") in self.ACTIVE_STATES):
+            if self._runtime_update_running or self._auto_update_running or (self._job and self._job.get("status") in self.ACTIVE_STATES):
                 raise PluginManagerError("다른 플러그인 작업이 진행 중입니다.")
             self._auto_update_running = operation == "auto_update"
             job_id = uuid.uuid4().hex
@@ -1819,6 +1835,7 @@ class BookOasisPluginManager:
 
     def _run_auto_updates(self, job_id, settings):
         normalized = self.normalized_settings(settings)
+        registered_ids = set(self._known_catalog_items(settings, include_discovery=False))
         counts = {"completed": 0, "failed": 0, "skipped": 0}
         try:
             for item in self.installed(settings):
@@ -1827,6 +1844,10 @@ class BookOasisPluginManager:
                 reason = ""
                 if plugin_id in self.PROTECTED_PLUGIN_IDS or not item.get("repository"):
                     reason = "자동 업데이트 대상 저장소가 없습니다."
+                elif plugin_id not in registered_ids:
+                    reason = "Topic에서 발견한 저장소는 자동 업데이트하지 않습니다."
+                elif not item.get("managed"):
+                    reason = "업데이트 관리 정보가 없는 플러그인입니다."
                 elif item.get("version_error"):
                     reason = "최신 버전 확인에 실패했습니다."
                 elif item.get("source") == "gitea" and not any(server["enabled"] and server["id"] == item.get("gitea_server_id") for server in normalized["gitea_servers"]):
@@ -2459,6 +2480,7 @@ class BookOasisPluginManager:
                 settings,
                 "failed",
                 "플러그인 패키지 처리에 실패했습니다.",
+                {"plugin_id": str(spec.get("plugin_id") or "")},
                 error=str(error),
             )
 
