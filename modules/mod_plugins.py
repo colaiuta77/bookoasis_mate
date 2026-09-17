@@ -32,6 +32,7 @@ class ModulePlugins(PluginModuleBase):
             "plugin_manager_gitea_allow_http": "False",
             "plugin_manager_gitea_servers": "[]",
             "plugins_auto_start": "False",
+            "plugin_manager_auto_update": "False",
             "plugins_interval": "720",
         }
         self.manager = BookOasisPluginManager(P.logger)
@@ -185,14 +186,14 @@ class ModulePlugins(PluginModuleBase):
             P.logic.scheduler_stop(self.name)
         except Exception:
             pass
-        if P.ModelSetting.get_bool("plugins_auto_start"):
+        if P.ModelSetting.get_bool("plugins_auto_start") or P.ModelSetting.get_bool("plugin_manager_auto_update"):
             P.logic.scheduler_start(self.name)
 
     def scheduler_function(self):
-        self.manager.start_installed_update_refresh(self._settings(), force=True)
+        self.manager.start_installed_update_refresh(self._settings(), force=True, auto_update=True)
 
     def setting_save_after(self, change_list):
-        if any(key in change_list for key in ("plugins_auto_start", "plugins_interval")):
+        if any(key in change_list for key in ("plugins_auto_start", "plugins_interval", "plugin_manager_auto_update")):
             self._reset_scheduler()
 
     def process_ajax(self, command, req):
@@ -223,6 +224,7 @@ class ModulePlugins(PluginModuleBase):
                     "plugin_manager_gitea_verify_ssl",
                     "plugin_manager_gitea_allow_http",
                     "plugins_auto_start",
+                    "plugin_manager_auto_update",
                     "plugins_interval",
                 )
                 candidate = dict(settings)
@@ -244,6 +246,8 @@ class ModulePlugins(PluginModuleBase):
                 for key in allowed:
                     if key in req.form:
                         P.ModelSetting.set(key, req.form.get(key))
+                if self.manager._as_bool(candidate.get("plugin_manager_auto_update")):
+                    P.ModelSetting.set("plugins_auto_start", "True")
                 if req.form.get("plugin_manager_gitea_token_clear") == "true":
                     P.ModelSetting.set("plugin_manager_gitea_token", "")
                 elif token:
@@ -252,7 +256,7 @@ class ModulePlugins(PluginModuleBase):
                 return jsonify({"ret": "success", "msg": "플러그인 관리 설정을 저장했습니다."})
             if command == "gitea_test":
                 data = self.manager.test_gitea_connection(settings)
-                return jsonify({"ret": "success", "msg": "Gitea 연결과 사용자 인증을 확인했습니다. 저장소 접근 권한은 조회 시 확인합니다.", "data": data})
+                return jsonify({"ret": "success", "msg": "Gitea 저장소 검색 API 연결을 확인했습니다. 개별 저장소 접근 권한은 사용 시 확인합니다.", "data": data})
             if command == "gitea_servers":
                 return jsonify({"ret": "success", "data": self.manager.public_gitea_servers(settings)})
             if command == "gitea_server_add":
@@ -274,7 +278,7 @@ class ModulePlugins(PluginModuleBase):
                 data = self.manager.test_gitea_connection(
                     settings, req.form.get("server_id")
                 )
-                return jsonify({"ret": "success", "msg": "Gitea 연결과 사용자 인증을 확인했습니다. 저장소 접근 권한은 조회 시 확인합니다.", "data": data})
+                return jsonify({"ret": "success", "msg": "Gitea 저장소 검색 API 연결을 확인했습니다. 개별 저장소 접근 권한은 사용 시 확인합니다.", "data": data})
             if command in {"gitea_server_toggle", "gitea_server_delete"}:
                 servers = self.manager.update_gitea_server(
                     settings,
@@ -350,7 +354,10 @@ class ModulePlugins(PluginModuleBase):
                 )
                 return jsonify({"ret": "success" if data.get("success") else "warning", "msg": data.get("message") or data.get("error") or "", "data": data})
             if command == "runtime_update":
-                data = P.bookoasis_mate_service.sample_update_plugin(req.form.get("plugin_id"))
+                data = self.manager.run_runtime_update(
+                    req.form.get("plugin_id"),
+                    P.bookoasis_mate_service.sample_update_plugin,
+                )
                 return jsonify({"ret": "success" if data.get("success") else "warning", "msg": data.get("message") or data.get("error") or "", "data": data})
             if command == "discovery":
                 return jsonify({"ret": "success", "data": self.manager.discovery(settings)})
