@@ -66,9 +66,12 @@ class ModuleGDriveScan(PluginModuleBase):
         }
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
+        self._collector_wake_event = threading.Event()
         self._worker_thread = None
+        self._collector_thread = None
         self._worker_lock = threading.RLock()
         self._queue_maintenance_lock = threading.Lock()
+        self._collection_lock = threading.Lock()
         self._last_cleanup_monotonic = 0.0
         self._last_builtin_poll_monotonic = 0.0
         self._builtin_retry = {}
@@ -80,6 +83,11 @@ class ModuleGDriveScan(PluginModuleBase):
             "last_finished_at": None,
             "last_error": "",
             "last_batch_size": 0,
+        }
+        self._collector_state = {
+            "enabled": False, "running": False, "last_started_at": None,
+            "last_finished_at": None, "last_error": "", "last_batch_size": 0,
+            "current_root": 0, "root_count": 0,
         }
 
     @property
@@ -332,7 +340,12 @@ class ModuleGDriveScan(PluginModuleBase):
             return jsonify({"ret": "fail", "msg": "변경 이벤트 저장에 실패했습니다."}), 500
 
     def process_ajax(self, command, req):
+        collection_locked = False
         try:
+            if command in {"builtin_test", "builtin_reset"}:
+                collection_locked = self._collection_lock.acquire(blocking=False)
+                if not collection_locked:
+                    raise ValueError("변경 수집 중입니다. 작업 중지 후 수집 종료를 기다린 다음 다시 시도해 주세요.")
             if command == "rclone_version":
                 settings = self._settings()
                 rclone_path = str(req.form.get("rclone_path") or "").strip()
@@ -526,7 +539,7 @@ class ModuleGDriveScan(PluginModuleBase):
                         "root_name": root.get("name") or client.root_id,
                     })
                 with self._worker_lock:
-                    self._worker_state["last_error"] = ""
+                    self._collector_state["last_error"] = ""
                 return jsonify({"ret": "success", "msg": f"rclone 토큰과 자체 변경 감지 설정 {len(checked)}개의 연결을 확인했습니다.", "data": {"roots": checked}})
             if command == "builtin_reset":
                 settings = self._settings()
@@ -605,7 +618,7 @@ class ModuleGDriveScan(PluginModuleBase):
             if command == "stop":
                 P.ModelSetting.set("gdrive_scan_enabled", "False")
                 self._stop_event.set()
-                self._wake_event.set()
+                self.wake_worker()
                 return jsonify({"ret": "success", "msg": "연동 사용을 끄고 중지를 요청했습니다. 현재 요청 결과를 저장한 뒤 멈춥니다."})
             if command == "delete":
                 deleted = self.model.delete_terminal(req.form.get("id"))
@@ -645,6 +658,9 @@ class ModuleGDriveScan(PluginModuleBase):
             return jsonify(
                 {"ret": "danger", "msg": "요청 처리에 실패했습니다. 로그를 확인해 주세요."}
             ), 500
+        finally:
+            if collection_locked:
+                self._collection_lock.release()
 
     def _validate_failed_paths(self, event, path, removed_path, processor=None):
         path = str(path or "").strip()
@@ -773,18 +789,44 @@ class ModuleGDriveScan(PluginModuleBase):
         return self._builtin_clients(settings)[0]
 
     def _poll_builtin_if_due(self, settings):
+        with self._worker_lock:
+            self._collector_state["enabled"] = bool(settings["gdrive_scan_enabled"] and settings["gdrive_scan_input_mode"] == "builtin")
         if self._stop_event.is_set() or not settings["gdrive_scan_enabled"] or settings["gdrive_scan_input_mode"] != "builtin":
             return 0
         now = time.monotonic()
         if self._last_builtin_poll_monotonic and now - self._last_builtin_poll_monotonic < settings["gdrive_scan_builtin_poll_seconds"]:
             return 0
-        self._last_builtin_poll_monotonic = now
+        with self._worker_lock:
+            self._collector_state.update(running=True, current_root=0, root_count=0,
+                                         last_started_at=datetime.now().isoformat(timespec="seconds"))
+        P.logger.info("[BookOasisMate] Google Drive 변경 수집을 시작합니다. 스캔 대기열은 별도로 처리합니다.")
+        try:
+            accepted = self._collect_builtin(settings)
+            with self._worker_lock:
+                self._collector_state["last_batch_size"] = accepted
+            return accepted
+        except Exception as error:
+            with self._worker_lock:
+                self._collector_state["last_error"] = str(error)
+            raise
+        finally:
+            # 긴 수집 직후 다시 수집을 시작하지 않도록 완료 시각을 기준으로 둡니다.
+            self._last_builtin_poll_monotonic = time.monotonic()
+            with self._worker_lock:
+                self._collector_state.update(running=False, last_finished_at=datetime.now().isoformat(timespec="seconds"))
+            self._wake_event.set()
+
+    def _collect_builtin(self, settings):
         if self.model is None or self.state_model is None or self.item_model is None:
             raise RuntimeError("자체 변경 감지 상태 모델을 사용할 수 없습니다.")
         accepted = 0
         errors = []
         waiting = False
-        for client in self._builtin_clients(settings):
+        clients = self._builtin_clients(settings)
+        with self._worker_lock:
+            self._collector_state["root_count"] = len(clients)
+        now = time.monotonic()
+        for index, client in enumerate(clients, 1):
             if self._stop_event.is_set():
                 break
             client.should_stop = self._stop_event.is_set
@@ -793,6 +835,8 @@ class ModuleGDriveScan(PluginModuleBase):
             if now < retry_at:
                 waiting = True
                 continue
+            with self._worker_lock:
+                self._collector_state["current_root"] = index
             watcher = GoogleDriveChangesWatcher(
                 client, self.state_model, self.item_model, self.model,
                 parse_extensions(settings["gdrive_scan_extensions"]),
@@ -820,7 +864,7 @@ class ModuleGDriveScan(PluginModuleBase):
             raise RuntimeError(" / ".join(errors))
         if not waiting:
             with self._worker_lock:
-                self._worker_state["last_error"] = ""
+                self._collector_state["last_error"] = ""
         return accepted
 
     def _scan_callback(self, db_type, library_id, library_name):
@@ -984,7 +1028,6 @@ class ModuleGDriveScan(PluginModuleBase):
             try:
                 self._cleanup_if_due(settings)
                 with self._queue_maintenance_lock:
-                    self._poll_builtin_if_due(self._settings())
                     processed = self._process_once()
                 if processed:
                     continue
@@ -996,17 +1039,36 @@ class ModuleGDriveScan(PluginModuleBase):
             self._wake_event.wait(interval)
             self._wake_event.clear()
 
+    def _collector_loop(self):
+        while not self._stop_event.is_set():
+            settings = self._settings()
+            try:
+                with self._collection_lock:
+                    self._poll_builtin_if_due(self._settings())
+            except Exception as error:
+                with self._worker_lock:
+                    self._collector_state["last_error"] = str(error)
+                P.logger.error(f"Google Drive 변경 수집 오류 (스캔 대기열 처리는 계속됩니다): {error}")
+                P.logger.error(traceback.format_exc())
+            self._collector_wake_event.wait(settings["gdrive_scan_worker_interval"])
+            self._collector_wake_event.clear()
+
     def _clear_pending_events(self):
         if self._settings()["gdrive_scan_enabled"]:
             raise ValueError("먼저 연동 설정에서 '연동 사용'을 끄고 저장해 주세요.")
-        if not self._queue_maintenance_lock.acquire(blocking=False):
-            raise ValueError("변경 수집 또는 스캔 배치가 실행 중입니다. 현재 작업이 끝난 뒤 다시 시도해 주세요.")
+        if not self._collection_lock.acquire(blocking=False):
+            raise ValueError("변경 수집이 실행 중입니다. 수집이 끝난 뒤 다시 시도해 주세요.")
         try:
-            if self._settings()["gdrive_scan_enabled"]:
-                raise ValueError("연동 사용이 켜져 있어 삭제할 수 없습니다.")
-            return self.model.clear_pending()
+            if not self._queue_maintenance_lock.acquire(blocking=False):
+                raise ValueError("스캔 배치가 실행 중입니다. 현재 작업이 끝난 뒤 다시 시도해 주세요.")
+            try:
+                if self._settings()["gdrive_scan_enabled"]:
+                    raise ValueError("연동 사용이 켜져 있어 삭제할 수 없습니다.")
+                return self.model.clear_pending()
+            finally:
+                self._queue_maintenance_lock.release()
         finally:
-            self._queue_maintenance_lock.release()
+            self._collection_lock.release()
 
     def _cleanup_if_due(self, settings):
         if self.model is None or not settings["gdrive_scan_auto_cleanup"]:
@@ -1027,27 +1089,31 @@ class ModuleGDriveScan(PluginModuleBase):
 
     def start_worker(self):
         with self._worker_lock:
-            if self._worker_thread is not None and self._worker_thread.is_alive():
+            scan_alive = self._worker_thread is not None and self._worker_thread.is_alive()
+            collect_alive = self._collector_thread is not None and self._collector_thread.is_alive()
+            if (scan_alive and collect_alive) or (self._stop_event.is_set() and (scan_alive or collect_alive)):
                 return False
             self._stop_event.clear()
-            self._wake_event.clear()
-            self._worker_thread = threading.Thread(
-                target=self._worker_loop,
-                name="bookoasis-mate-gdrive-scan",
-                daemon=True,
-            )
-            self._worker_thread.start()
+            if not scan_alive:
+                self._wake_event.clear()
+                self._worker_thread = threading.Thread(target=self._worker_loop, name="bookoasis-mate-gdrive-scan", daemon=True)
+                self._worker_thread.start()
+            if not collect_alive:
+                self._collector_wake_event.clear()
+                self._collector_thread = threading.Thread(target=self._collector_loop, name="bookoasis-mate-gdrive-collect", daemon=True)
+                self._collector_thread.start()
             return True
 
     def wake_worker(self):
         self._wake_event.set()
+        self._collector_wake_event.set()
 
     def stop_worker(self):
         self._stop_event.set()
-        self._wake_event.set()
-        worker = self._worker_thread
-        if worker is not None and worker.is_alive():
-            worker.join(timeout=5)
+        self.wake_worker()
+        for worker in (self._worker_thread, self._collector_thread):
+            if worker is not None and worker.is_alive():
+                worker.join(timeout=5)
 
     def worker_status(self):
         with self._worker_lock:
@@ -1055,7 +1121,9 @@ class ModuleGDriveScan(PluginModuleBase):
             data["alive"] = bool(
                 self._worker_thread is not None and self._worker_thread.is_alive()
             )
-            data["stopping"] = data["alive"] and self._stop_event.is_set()
+            data["collector"] = dict(self._collector_state)
+            data["collector"]["alive"] = bool(self._collector_thread is not None and self._collector_thread.is_alive())
+            data["stopping"] = (data["alive"] or data["collector"]["alive"]) and self._stop_event.is_set()
         return data
 
     def plugin_load(self):
