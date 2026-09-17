@@ -383,11 +383,16 @@ function renderGdriveEvents(data) {
     ' · 처리 ' + (counts.processing || 0) +
     ' · 실패 ' + (counts.failed || 0);
   var worker = data.worker || {};
+  var collector = worker.collector || {};
   document.getElementById('gdrive_worker_state').textContent =
     '연동 ' + (data.enabled ? '사용 중' : '꺼짐') +
-    ' · 작업자 ' + (worker.stopping ? '중지 요청 중' : (worker.alive ? '실행 중' : '중지')) +
+    ' · 스캔 ' + (worker.stopping ? '중지 요청 중' : (worker.alive ? (worker.running ? '처리 중' : '대기') : '중지')) +
+    (collector.enabled ? ' · 수집 ' + (worker.stopping ? '중지 요청 중' : (collector.alive ? (collector.running ? '진행 중' : '대기') : '중지')) : '') +
+    (collector.running && collector.root_count ? ' (' + collector.current_root + '/' + collector.root_count + ' 경로)' : '') +
+    (collector.running && collector.last_started_at ? ' · 수집 시작 ' + collector.last_started_at : '') +
     (worker.last_finished_at ? ' · 마지막 처리 ' + worker.last_finished_at : '') +
-    (worker.last_error ? ' · 최근 오류 ' + worker.last_error : '');
+    (collector.last_error ? ' · 수집 오류 ' + collector.last_error : '') +
+    (worker.last_error ? ' · 스캔 오류 ' + worker.last_error : '');
   renderGdrivePagination(data);
 }
 
