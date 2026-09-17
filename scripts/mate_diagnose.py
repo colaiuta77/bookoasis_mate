@@ -147,7 +147,7 @@ def container_probe(request):
         text = (root / "info.yaml").read_text(encoding="utf-8")[:16384]
         match = re.search(r'''(?m)^version:\s*["']?([\w.\-]+)''', text)
         return {"version": match.group(1) if match else "미확인", "git_present": (root / ".git").exists(),
-                "local_watch": (root / "local_folder_watch.py").is_file(),
+                "local_watch": (root / "services" / "local_folder_watch.py").is_file() or (root / "local_folder_watch.py").is_file(),
                 "duplicate_default_copy": str(root) != "/data/plugins/bookoasis_mate" and Path("/data/plugins/bookoasis_mate/info.yaml").is_file()}
     if mode == "http":
         class NoRedirect(HTTPRedirectHandler):

@@ -72,7 +72,7 @@ P = create_plugin_instance(setting)
 
 P.history_model = None
 try:
-    from .model_history import ModelScanHistory
+    from .models.model_history import ModelScanHistory
 
     P.history_model = ModelScanHistory
 except Exception as error:
@@ -84,7 +84,7 @@ P.local_folder_model = None
 P.gdrive_scan_state_model = None
 P.gdrive_item_state_model = None
 try:
-    from .model_gdrive_scan import (
+    from .models.model_gdrive_scan import (
         ModelGDriveItemState,
         ModelGDriveScanEvent,
         ModelGDriveScanState,
@@ -101,7 +101,7 @@ except Exception as error:
 
 P.library_statistics_model = None
 try:
-    from .model_library_statistics import ModelLibraryStatisticsSnapshot
+    from .models.model_library_statistics import ModelLibraryStatisticsSnapshot
 
     P.library_statistics_model = ModelLibraryStatisticsSnapshot
 except Exception as error:
@@ -110,23 +110,23 @@ except Exception as error:
 
 P.summary_snapshot_model = None
 try:
-    from .model_summary_snapshot import ModelSummarySnapshot
+    from .models.model_summary_snapshot import ModelSummarySnapshot
 
     P.summary_snapshot_model = ModelSummarySnapshot
 except Exception as error:
     P.logger.error(f"BookOasis Mate 상태 요약 스냅샷 모델을 초기화하지 못했습니다: {error}")
     P.logger.error(traceback.format_exc())
 
-from .mod_main import ModuleMain
-from .mod_database_migration import ModuleDatabaseMigration
-from .mod_gdrive_scan import ModuleGDriveScan
-from .mod_local_watch import ModuleLocalWatch
-from .mod_font import ModuleFont
-from .mod_migration import ModuleMigration
-from .mod_manual import ModuleManual
-from .mod_sql import ModuleSql
-from .mod_plugins import ModulePlugins
-from .mod_setting import ModuleSetting
+from .modules.mod_main import ModuleMain
+from .modules.mod_database_migration import ModuleDatabaseMigration
+from .modules.mod_gdrive_scan import ModuleGDriveScan
+from .modules.mod_local_watch import ModuleLocalWatch
+from .modules.mod_font import ModuleFont
+from .modules.mod_migration import ModuleMigration
+from .modules.mod_manual import ModuleManual
+from .modules.mod_sql import ModuleSql
+from .modules.mod_plugins import ModulePlugins
+from .modules.mod_setting import ModuleSetting
 
 P.set_module_list(
     [
