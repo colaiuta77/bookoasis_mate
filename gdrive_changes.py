@@ -3,11 +3,13 @@ import json
 import posixpath
 import shlex
 import subprocess
+import sys
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request, getproxies, urlopen
 
 
 DRIVE_API = "https://www.googleapis.com/drive/v3"
@@ -261,9 +263,40 @@ class GoogleDriveChangesClient:
         self.runner = runner or subprocess.run
         self.opener = opener or urlopen
         self._credentials = None
+        self._request_stage = {"stage": "credentials", "host": "", "attempt": 0}
         self.should_stop = lambda: False
         if not self.remote or not self.source_remote or not self.root_id or not self.local_root:
             raise ValueError("자체 변경 감지의 rclone 리모트, 감시 폴더 ID와 로컬 루트를 입력해 주세요.")
+
+    def network_diagnostics(self, error):
+        """요청 값이나 예외 메시지 없이 연결 실패 위치와 실행 환경만 반환합니다."""
+        errors = []
+        seen = set()
+        while error is not None and id(error) not in seen and len(errors) < 8:
+            seen.add(id(error))
+            reason = getattr(error, "reason", error)
+            errors.append({
+                "type": type(error).__name__,
+                "errno": getattr(reason, "errno", None),
+                "frames": [
+                    {"file": frame.filename.replace("\\", "/").rsplit("/", 1)[-1],
+                     "line": frame.lineno, "function": frame.name}
+                    for frame in traceback.extract_tb(error.__traceback__)
+                ],
+            })
+            error = error.__cause__ or error.__context__
+        monkey = sys.modules.get("gevent.monkey")
+        proxies = getproxies()
+        return {
+            **self._request_stage,
+            "timeout_seconds": self.api_timeout,
+            "proxy_configured": any(proxies.get(key) for key in ("http", "https", "all")),
+            "gevent_patched": {
+                name: bool(monkey and monkey.is_module_patched(name))
+                for name in ("socket", "ssl")
+            },
+            "errors": errors,
+        }
 
     def _run_json(self, *args):
         if self.should_stop() and args[:2] != ("config", "update"):
@@ -320,6 +353,7 @@ class GoogleDriveChangesClient:
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             method="POST",
         )
+        self._request_stage = {"stage": "oauth_refresh", "host": "oauth2.googleapis.com", "attempt": 1}
         try:
             if self.should_stop():
                 raise InterruptedError("변경 수집 중지")
@@ -376,6 +410,7 @@ class GoogleDriveChangesClient:
         for attempt in range(2):
             if self.should_stop():
                 raise InterruptedError("변경 수집 중지")
+            self._request_stage = {"stage": "credentials", "host": "", "attempt": attempt + 1}
             token, drive_id = self._access()
             query = dict(params or {})
             if path.startswith("changes") or path.startswith("files/"):
@@ -391,6 +426,13 @@ class GoogleDriveChangesClient:
                 headers={"Authorization": f"Bearer {token}", "User-Agent": "BookOasisMate/1.0",
                          "Content-Type": "application/json"},
             )
+            self._request_stage = {
+                "stage": "activity_query" if activity_body is not None else (
+                    "file_lookup" if path.startswith("files/") else "changes_query"
+                ),
+                "host": "driveactivity.googleapis.com" if activity_body is not None else "www.googleapis.com",
+                "attempt": attempt + 1,
+            }
             try:
                 if self.should_stop():
                     raise InterruptedError("변경 수집 중지")

@@ -1,4 +1,5 @@
 # gd-poller 이벤트 수신 API와 영속 큐 기반 BookOasis 스캔 작업자를 제공합니다.
+import json
 import random
 import threading
 import time
@@ -801,6 +802,10 @@ class ModuleGDriveScan(PluginModuleBase):
                 accepted += watcher.poll_once()
                 self._builtin_retry.pop(key, None)
             except Exception as error:
+                P.logger.error(
+                    "[BookOasisMate] Google API 연결 진단 "
+                    + json.dumps(client.network_diagnostics(error), ensure_ascii=False)
+                )
                 if isinstance(error, GoogleDriveApiError) and (
                     error.status_code == 429 or error.reason in {"userRateLimitExceeded", "rateLimitExceeded"}
                 ):
