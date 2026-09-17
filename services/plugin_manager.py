@@ -107,15 +107,17 @@ class GiteaClient:
             raise PluginManagerError("Gitea 서버에 연결할 수 없습니다. 주소·포트·방화벽과 서버 실행 상태를 확인하세요.") from None
 
     def test_connection(self):
-        with self._open("/api/v1/user") as response:
+        with self._open("/api/v1/repos/search?limit=1&private=true") as response:
             payload = response.read(262145)
         if len(payload) > 262144:
-            raise PluginManagerError("Gitea 사용자 응답이 허용 크기를 초과했습니다.")
+            raise PluginManagerError("Gitea 저장소 응답이 허용 크기를 초과했습니다.")
         try:
             data = json.loads(payload.decode("utf-8"))
         except (UnicodeError, json.JSONDecodeError) as error:
             raise PluginManagerError("Gitea API 응답을 해석할 수 없습니다.") from error
-        return {"success": True, "server": urlparse(self.base_url).netloc, "username": str(data.get("login") or self.username or "")}
+        if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+            raise PluginManagerError("Gitea 저장소 조회 응답 형식이 올바르지 않습니다.")
+        return {"success": True, "server": urlparse(self.base_url).netloc, "username": self.username}
 
     def repository_topics(self, owner, repository):
         path = f"/api/v1/repos/{quote(owner, safe='')}/{quote(repository, safe='')}/topics"
@@ -325,6 +327,7 @@ class BookOasisPluginManager:
         self.logger = logger
         self._lock = threading.RLock()
         self._job = None
+        self._auto_update_running = False
         self._stop_event = threading.Event()
         self._prepared = {}
         self._discovery = GitHubPluginDiscovery()
@@ -445,6 +448,7 @@ class BookOasisPluginManager:
         )[:5]
         return {
             "plugin_root": plugin_root,
+            "auto_update": cls._as_bool(raw.get("plugin_manager_auto_update")),
             "bookoasis_root_path": root,
             "work_dir": work_dir,
             "backup_keep": cls._as_int(
@@ -1246,7 +1250,7 @@ class BookOasisPluginManager:
             status["status"] = "completed"
         return status
 
-    def start_installed_update_refresh(self, settings, force=False):
+    def start_installed_update_refresh(self, settings, force=False, auto_update=False):
         current = self.installed_update_status(settings)
         with self._lock:
             if self._installed_update_job.get("status") == "running":
@@ -1266,7 +1270,7 @@ class BookOasisPluginManager:
             snapshot = copy.deepcopy(self._installed_update_job)
         threading.Thread(
             target=self._run_installed_update_refresh,
-            args=(dict(settings or {}),),
+            args=(dict(settings or {}), auto_update),
             name="bookoasis-installed-plugin-update-check",
             daemon=True,
         ).start()
@@ -1274,7 +1278,7 @@ class BookOasisPluginManager:
         snapshot["fetched_at"] = current.get("fetched_at", "")
         return snapshot
 
-    def _run_installed_update_refresh(self, settings):
+    def _run_installed_update_refresh(self, settings, auto_update=False):
         errors = {}
         remote_items = {}
         try:
@@ -1323,6 +1327,14 @@ class BookOasisPluginManager:
                 "fetched_at_epoch": now,
             }
             self._write_installed_update_cache(settings, payload)
+            if auto_update and self.normalized_settings(settings)["auto_update"]:
+                try:
+                    self._begin_job("auto_update", "예약 업데이트", self._run_auto_updates, (settings,))
+                except PluginManagerError:
+                    self._record_history(self.normalized_settings(settings), {
+                        "operation": "auto_update", "status": "skipped",
+                        "message": "다른 플러그인 작업이 진행 중이어서 자동 업데이트를 건너뛰었습니다.",
+                    })
             with self._lock:
                 self._installed_update_job.update(
                     {
@@ -1375,7 +1387,7 @@ class BookOasisPluginManager:
             raise PluginManagerError("BookOasis Mate 자체 플러그인은 이 화면에서 삭제할 수 없습니다.")
         normalized = self.normalized_settings(settings)
         with self._lock:
-            if self._job and self._job.get("status") in self.ACTIVE_STATES:
+            if self._auto_update_running or (self._job and self._job.get("status") in self.ACTIVE_STATES):
                 raise PluginManagerError("다른 플러그인 작업이 진행 중입니다.")
             root_input = Path(normalized["plugin_root"]).expanduser()
             if root_input.is_symlink():
@@ -1636,11 +1648,13 @@ class BookOasisPluginManager:
 
     def status(self):
         with self._lock:
-            return copy.deepcopy(self._job) if self._job else self._empty_status()
+            data = copy.deepcopy(self._job) if self._job else self._empty_status()
+            data["auto_update_running"] = self._auto_update_running
+            return data
 
     def work_dir_busy(self):
         with self._lock:
-            return any(job and job.get("status") == "running" for job in (
+            return self._auto_update_running or any(job and job.get("status") == "running" for job in (
                 self._job, self._discovery_job, self._installed_update_job,
             ))
 
@@ -1684,7 +1698,7 @@ class BookOasisPluginManager:
 
     def stop(self):
         with self._lock:
-            if not self._job or self._job.get("status") not in self.ACTIVE_STATES:
+            if not self._job or (not self._auto_update_running and self._job.get("status") not in self.ACTIVE_STATES):
                 return {"requested": False, "message": "실행 중인 작업이 없습니다."}
             self._job["status"] = "stopping"
             self._job["status_label"] = "중지 요청"
@@ -1694,8 +1708,9 @@ class BookOasisPluginManager:
 
     def _begin_job(self, operation, source, runner, args):
         with self._lock:
-            if self._job and self._job.get("status") in self.ACTIVE_STATES:
+            if self._auto_update_running or (self._job and self._job.get("status") in self.ACTIVE_STATES):
                 raise PluginManagerError("다른 플러그인 작업이 진행 중입니다.")
+            self._auto_update_running = operation == "auto_update"
             job_id = uuid.uuid4().hex
             self._stop_event.clear()
             self._job = {
@@ -1776,14 +1791,14 @@ class BookOasisPluginManager:
                 "필수 플러그인을 먼저 업데이트해 주세요: " + ", ".join(outdated)
             )
 
-    def start_catalog_install(self, plugin_id, settings):
+    def _catalog_install_spec(self, plugin_id, settings):
         item = self._catalog_item(plugin_id, settings)
         state = self._repository_cache(settings).get(self._repository_key(item)) or {}
         if state.get("repository_status") == "missing":
             raise PluginManagerError("저장소가 없거나 접근할 수 없어 설치할 수 없습니다. 전체 새로고침으로 다시 확인해 주세요.")
         self._validate_catalog_dependencies(item, settings)
         source = str(item.get("source") or "github").lower()
-        spec = {
+        return {
             "kind": source,
             "repository": item["repository"],
             "ref": item["ref"],
@@ -1792,12 +1807,62 @@ class BookOasisPluginManager:
             "ignored_archive_files": list(item.get("ignored_archive_files") or []),
             "gitea_server_id": str(item.get("gitea_server_id") or ""),
         }
+
+    def start_catalog_install(self, plugin_id, settings):
+        spec = self._catalog_install_spec(plugin_id, settings)
         return self._begin_job(
             "install",
-            item["repository"],
+            spec["repository"],
             self._run_source_job,
             (spec, self.normalized_settings(settings), True),
         )
+
+    def _run_auto_updates(self, job_id, settings):
+        normalized = self.normalized_settings(settings)
+        counts = {"completed": 0, "failed": 0, "skipped": 0}
+        try:
+            for item in self.installed(settings):
+                self._check_stop()
+                plugin_id = item["id"]
+                reason = ""
+                if plugin_id in self.PROTECTED_PLUGIN_IDS or not item.get("repository"):
+                    reason = "자동 업데이트 대상 저장소가 없습니다."
+                elif item.get("version_error"):
+                    reason = "최신 버전 확인에 실패했습니다."
+                elif item.get("source") == "gitea" and not any(server["enabled"] and server["id"] == item.get("gitea_server_id") for server in normalized["gitea_servers"]):
+                    reason = "비활성화된 Gitea 서버입니다."
+                elif not item.get("update_available"):
+                    reason = "새 버전이 확인되지 않았습니다."
+                if reason:
+                    counts["skipped"] += 1
+                    self._record_history(normalized, {"operation": "auto_update", "status": "skipped",
+                        "message": reason, "result": {"plugin_id": plugin_id}})
+                    continue
+                self._set_job(job_id, status="running", result=None, error="", finished_at="",
+                              source=item["repository"], message=f"{plugin_id} 자동 업데이트 중")
+                try:
+                    spec = self._catalog_install_spec(plugin_id, settings)
+                    spec["auto_update"] = True
+                    self._run_source_job(job_id, spec, normalized, True)
+                    self._check_stop()
+                    state = self.status().get("status")
+                    counts["completed" if state == "completed" else "failed"] += 1
+                except PluginManagerStopped:
+                    raise
+                except Exception as error:
+                    counts["failed"] += 1
+                    self._finish_job(job_id, normalized, "failed", str(error), {"plugin_id": plugin_id})
+            message = f"자동 업데이트 완료 {counts['completed']}개 · 실패 {counts['failed']}개 · 건너뜀 {counts['skipped']}개"
+            if counts["completed"]:
+                message += " · 적용 확인을 위해 BookOasis 재시작을 권장합니다."
+            self._finish_job(job_id, normalized, "failed" if counts["failed"] else "completed", message, counts)
+        except PluginManagerStopped as error:
+            self._finish_job(job_id, normalized, "stopped", str(error), counts)
+        except Exception as error:
+            self._finish_job(job_id, normalized, "failed", "자동 업데이트에 실패했습니다.", counts, str(error))
+        finally:
+            with self._lock:
+                self._auto_update_running = False
 
     def start_github_inspect(self, repository, ref, plugin_id, settings, allow_shell_scripts=False):
         owner, repo = self.parse_github_url(repository)
@@ -2248,8 +2313,8 @@ class BookOasisPluginManager:
                     "message": job.get("message"),
                     "plugin_id": result.get("plugin_id", ""),
                     "version": result.get("version", ""),
-                    "started_at": job.get("started_at"),
-                    "finished_at": job.get("finished_at"),
+                    "started_at": job.get("started_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "finished_at": job.get("finished_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
                 },
             )
             temporary = path.with_suffix(".tmp")
@@ -2353,6 +2418,11 @@ class BookOasisPluginManager:
             )
             if install:
                 self._check_stop()
+                if spec.get("auto_update"):
+                    current = Path(settings["plugin_root"]) / plugin_id
+                    current_version = self._read_version(current) if current.is_dir() else ""
+                    if not self._version_tuple(current_version) or not self._version_tuple(manifest.get("version")) or self._version_tuple(manifest["version"]) <= self._version_tuple(current_version):
+                        raise PluginManagerError("설치 상태 또는 다운로드 버전이 변경되어 자동 업데이트를 적용하지 않았습니다.")
                 install_result = self._install_candidate(candidate, manifest, settings, job_id)
                 manifest.update(install_result)
                 message = "플러그인 업데이트를 완료했습니다." if install_result["action"] == "updated" else "플러그인 설치를 완료했습니다."

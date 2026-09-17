@@ -57,7 +57,7 @@
         {{ macros.setting_input_text('plugin_manager_discovery_topics', 'GitHub·Gitea 탐색 Topic', value=arg.get('plugin_manager_discovery_topics', 'bookoasis-plugin,security-bookoasis-plugin'), desc=['쉼표로 구분하며 최대 5개까지 사용합니다.', 'bookoasis-plugin과 security-bookoasis-plugin은 항상 포함됩니다.']) }}
         {{ macros.setting_input_int('plugin_manager_discovery_cache_hours', 'Topic 탐색 캐시(시간)', value=arg.get('plugin_manager_discovery_cache_hours', '6'), desc=['1~168시간']) }}
         <hr><h5>비공개 Gitea</h5>
-        <p class="doctor-muted">사용자 인증 확인 후 저장합니다. <a href="/bookoasis_mate/manual#manual-gitea" target="_blank" rel="noopener">토큰 권한·연결 오류 안내 ↗</a></p>
+        <p class="doctor-muted">저장소 검색 API 연결 확인 후 저장합니다. <a href="/bookoasis_mate/manual#manual-gitea" target="_blank" rel="noopener">토큰 권한·연결 오류 안내 ↗</a></p>
         <div class="doctor-plugin-source-row">
           <div class="form-group"><label for="plugin_gitea_base_url">Gitea 대표 주소</label><input id="plugin_gitea_base_url" class="form-control" placeholder="https://git.example.com"></div>
           <div class="form-group"><label for="plugin_gitea_token">Gitea API 토큰</label><input id="plugin_gitea_token" class="form-control" type="password" autocomplete="new-password" placeholder="사용자 조회·저장소 읽기 권한 토큰"></div>
@@ -68,6 +68,8 @@
         <div id="plugin_gitea_servers" class="doctor-plugin-server-list mt-3"></div>
         <hr><h5>업데이트 확인 예약</h5>
         <div class="form-check mb-3"><input id="plugins_auto_start" class="form-check-input" type="checkbox" {% if arg.get('plugins_auto_start') in [True, 'True', 'true', 'On', 'on', '1'] %}checked{% endif %}><label class="form-check-label" for="plugins_auto_start">자동 업데이트 확인</label></div>
+        <div class="form-check mb-3"><input id="plugin_manager_auto_update" class="form-check-input" type="checkbox" {% if arg.get('plugin_manager_auto_update') in [True, 'True', 'true', 'On', 'on', '1'] %}checked{% endif %}><label class="form-check-label" for="plugin_manager_auto_update">플러그인 자동 업데이트</label></div>
+        <p class="doctor-muted">기본 OFF. 켜면 확인 예약도 활성화되며 아래 주기에 등록된 저장소의 설치 플러그인을 하나씩 업데이트합니다. 기존 검증·백업을 유지하며 다른 설치 작업 중에는 건너뜁니다. 실행 결과는 작업 이력에서 확인하세요. 진행 중인 업데이트는 작업 중지 버튼으로 중지할 수 있습니다. 파일 적용 후 BookOasis 재시작을 권장하며 자동 재시작은 하지 않습니다.</p>
         {{ macros.setting_input_int('plugins_interval', '확인 주기(분)', value=arg.get('plugins_interval', '720'), desc=['기본값 720분(12시간)']) }}
       </form>
       <div class="doctor-plugin-effective-paths">
@@ -168,7 +170,7 @@
 
   <div id="plugin_history_tab" class="tab-pane fade" role="tabpanel">
     <div class="doctor-plugin-toolbar"><p class="doctor-muted mb-0">최근 100개 검사·설치·실패 기록을 표시합니다.</p><button id="plugin_history_refresh" type="button" class="btn btn-sm btn-outline-primary">새로고침</button></div>
-    <div class="doctor-table-wrap"><table class="table table-sm doctor-table"><thead><tr><th>시각</th><th>작업</th><th>플러그인</th><th>소스</th><th>결과</th></tr></thead><tbody id="plugin_history"></tbody></table></div>
+    <div class="doctor-table-wrap"><table class="table table-sm doctor-table"><thead><tr><th>시각</th><th>작업</th><th>플러그인</th><th>소스</th><th>결과</th><th>설명</th></tr></thead><tbody id="plugin_history"></tbody></table></div>
   </div>
 </div>
 
@@ -676,7 +678,7 @@ function pluginManagerScheduleJobHide() {
 function pluginManagerRenderJob(job, focus, initial) {
   job = job || {};
   pluginManagerClearJobHideTimer();
-  var active = ['ready','running','stopping'].indexOf(job.status) >= 0;
+  var active = !!job.auto_update_running || ['ready','running','stopping'].indexOf(job.status) >= 0;
   var completedInstall = job.status === 'completed' && job.operation === 'install';
   var percent = Math.max(0, Math.min(100, Number(job.percent || 0)));
   $('#plugin_job_message').text((job.status_label || '대기') + ' · ' + (job.message || ''));
@@ -720,10 +722,10 @@ function pluginManagerLoadHistory() {
   bookoasisMateAjax('plugins', 'history', {}, function(ret) {
     var body = document.getElementById('plugin_history'); bookoasisMateClear(body);
     var items = ret.data || [];
-    if (!items.length) { var row = document.createElement('tr'); var cell = pluginManagerText('td', 'doctor-muted', '저장된 작업 이력이 없습니다.'); cell.colSpan = 5; row.appendChild(cell); body.appendChild(row); return; }
+    if (!items.length) { var row = document.createElement('tr'); var cell = pluginManagerText('td', 'doctor-muted', '저장된 작업 이력이 없습니다.'); cell.colSpan = 6; row.appendChild(cell); body.appendChild(row); return; }
     items.forEach(function(item) {
       var row = document.createElement('tr');
-      [item.finished_at || item.started_at || '-', item.operation || '-', (item.plugin_id || '-') + (item.version ? ' v' + item.version : ''), item.source || '-', item.status || '-'].forEach(function(value) { row.appendChild(pluginManagerText('td', '', value)); });
+      [item.finished_at || item.started_at || '-', item.operation === 'auto_update' ? '자동 업데이트' : (item.operation || '-'), (item.plugin_id || '-') + (item.version ? ' v' + item.version : ''), item.source || '-', item.status === 'skipped' ? '건너뜀' : (item.status || '-'), item.message || '-'].forEach(function(value) { row.appendChild(pluginManagerText('td', '', value)); });
       body.appendChild(row);
     });
   }, null, {global:false});
@@ -736,7 +738,7 @@ function pluginManagerSelectFolder(title, inputId) {
 
 $('#plugin_root_select_btn').click(function(event) { event.preventDefault(); pluginManagerSelectFolder('BookOasis plugins/metadata 폴더 선택', 'plugin_manager_plugins_path'); });
 $('#plugin_settings_save').click(function() {
-  var data = getFormdata('#plugin_manager_settings') + '&plugins_auto_start=' + ($('#plugins_auto_start').prop('checked') ? 'True' : 'False');
+  var data = getFormdata('#plugin_manager_settings') + '&plugins_auto_start=' + ($('#plugins_auto_start').prop('checked') ? 'True' : 'False') + '&plugin_manager_auto_update=' + ($('#plugin_manager_auto_update').prop('checked') ? 'True' : 'False');
   bookoasisMateAjax('plugins', 'manager_settings_save', data, function(ret) {
     notify(ret.msg || '플러그인 관리 설정을 저장했습니다.', ret.ret || 'success');
     bookoasisMateAjax('plugins', 'paths', {}, function(pathRet) {
