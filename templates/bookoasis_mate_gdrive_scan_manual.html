@@ -77,8 +77,9 @@
     <pre><code>/mnt/gds/GDRIVE|/GDRIVE|http://RCLONE_HOST:5572
 /mnt/gds/GDRIVE|/GDRIVE|http://RCLONE_HOST:5572#vfs|RCLONE_USER|RCLONE_PASSWORD</code></pre>
     <p>형식은 BookOasis 경로 접두사 | rclone 경로 | RC 주소 | 사용자명 | 비밀번호입니다. 인증정보는 URL에 넣지 마세요.</p>
-    <p>Mate는 이동·이름 변경·삭제 시 이전 항목을 forget합니다. 생성·수정·복원의 현재 경로 갱신은 BookOasis가 담당하므로 Mate가 refresh를 중복 요청하지 않습니다.</p>
-    <p>rclone.conf만으로 RC 주소·VFS 이름을 알아낼 수는 없습니다. 이전 항목의 VFS 규칙이 없거나 forget이 실패하면 스캔을 보류합니다.</p>
+    <p>자체 감지와 외부 연동 모두 VFS 규칙이 필요합니다. Mate는 이동·이름 변경·삭제 시 이전 항목을 forget하고, 스캔 전에 부모 폴더 목록을 refresh합니다. BookOasis는 VFS 갱신보다 먼저 경로 존재 여부를 검사할 수 있습니다.</p>
+    <p>삭제·이동 이전 경로가 없다는 응답이면 해당 보관함 안의 상위 폴더를 재요청합니다. 루트까지 올라가면 해당 보관함의 증분 스캔을 요청합니다. 생성 경로의 404나 인증·통신 오류에는 이 처리를 하지 않습니다.</p>
+    <p>rclone.conf만으로 RC 주소·VFS 이름을 알아낼 수는 없습니다. 규칙이 없거나 VFS 갱신이 실패하면 스캔을 보류합니다.</p>
   </details>
 </div>
 <div class="doctor-section doctor-card">
