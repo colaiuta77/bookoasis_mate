@@ -50,6 +50,8 @@
   </div>
 </div>
 
+<div id="gdrive_event_pagination_top" class="doctor-pagination" aria-label="상단 페이지 이동"></div>
+
 <div class="doctor-gdrive-summary">
   <span id="gdrive_worker_state" class="doctor-muted"></span>
   <button id="gdrive_worker_stop" class="btn btn-sm btn-outline-danger">작업 중지</button>
@@ -256,8 +258,8 @@ function renderGdriveLibraryOptions(libraries) {
   select.value = found ? current : '';
 }
 
-function renderGdrivePagination(data) {
-  var container = document.getElementById('gdrive_event_pagination');
+function renderGdrivePagination(data, containerId) {
+  var container = document.getElementById(containerId);
   bookoasisMateClear(container);
   var page = Number(data.page || 1);
   var pages = Number(data.pages || 1);
@@ -414,7 +416,8 @@ function renderGdriveEvents(data) {
     (worker.last_finished_at ? ' · 마지막 처리 ' + worker.last_finished_at : '') +
     (collector.last_error ? ' · 수집 오류 ' + collector.last_error : '') +
     (worker.last_error ? ' · 스캔 오류 ' + worker.last_error : '');
-  renderGdrivePagination(data);
+  renderGdrivePagination(data, 'gdrive_event_pagination_top');
+  renderGdrivePagination(data, 'gdrive_event_pagination');
 }
 
 function scheduleGdriveEventRefresh() {

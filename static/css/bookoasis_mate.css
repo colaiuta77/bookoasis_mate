@@ -237,6 +237,10 @@
 .doctor-gdrive-list { min-width:760px; }
 .doctor-gdrive-row { display:grid; grid-template-columns:72px 135px minmax(320px,1fr) 190px 150px; gap:14px; align-items:center; min-height:126px; padding:16px 8px; border-bottom:1px solid #dee2e6; }
 #gdrive_event_rows { min-width:0; }
+#gdrive_event_pagination_top { margin:12px 0; }
+#gdrive_event_pagination_top:empty { display:none; }
+#gdrive_event_rows .doctor-gdrive-time { justify-self:end; width:max-content; max-width:100%; }
+#gdrive_event_rows .doctor-gdrive-time > div > strong { display:inline-block; width:4.8em; }
 #gdrive_event_rows .doctor-gdrive-row { grid-template-columns:72px 115px minmax(240px,1fr) 225px; padding:14px 8px; }
 .doctor-gdrive-row:hover { background:rgba(13,110,253,.035); }
 .doctor-gdrive-id, .doctor-gdrive-info, .doctor-gdrive-time, .doctor-gdrive-actions { display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
@@ -400,7 +404,7 @@
 @media (max-width: 900px) {
   #gdrive_event_rows .doctor-gdrive-row { grid-template-columns:70px minmax(0,1fr); }
   #gdrive_event_rows .doctor-gdrive-paths, #gdrive_event_rows .doctor-gdrive-time { grid-column:1 / -1; }
-  #gdrive_event_rows .doctor-gdrive-time { flex-direction:row; flex-wrap:wrap; gap:5px 12px; white-space:normal; }
+  #gdrive_event_rows .doctor-gdrive-time { flex-direction:row; flex-wrap:wrap; gap:5px 12px; white-space:normal; justify-self:stretch; width:auto; }
   .doctor-sql-toolbar { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .doctor-sql-toolbar .doctor-sql-preset { grid-column:1 / -1; }
   .doctor-db-action-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
