@@ -1,6 +1,7 @@
 # gd-poller 변경 이벤트를 BookOasis 보관함 스캔과 rclone VFS 갱신으로 변환합니다.
 import json
 import posixpath
+from datetime import datetime
 from contextlib import closing
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
@@ -562,7 +563,7 @@ class GDriveScanProcessor:
         self.should_stop = should_stop or (lambda: False)
         builtin = self.settings.get("gdrive_scan_input_mode") == "builtin"
         # 자체 감지는 이미 BookOasis 경로를 전달하지만 VFS 사전 갱신은 동일하게 필요합니다.
-        self.refresh_vfs = refresh_vfs
+        self.refresh_vfs = refresh_vfs and str(self.settings.get("gdrive_scan_vfs_enabled", True)).lower() == "true"
         self.path_mappings = parse_path_mappings(
             "" if builtin else self.settings.get("gdrive_scan_path_mappings", "")
         )
@@ -799,6 +800,7 @@ class GDriveScanProcessor:
                     "path": relative_path,
                 }
                 continue
+            requested_at = datetime.now().isoformat(timespec="milliseconds")
             try:
                 if mode == "path":
                     response = self.path_scan_callback(
@@ -836,6 +838,8 @@ class GDriveScanProcessor:
                 message = str(error)
                 response = {}
             scan_results[request_key] = {
+                "requested_at": requested_at,
+                "responded_at": datetime.now().isoformat(timespec="milliseconds"),
                 "success": success,
                 "message": message,
                 "response": response,

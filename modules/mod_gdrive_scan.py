@@ -56,6 +56,7 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_extensions": ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json,.mp3,.m4b,.m4a,.flac,.aac,.wav,.ogg,.opus,.wma,.mp4,.mkv,.avi,.webm,.mov,.m4v,.ts,.smi,.srt,.vtt",
             "gdrive_scan_path_mappings": "/GDRIVE => /mnt/gds/GDRIVE",
             "gdrive_scan_vfs_rules": "/mnt/gds/GDRIVE|/GDRIVE|http://127.0.0.1:5572",
+            "gdrive_scan_vfs_enabled": "True",
             "gdrive_scan_rc_timeout": "30",
             "gdrive_scan_changes_timeout": "60",
             "gdrive_scan_path_timeout": "120",
@@ -194,6 +195,7 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_extensions": extensions,
             "gdrive_scan_path_mappings": model.get("gdrive_scan_path_mappings"),
             "gdrive_scan_vfs_rules": model.get("gdrive_scan_vfs_rules"),
+            "gdrive_scan_vfs_enabled": str(model.get("gdrive_scan_vfs_enabled")).lower() not in ("false", "0"),
             "gdrive_scan_rc_timeout": self._as_int(
                 model.get("gdrive_scan_rc_timeout"), 30, 1, 300
             ),
@@ -1152,6 +1154,7 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_extensions",
             "gdrive_scan_path_mappings",
             "gdrive_scan_vfs_rules",
+            "gdrive_scan_vfs_enabled",
             "gdrive_scan_rc_timeout",
             "gdrive_scan_changes_timeout",
             "gdrive_scan_history_limit",
