@@ -236,6 +236,12 @@
 .doctor-gdrive-summary { display:flex; justify-content:space-between; gap:15px; padding:10px 12px; border-top:1px solid #dee2e6; border-bottom:2px solid #343a40; background:rgba(127,127,127,.04); }
 .doctor-gdrive-list { min-width:760px; }
 .doctor-gdrive-row { display:grid; grid-template-columns:72px 135px minmax(320px,1fr) 190px 150px; gap:14px; align-items:center; min-height:126px; padding:16px 8px; border-bottom:1px solid #dee2e6; }
+#gdrive_event_rows, #local_events { min-width:0; }
+#gdrive_event_pagination_top, #local_pagination_top { margin:12px 0; }
+#gdrive_event_pagination_top:empty, #local_pagination_top:empty { display:none; }
+:is(#gdrive_event_rows, #local_events) .doctor-gdrive-time { justify-self:end; width:max-content; max-width:100%; }
+:is(#gdrive_event_rows, #local_events) .doctor-gdrive-time > div > strong { display:inline-block; width:4.8em; }
+:is(#gdrive_event_rows, #local_events) .doctor-gdrive-row { grid-template-columns:72px 115px minmax(240px,1fr) 225px; padding:14px 8px; }
 .doctor-gdrive-row:hover { background:rgba(13,110,253,.035); }
 .doctor-gdrive-id, .doctor-gdrive-info, .doctor-gdrive-time, .doctor-gdrive-actions { display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
 .doctor-gdrive-id strong { font-size:1rem; }
@@ -246,6 +252,8 @@
 .doctor-gdrive-error { margin-top:7px; font-size:.82rem; }
 .doctor-gdrive-time { color:#6c757d; font-size:.8rem; white-space:nowrap; }
 .doctor-gdrive-actions { flex-direction:row; flex-wrap:wrap; }
+:is(#gdrive_event_rows, #local_events) .doctor-gdrive-actions { gap:4px; margin-top:10px; }
+:is(#gdrive_event_rows, #local_events) .doctor-gdrive-actions .btn { padding:2px 7px; font-size:.75rem; line-height:1.4; }
 .doctor-gdrive-action, .doctor-gdrive-status { display:inline-block; padding:2px 7px; border-radius:999px; font-size:.73rem; font-weight:700; }
 .doctor-gdrive-action-create, .doctor-gdrive-action-restore { color:#198754; background:rgba(25,135,84,.13); }
 .doctor-gdrive-action-edit, .doctor-gdrive-action-move, .doctor-gdrive-action-rename { color:#0d6efd; background:rgba(13,110,253,.12); }
@@ -394,6 +402,9 @@
   .doctor-statistics-grid { grid-template-columns:1fr; }
 }
 @media (max-width: 900px) {
+  :is(#gdrive_event_rows, #local_events) .doctor-gdrive-row { grid-template-columns:70px minmax(0,1fr); }
+  :is(#gdrive_event_rows, #local_events) .doctor-gdrive-paths, :is(#gdrive_event_rows, #local_events) .doctor-gdrive-time { grid-column:1 / -1; }
+  :is(#gdrive_event_rows, #local_events) .doctor-gdrive-time { flex-direction:row; flex-wrap:wrap; gap:5px 12px; white-space:normal; justify-self:stretch; width:auto; }
   .doctor-sql-toolbar { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .doctor-sql-toolbar .doctor-sql-preset { grid-column:1 / -1; }
   .doctor-db-action-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }

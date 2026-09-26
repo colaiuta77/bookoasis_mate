@@ -64,7 +64,10 @@ class ScanEventBase(ModelBase):
     @classmethod
     def _result_json_with_drive(cls, event_id, result):
         entity = F.db.session.query(cls).filter(cls.id == int(event_id)).first()
-        drive = (entity.to_dict()["result"].get("drive") or {}) if entity else {}
+        previous = entity.to_dict()["result"] if entity else {}
+        drive = previous.get("drive") or {}
+        if previous.get("processing_started_at"):
+            result = dict(result, processing_started_at=previous["processing_started_at"])
         return json.dumps(dict(result, drive=drive) if drive else result, ensure_ascii=False)
 
     @classmethod
@@ -121,6 +124,9 @@ class ScanEventBase(ModelBase):
             )
             for entity in candidates:
                 snapshot = entity.to_dict()
+                attempt_result = {key: value for key, value in snapshot["result"].items()
+                                  if key in ("drive", "activity")}
+                attempt_result["processing_started_at"] = now.isoformat(timespec="milliseconds")
                 updated = (
                     F.db.session.query(cls)
                     .filter(cls.id == entity.id)
@@ -130,6 +136,7 @@ class ScanEventBase(ModelBase):
                             cls.status: "processing",
                             cls.attempts: int(entity.attempts or 0) + 1,
                             cls.updated_at: now,
+                            cls.result_json: json.dumps(attempt_result, ensure_ascii=False),
                         },
                         synchronize_session=False,
                     )
@@ -137,6 +144,7 @@ class ScanEventBase(ModelBase):
                 if updated == 1:
                     snapshot["attempts"] = int(entity.attempts or 0) + 1
                     snapshot["status"] = "processing"
+                    snapshot["result"] = attempt_result
                     claimed.append(snapshot)
             F.db.session.commit()
         return claimed
@@ -537,7 +545,7 @@ class ScanEventBase(ModelBase):
             "ready_at": self.ready_at.isoformat(timespec="seconds")
             if self.ready_at
             else None,
-            "completed_at": self.completed_at.isoformat(timespec="seconds")
+            "completed_at": self.completed_at.isoformat(timespec="milliseconds")
             if self.completed_at
             else None,
             "action": self.action,

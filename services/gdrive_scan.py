@@ -1,6 +1,7 @@
 # gd-poller 변경 이벤트를 BookOasis 보관함 스캔과 rclone VFS 갱신으로 변환합니다.
 import json
 import posixpath
+from datetime import datetime
 from contextlib import closing
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
@@ -300,6 +301,11 @@ def event_vfs_operations(event):
         target = previous or current
         if target:
             operations.append(("forget", target, item_type))
+    # 부모 목록을 먼저 갱신해야 BookOasis의 스캔 전 존재 검사를 통과할 수 있습니다.
+    for path in (previous, current):
+        if path:
+            directory = posixpath.dirname(path) or "/"
+            operations.append(("refresh", directory, "directory"))
     result = []
     seen = set()
     for operation in operations:
@@ -462,7 +468,7 @@ def event_scan_targets(event, libraries):
         if key in seen:
             continue
         seen.add(key)
-        targets.append({"library": library, "path": relative_path})
+        targets.append({"library": library, "path": relative_path, "removed": removed})
     return targets
 
 
@@ -508,11 +514,27 @@ class RcloneRcClient:
 
     def refresh(self, rule, local_path):
         remote_path = to_remote_path(local_path, rule)
-        return self._request(
+        response = self._request(
             rule,
             "vfs/refresh",
             {"dir": remote_path, "recursive": "false"},
         )
+        results = response.get("result")
+        if not isinstance(results, dict) or not results:
+            raise RuntimeError("rclone VFS 갱신 결과가 없습니다.")
+        failures = [str(value) for value in results.values() if value != "OK"]
+        if failures:
+            # 삭제된 폴더는 남아 있는 상위 목록을 갱신합니다. 규칙 루트 밖으로 나가지 않습니다.
+            missing = all(any(word in value.lower() for word in (
+                "directory not found", "file does not exist", "no such file or directory",
+            )) for value in failures)
+            parent = posixpath.dirname(local_path.rstrip("/")) or "/"
+            if missing and parent != local_path and (
+                parent == rule["local"] or parent.startswith(rule["local"].rstrip("/") + "/")
+            ):
+                return self.refresh(rule, parent)
+            raise RuntimeError("rclone VFS 갱신 실패: " + "; ".join(failures))
+        return response
 
     def forget(self, rule, local_path, item_type):
         remote_path = to_remote_path(local_path, rule)
@@ -540,8 +562,8 @@ class GDriveScanProcessor:
         self.logger = logger
         self.should_stop = should_stop or (lambda: False)
         builtin = self.settings.get("gdrive_scan_input_mode") == "builtin"
-        # 자체 감지는 이미 BookOasis 경로를 전달하며 VFS 갱신도 스캔 엔진에 맡깁니다.
-        self.refresh_vfs = refresh_vfs and not builtin
+        # 자체 감지는 이미 BookOasis 경로를 전달하지만 VFS 사전 갱신은 동일하게 필요합니다.
+        self.refresh_vfs = refresh_vfs and str(self.settings.get("gdrive_scan_vfs_enabled", True)).lower() == "true"
         self.path_mappings = parse_path_mappings(
             "" if builtin else self.settings.get("gdrive_scan_path_mappings", "")
         )
@@ -662,6 +684,7 @@ class GDriveScanProcessor:
 
         operation_results = {}
         operation_cache = {}
+        operations.sort(key=lambda item: item[1] != "forget")
         for event_id, operation, path, item_type in operations:
             if self.should_stop():
                 break
@@ -745,8 +768,10 @@ class GDriveScanProcessor:
                     request_key = ("path",) + library_key + (relative_path,)
                 scan_requests.setdefault(
                     request_key,
-                    {"library": library, "event_ids": set()},
+                    {"library": library, "event_ids": set(), "removed": False},
                 )["event_ids"].add(event_id)
+                if target.get("removed"):
+                    scan_requests[request_key]["removed"] = True
                 event_scan_keys.setdefault(event_id, [])
                 if request_key not in event_scan_keys[event_id]:
                     event_scan_keys[event_id].append(request_key)
@@ -775,6 +800,7 @@ class GDriveScanProcessor:
                     "path": relative_path,
                 }
                 continue
+            requested_at = datetime.now().isoformat(timespec="milliseconds")
             try:
                 if mode == "path":
                     response = self.path_scan_callback(
@@ -783,6 +809,22 @@ class GDriveScanProcessor:
                         library["name"],
                         relative_path,
                     )
+                    requested_path = relative_path
+                    while request_data["removed"] and not self.should_stop() and (
+                        response.get("http_status") == 404
+                        and not response.get("outcome_unknown")
+                        and (response.get("message") == "해당 경로를 라이브러리 내에서 찾을 수 없습니다."
+                             or str(response.get("message") or "").startswith("Path not found within library:"))
+                    ):
+                        requested_path = posixpath.dirname(requested_path)
+                        if requested_path:
+                            response = self.path_scan_callback(db_type, library_id, library["name"], requested_path)
+                        else:
+                            response = self.scan_callback(db_type, library_id, library["name"])
+                        response = dict(response, cleanup_path=requested_path,
+                                        cleanup_scope="path" if requested_path else "library")
+                        if not requested_path:
+                            break
                 else:
                     response = self.scan_callback(
                         db_type,
@@ -796,6 +838,8 @@ class GDriveScanProcessor:
                 message = str(error)
                 response = {}
             scan_results[request_key] = {
+                "requested_at": requested_at,
+                "responded_at": datetime.now().isoformat(timespec="milliseconds"),
                 "success": success,
                 "message": message,
                 "response": response,
