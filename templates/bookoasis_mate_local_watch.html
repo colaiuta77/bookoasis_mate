@@ -3,7 +3,7 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
-<ul class="nav nav-pills doctor-setting-tabs mb-3" role="tablist" aria-label="로컬 폴더 감지">
+<ul class="nav nav-pills bg-light shadow text-dark mb-3" role="tablist" aria-label="로컬 폴더 감지">
   <li class="nav-item"><a class="nav-link active" id="local_settings_tab" data-toggle="tab" href="#local_settings" role="tab" aria-controls="local_settings" aria-selected="true">설정</a></li>
   <li class="nav-item"><a class="nav-link" id="local_changes_tab" data-toggle="tab" href="#local_changes" role="tab" aria-controls="local_changes" aria-selected="false">변경 이벤트</a></li>
   <li class="nav-item"><a class="nav-link" id="local_manual_tab" data-toggle="tab" href="#local_watch_manual" role="tab" aria-controls="local_watch_manual" aria-selected="false">매뉴얼</a></li>
@@ -300,7 +300,9 @@ function renderLocalPagination(id) {
 }
 $('a[data-toggle="tab"]').on('shown.bs.tab', function() {
   var changes = $('#local_changes').hasClass('active');
+  var manual = $('#local_watch_manual').hasClass('active');
   $('#local_toolbar').appendTo(changes ? '#local_event_toolbar' : '#local_toolbar_home');
+  $('#local_toolbar').toggle(!manual);
   $('#local_save').toggle(!changes);
 });
 $(function() {
