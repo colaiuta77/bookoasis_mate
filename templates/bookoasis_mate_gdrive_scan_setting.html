@@ -1,7 +1,7 @@
 {# gd-poller 변경 감지와 rclone VFS·BookOasis 스캔 연동값을 설정합니다. #}
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=drive-activity-1">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=drive-settings-2">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 {{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['gdrive_scan_wake_btn', '작업자 깨우기'], ['gdrive_scan_stop_btn', '작업 중지']]) }}
@@ -70,10 +70,12 @@
       <input type="number" class="form-control" id="gdrive_scan_builtin_poll_seconds" name="gdrive_scan_builtin_poll_seconds" min="15" max="3600" value="{{ arg.get('gdrive_scan_builtin_poll_seconds', '60') }}">
       <small class="form-text text-muted">15~3600초 사이에서 Google Drive 변경 내역을 확인합니다.</small>
     </div>
+    <div class="gdrive-scan-poll-settings">
     <div class="gdrive-scan-poll-setting">
       <label for="gdrive_scan_activity_delay_seconds"><strong>Activity 조회 지연(초)</strong></label>
       <input type="number" class="form-control" id="gdrive_scan_activity_delay_seconds" name="gdrive_scan_activity_delay_seconds" min="0" max="3600" value="{{ arg.get('gdrive_scan_activity_delay_seconds', '60') }}">
       <small class="form-text text-muted">기본 60초. 현재 시각에서 이 시간만큼 이전까지 Activity를 조회합니다. 늦게 공개되는 활동을 기다리는 설정이며, Changes 방식과 이벤트 처리 대기 시간에는 적용하지 않습니다.</small>
+    </div>
     </div>
     <input type="hidden" id="gdrive_scan_builtin_roots" name="gdrive_scan_builtin_roots" value="[]">
     <div class="gdrive-scan-root-heading">
@@ -136,14 +138,10 @@
   <div id="gdrive_scan_vfs_settings">
   {{ macros.setting_checkbox('gdrive_scan_vfs_enabled', 'rclone vfs/refresh 사용', value=arg.get('gdrive_scan_vfs_enabled', 'True'), desc=['세 변경 감지 방식의 공통 설정입니다. Off이면 Mate의 사전 forget·refresh 처리를 모두 생략합니다.']) }}
   <div id="gdrive_scan_vfs_warning" class="alert alert-warning" role="status">VFS 사전 갱신을 사용하지 않습니다. 다른 곳에서 캐시를 갱신하지 않으면 새 경로 스캔이 실패할 수 있습니다. BookOasis 자체 VFS 설정은 변경하지 않습니다.</div>
-  <div class="form-group row">
-    <label class="col-sm-3 control-label">rclone VFS 규칙</label>
-    <div class="col-sm-9">
-      <textarea class="form-control" rows="2" id="gdrive_scan_vfs_rules" name="gdrive_scan_vfs_rules">{{ arg.get('gdrive_scan_vfs_rules', '') }}</textarea>
-      <small class="form-text text-muted">한 줄에 <code>로컬경로|리모트경로|RC주소#VFS이름|사용자|비밀번호</code>를 입력합니다. 인증이 없으면 마지막 두 필드를 생략합니다.</small>
-      <small class="form-text text-muted">자체 감지에도 필요합니다. 로컬경로는 BookOasis 경로이며 RC 주소는 FlaskFarm에서 접속 가능해야 합니다. rclone.conf의 리모트 이름만으로 RC 주소를 자동 결정할 수 없습니다.</small>
-    </div>
-  </div>
+  {{ macros.setting_input_textarea('gdrive_scan_vfs_rules', 'rclone VFS 규칙',
+    value=arg.get('gdrive_scan_vfs_rules', ''), col='12', row='2',
+    desc=['한 줄에 로컬경로|리모트경로|RC주소#VFS이름|사용자|비밀번호를 입력합니다. 인증이 없으면 마지막 두 필드를 생략합니다.',
+          '자체 감지에도 필요합니다. 로컬경로는 BookOasis 경로이며 RC 주소는 FlaskFarm에서 접속 가능해야 합니다. rclone.conf의 리모트 이름만으로 RC 주소를 자동 결정할 수 없습니다.']) }}
   </div>
 </form>
 
