@@ -43,6 +43,7 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_enabled": "False",
             "gdrive_scan_input_mode": "command",
             "gdrive_scan_builtin_poll_seconds": "60",
+            "gdrive_scan_activity_delay_seconds": "60",
             "gdrive_scan_builtin_remote": "",
             "gdrive_scan_builtin_root_id": "",
             "gdrive_scan_builtin_remote_path": "",
@@ -171,6 +172,9 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_input_mode": input_mode,
             "gdrive_scan_builtin_poll_seconds": self._as_int(
                 model.get("gdrive_scan_builtin_poll_seconds"), 60, 15, 3600
+            ),
+            "gdrive_scan_activity_delay_seconds": self._as_int(
+                model.get("gdrive_scan_activity_delay_seconds"), 60, 0, 3600
             ),
             "gdrive_scan_builtin_remote": str(model.get("gdrive_scan_builtin_remote") or "").strip(),
             "gdrive_scan_builtin_root_id": str(model.get("gdrive_scan_builtin_root_id") or "").strip(),
@@ -783,6 +787,8 @@ class ModuleGDriveScan(PluginModuleBase):
                 source_remote=resolve_google_drive_source(
                     sources, root["remote"], root.get("source_remote")
                 ),
+                **({"polling_delay_seconds": settings.get("gdrive_scan_activity_delay_seconds", 60)}
+                   if root.get("detection_mode") == "activity" else {}),
             )
             for root in roots
         ]
@@ -908,6 +914,7 @@ class ModuleGDriveScan(PluginModuleBase):
                 db_type=db_type,
                 force=False,
                 timeout=settings["gdrive_scan_path_timeout"],
+                allow_absolute=relative_path.startswith("/"),
             )
             response = {**response, "mode": "admin_scan_path"}
         else:
@@ -916,6 +923,9 @@ class ModuleGDriveScan(PluginModuleBase):
         unsupported_api = response.get("http_status") == 405 or (
             response.get("http_status") == 404 and response.get("message") == "HTTP 오류 404"
         )
+        if not response.get("success") and unsupported_api and not response.get("outcome_unknown") and relative_path.startswith("/"):
+            return {"success": False, "retryable": False, "mode": "admin_scan_path",
+                    "message": "다중 루트 부분 스캔에는 BookOasis 관리자 계정과 scan-path API 지원이 필요합니다. 전체 스캔으로 자동 전환하지 않았습니다."}
         if not response.get("success") and unsupported_api and not response.get("outcome_unknown"):
             if self._stop_event.is_set():
                 return {"success": False, "cancelled": True, "message": "작업 중지"}
@@ -1141,6 +1151,7 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_enabled",
             "gdrive_scan_input_mode",
             "gdrive_scan_builtin_poll_seconds",
+            "gdrive_scan_activity_delay_seconds",
             "gdrive_scan_builtin_remote",
             "gdrive_scan_builtin_root_id",
             "gdrive_scan_builtin_remote_path",

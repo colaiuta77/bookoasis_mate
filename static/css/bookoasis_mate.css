@@ -23,7 +23,8 @@
 .gdrive-scan-root-help { margin:2px 0 14px; }
 .gdrive-scan-rclone-status { display:flex; flex-direction:column; gap:5px; }
 .gdrive-scan-rclone-status code { overflow-wrap:anywhere; color:#d63384; }
-.gdrive-scan-poll-setting { width:100%; max-width:260px; margin:18px 0; text-align:left; }
+.gdrive-scan-poll-settings { display:flex; flex-wrap:wrap; gap:24px; margin:18px 0; }
+.gdrive-scan-poll-setting { flex:1 1 260px; min-width:0; text-align:left; }
 .gdrive-scan-poll-setting label, .gdrive-scan-poll-setting small { display:block; }
 .gdrive-scan-poll-setting .form-control { width:170px; margin:7px 0 0; }
 .gdrive-scan-checkpoint-help { margin:14px 0 12px; }

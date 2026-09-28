@@ -295,6 +295,7 @@ class BookOasisClient:
         db_type="general",
         force=False,
         timeout=None,
+        allow_absolute=False,
     ):
         library_id, error = self._valid_positive_id(library_id, "보관함 ID")
         if error:
@@ -306,7 +307,7 @@ class BookOasisClient:
         parts = [part for part in relative_path.split("/") if part]
         if (
             not relative_path
-            or relative_path.startswith("/")
+            or (relative_path.startswith("/") and not allow_absolute)
             or ".." in parts
             or posixpath.normpath(relative_path) in {"", ".", ".."}
         ):
@@ -366,6 +367,12 @@ class BookOasisClient:
     def queue_status(self):
         return self._admin_request(
             "api/media/system/queue",
+            query={"_ts": str(time.time_ns())},
+        )
+
+    def tts_status(self):
+        return self._admin_request(
+            "api/media/tts/pregen/admin-status",
             query={"_ts": str(time.time_ns())},
         )
 

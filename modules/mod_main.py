@@ -143,6 +143,8 @@ class ModuleMain(PluginModuleBase):
                     page_size=req.form.get("page_size", P.ModelSetting.get("page_size")),
                 )
                 return jsonify({"ret": "success", "data": data})
+            if command == "tts_status":
+                return jsonify({"ret": "success", "data": self.service.admin_client().tts_status()})
             if command == "scanner":
                 data = self.service.scanner(
                     db_type=req.form.get("db_type", "general"),

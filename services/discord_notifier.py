@@ -175,7 +175,7 @@ class DiscordWebhookNotifier:
         name = str(drive.get("name") or self._basename(path))
         if len(name) > 256:
             fields.append({"name": "파일명", "value": self._truncate(name, self.MAX_FIELD_VALUE), "inline": False})
-        for label, key in (("ID", "file_id"), ("MIME", "mime_type")):
+        for label, key in (("세부 유형", "action_detail"), ("발생 시각", "occurred_at"), ("ID", "file_id"), ("MIME", "mime_type")):
             if drive.get(key):
                 fields.append({"name": label, "value": self._truncate(drive[key], self.MAX_FIELD_VALUE), "inline": False})
         if drive.get("file_id"):
@@ -201,13 +201,18 @@ class DiscordWebhookNotifier:
         fields.append(
             {
                 "name": "처리 결과",
-                "value": self.STATUS_LABELS.get(status, status or "확인 불가"),
+                "value": "요청 접수 · 실제 스캔 완료 미확인" if status == "completed" and any(
+                    scan.get("request_accepted") for scan in result.get("scans") or []
+                ) else self.STATUS_LABELS.get(status, status or "확인 불가"),
                 "inline": True,
             }
         )
         scan_modes = []
         for scan in result.get("scans") or []:
             mode = str(scan.get("mode") or "").strip()
+            if (scan.get("response") or {}).get("cleanup_scope") == "library":
+                mode = "library"
+            mode = {"library": "보관함 증분 스캔", "full_webhook_compat": "보관함 증분 스캔", "admin_scan_path": "개별 경로 스캔", "path_webhook": "경로 스캔 요청", "path": "경로 스캔 요청"}.get(mode, mode)
             if mode and mode not in scan_modes:
                 scan_modes.append(mode)
         if scan_modes:
@@ -219,6 +224,9 @@ class DiscordWebhookNotifier:
                 }
             )
 
+        reasons = list(dict.fromkeys(scan["fallback_reason"] for scan in result.get("scans") or [] if scan.get("fallback_reason")))
+        if reasons:
+            fields.append({"name": "전체 스캔 전환 사유", "value": self._truncate(" · ".join(reasons), self.MAX_FIELD_VALUE), "inline": False})
         return {
             "title": self._book_title(event),
             "color": self.ACTION_COLORS.get(action, self.DEFAULT_COLOR),
