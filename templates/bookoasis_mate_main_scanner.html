@@ -43,6 +43,17 @@
   </div>
 </div>
 
+<div class="doctor-card doctor-live-card" aria-live="polite">
+  <div class="doctor-live-header">
+    <div><h5>TTS 음성 생성</h5><span class="doctor-muted">서버 미리 만들기 · 일반·성인 합계 (DB 선택과 무관)</span></div>
+    <span id="tts_status_badge" class="doctor-status doctor-status-warning">확인 중</span>
+  </div>
+  <div id="tts_status_summary" class="doctor-live-stage"></div>
+  <div id="tts_status_error" class="doctor-live-error" style="display:none"></div>
+  <div id="tts_status_root" class="doctor-path"></div>
+  <div id="tts_status_updated" class="doctor-muted"></div>
+</div>
+
 <h4>보관함 상태</h4>
 <div class="doctor-table-wrap"><table class="table table-sm doctor-table">
   <thead><tr><th>보관함</th><th>상태</th><th>마지막 스캔</th><th>스케줄</th><th>원격</th><th>VFS</th><th>체크포인트</th><th>작업</th></tr></thead>
@@ -60,6 +71,47 @@
 <script>
 var scannerPollTimer = null;
 var scannerRequestRunning = false;
+var ttsRequestRunning = false;
+
+function renderTtsStatus(data) {
+  data = data || {};
+  var badge = document.getElementById('tts_status_badge');
+  var summary = document.getElementById('tts_status_summary');
+  var error = document.getElementById('tts_status_error');
+  var root = document.getElementById('tts_status_root');
+  summary.textContent = '';
+  root.textContent = '';
+  error.textContent = '';
+  badge.className = 'doctor-status doctor-status-warning';
+  var valid = data.success === true && typeof data.enabled === 'boolean' && typeof data.available === 'boolean' &&
+    ['running', 'queued', 'cache_mb'].every(function(key) { return typeof data[key] === 'number' && Number.isFinite(data[key]) && data[key] >= 0; });
+  if (!valid) {
+    var status = Number(data.http_status);
+    badge.textContent = status === 404 || status === 405 ? 'API 미지원' : status === 401 || status === 403 ? '권한 확인' : '조회 실패';
+    error.textContent = status === 404 || status === 405 ? '이 코어에서 TTS 상태 API를 사용할 수 없습니다. 코어 버전을 확인해 주세요.' :
+      status === 401 || status === 403 ? 'BookOasis 관리자 계정과 권한을 확인해 주세요.' :
+      (data.message || data.error || 'TTS 상태 응답을 확인할 수 없습니다.');
+  } else {
+    badge.textContent = !data.enabled ? '비활성' : !data.available ? '엔진 사용 불가' : data.running ? '생성 중' : data.queued ? '대기 중' : '대기';
+    if (data.enabled && data.available) badge.className = 'doctor-status doctor-status-healthy';
+    summary.textContent = '실행 ' + data.running + '건 · 대기 ' + data.queued + '건 · 음성 캐시 ' + data.cache_mb.toLocaleString() + ' MB';
+    root.textContent = data.audio_root || '';
+    error.textContent = data.reason || (!data.available ? 'TTS 엔진 또는 음성 저장 경로를 확인해 주세요.' : '');
+  }
+  error.style.display = error.textContent ? 'block' : 'none';
+  document.getElementById('tts_status_updated').textContent = (valid ? '마지막 갱신 ' : '조회 시각 ') + new Date().toLocaleTimeString();
+}
+
+function loadTtsStatus() {
+  if (ttsRequestRunning) return;
+  ttsRequestRunning = true;
+  bookoasisMateAjax('main', 'tts_status', {}, function(ret) {
+    renderTtsStatus(ret.data || {success:false, message:ret.msg});
+  }, function() { ttsRequestRunning = false; }, {
+    global:false, silent:true,
+    error:function(xhr, message) { renderTtsStatus({success:false, message:message, http_status:xhr.status}); }
+  });
+}
 
 function renderPendingQueue(items) {
   var root = document.getElementById('pending_queue');
@@ -243,6 +295,7 @@ function scheduleScannerPoll() {
   }
 }
 function loadScanner(showLoading) {
+  loadTtsStatus();
   if (scannerRequestRunning) return;
   scannerRequestRunning = true;
   bookoasisMateAjax('main', 'scanner', {db_type:$('#db_type').val(), live:'true'}, function(ret) {

@@ -370,6 +370,12 @@ class BookOasisClient:
             query={"_ts": str(time.time_ns())},
         )
 
+    def tts_status(self):
+        return self._admin_request(
+            "api/media/tts/pregen/admin-status",
+            query={"_ts": str(time.time_ns())},
+        )
+
     def clear_queue(self):
         return self._admin_request(
             "api/media/system/queue/clear",
