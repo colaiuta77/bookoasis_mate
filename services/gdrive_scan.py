@@ -462,8 +462,8 @@ def event_scan_targets(event, libraries):
         roots = {item["root"] for item in libraries
                  if (item["db_type"], item["id"]) == (library["db_type"], library["id"])}
         if len(roots) > 1:
-            # 현재 BookOasis API는 상대 경로에 대응하는 루트를 지정할 수 없습니다.
-            relative_path = ""
+            # 코어의 루트 내부 검증을 거치는 절대 경로로 동일한 상대 경로를 구분합니다.
+            relative_path = directory
         key = (library["db_type"], library["id"], relative_path)
         if key in seen:
             continue
@@ -782,6 +782,9 @@ class GDriveScanProcessor:
                 break
             mode, db_type, library_id, relative_path = request_key
             library = request_data["library"]
+            if relative_path.startswith("/"):
+                library = find_library(relative_path, [item for item in self.libraries
+                                       if (item["db_type"], item["id"]) == (db_type, library_id)]) or library
             related_event_ids = request_data["event_ids"]
             vfs_failed = any(
                 not operation_result.get("success")
@@ -801,6 +804,7 @@ class GDriveScanProcessor:
                 }
                 continue
             requested_at = datetime.now().isoformat(timespec="milliseconds")
+            fallback_reason = ("부분 스캔 연결 미설정" if not self.path_scan_callback else "보관함 루트 변경") if mode == "library" else ""
             try:
                 if mode == "path":
                     response = self.path_scan_callback(
@@ -816,10 +820,14 @@ class GDriveScanProcessor:
                         and (response.get("message") == "해당 경로를 라이브러리 내에서 찾을 수 없습니다."
                              or str(response.get("message") or "").startswith("Path not found within library:"))
                     ):
+                        if requested_path.startswith("/") and requested_path == (library["root"].rstrip("/") or "/"):
+                            # 루트 자체가 없으면 마운트 오류일 수 있으므로 범위를 넓히지 않습니다.
+                            break
                         requested_path = posixpath.dirname(requested_path)
                         if requested_path:
                             response = self.path_scan_callback(db_type, library_id, library["name"], requested_path)
                         else:
+                            fallback_reason = "삭제 경로의 상위 폴더 없음"
                             response = self.scan_callback(db_type, library_id, library["name"])
                         response = dict(response, cleanup_path=requested_path,
                                         cleanup_scope="path" if requested_path else "library")
@@ -832,6 +840,8 @@ class GDriveScanProcessor:
                         library["name"],
                     )
                 success = bool(response.get("success"))
+                if response.get("mode") == "full_webhook_compat":
+                    fallback_reason = "코어 웹훅이 경로 대신 보관함 스캔으로 접수"
                 message = response.get("message") or response.get("error") or ""
             except Exception as error:
                 success = False
@@ -845,6 +855,8 @@ class GDriveScanProcessor:
                 "response": response,
                 "mode": response.get("mode") or mode,
                 "path": relative_path,
+                "fallback_reason": fallback_reason,
+                "request_accepted": success and (mode == "library" or response.get("cleanup_scope") == "library" or response.get("mode") != "admin_scan_path"),
             }
 
         for event in prepared:

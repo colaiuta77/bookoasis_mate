@@ -70,6 +70,11 @@
       <input type="number" class="form-control" id="gdrive_scan_builtin_poll_seconds" name="gdrive_scan_builtin_poll_seconds" min="15" max="3600" value="{{ arg.get('gdrive_scan_builtin_poll_seconds', '60') }}">
       <small class="form-text text-muted">15~3600초 사이에서 Google Drive 변경 내역을 확인합니다.</small>
     </div>
+    <div class="gdrive-scan-poll-setting">
+      <label for="gdrive_scan_activity_delay_seconds"><strong>Activity 조회 지연(초)</strong></label>
+      <input type="number" class="form-control" id="gdrive_scan_activity_delay_seconds" name="gdrive_scan_activity_delay_seconds" min="0" max="3600" value="{{ arg.get('gdrive_scan_activity_delay_seconds', '60') }}">
+      <small class="form-text text-muted">기본 60초. 현재 시각에서 이 시간만큼 이전까지 Activity를 조회합니다. 늦게 공개되는 활동을 기다리는 설정이며, Changes 방식과 이벤트 처리 대기 시간에는 적용하지 않습니다.</small>
+    </div>
     <input type="hidden" id="gdrive_scan_builtin_roots" name="gdrive_scan_builtin_roots" value="[]">
     <div class="gdrive-scan-root-heading">
       <div>

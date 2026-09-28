@@ -360,10 +360,8 @@ function renderGdriveEvents(data) {
     addTime('스캔 요청', requested[0]);
     addTime('스캔 응답', responded[responded.length - 1]);
     addTime('처리 완료', item.completed_at);
-    if (result.processing_started_at && item.completed_at) {
-      var seconds = (Date.parse(item.completed_at) - Date.parse(result.processing_started_at)) / 1000;
-      if (Number.isFinite(seconds) && seconds >= 0) timeColumn.appendChild(gdriveEventInfoLine('처리 소요', seconds.toFixed(1) + '초'));
-    }
+    var fallbackReasons = Array.from(new Set(scans.map(function(scan) { return scan.fallback_reason; }).filter(Boolean)));
+    if (fallbackReasons.length) timeColumn.appendChild(bookoasisMateText('span', 'doctor-muted', '전체 스캔 전환 · ' + fallbackReasons.join(' · ')));
     if (item.status === 'completed' && scans.some(function(scan) {
       return scan.success && (scan.mode !== 'admin_scan_path' || (scan.response || {}).cleanup_scope === 'library');
     })) {

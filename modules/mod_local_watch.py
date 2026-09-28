@@ -200,14 +200,21 @@ class ModuleLocalWatch(PluginModuleBase):
             return {"success": False, "cancelled": True, "message": "작업 중지 또는 감시 경로 확인 대기"}
         if settings.get("bookoasis_username") and settings.get("bookoasis_password"):
             if relative:
-                result = client.scan_library_path(library_id, relative, db_type=db_type, force=False, timeout=120)
+                result = client.scan_library_path(library_id, relative, db_type=db_type, force=False, timeout=120,
+                                                  allow_absolute=relative.startswith("/"))
+                result = dict(result, mode="admin_scan_path")
             else:
                 result = client.scan_library(library_id, db_type=db_type, force=False)
-            if result.get("success") or result.get("http_status") not in {404, 405} or result.get("outcome_unknown"):
+            unsupported_api = result.get("http_status") == 405 or (
+                result.get("http_status") == 404 and result.get("message") == "HTTP 오류 404")
+            if result.get("success") or not unsupported_api or result.get("outcome_unknown"):
                 return result
         if blocked():
             return {"success": False, "cancelled": True, "message": "작업 중지 또는 감시 경로 확인 대기"}
         if relative:
+            if relative.startswith("/"):
+                return {"success": False, "retryable": False, "mode": "admin_scan_path",
+                        "message": "다중 루트 부분 스캔에는 BookOasis 관리자 계정과 scan-path API 지원이 필요합니다. 전체 스캔으로 자동 전환하지 않았습니다."}
             return client.request_scan_path(settings.get("webhook_token"), library_id, relative, db_type=db_type, timeout=120)
         return client.request_scan(settings.get("webhook_token"), library_id, db_type=db_type)
 

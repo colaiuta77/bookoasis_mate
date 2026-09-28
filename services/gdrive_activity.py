@@ -14,6 +14,7 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
     detection_mode = "activity"
 
     def __init__(self, *args, **kwargs):
+        self.polling_delay_seconds = max(0, min(int(kwargs.pop("polling_delay_seconds", 60)), 3600))
         super().__init__(*args, **kwargs)
         self.state_remote = google_drive_state_remote(self.remote, self.source_remote, "activity")
         self.item_scope = f"{self.state_remote}:{self.root_id}"
@@ -48,8 +49,8 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
     def list_changes(self, page_token):
         cursor = json.loads(page_token)
         start = self._time(cursor["start"])
-        # 1분 지연 및 5분 중첩으로 늦게 공개된 활동을 다시 확인합니다.
-        end = self._time(cursor["end"]) if cursor.get("end") else datetime.now(timezone.utc) - timedelta(seconds=60)
+        # 조회 지연 및 5분 중첩으로 늦게 공개된 활동을 다시 확인합니다.
+        end = self._time(cursor["end"]) if cursor.get("end") else datetime.now(timezone.utc) - timedelta(seconds=self.polling_delay_seconds)
         if end <= start:
             return
         body = {"ancestorName": "items/" + self.root_id, "pageSize": 100,
@@ -135,6 +136,8 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
         return previous, {"action": kind, "item_type": "directory" if "driveFolder" in target else "file",
                           "path": "", "removed_path": "", "activity_hold": metadata,
                           "drive": {"file_id": change["fileId"], "name": str(target.get("title") or ""),
+                                    "action_detail": next(iter(detail.get("create") or {}), "") if "create" in detail else str((detail.get("delete") or detail.get("restore") or {}).get("type") or ""),
+                                    "occurred_at": change["receipt"]["parent_id"],
                                     "mime_type": str(target.get("mimeType") or "")},
                           "ingestion_error": f"Activity 경로 확인 보류 ({kind}, 파일 ID {change['fileId']}): {reason} 경로 수정 후 재시도해 주세요. 다른 활동 수집은 계속합니다."}
 
@@ -182,5 +185,7 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
         event = {"action": kind, "item_type": item_type, "path": new_path or old_path,
                  "removed_path": old_path if kind in {"move", "rename", "delete"} else "",
                  "drive": {"file_id": file_id, "name": str((data or {}).get("name") or target.get("title") or ""),
+                           "action_detail": next(iter(detail.get("create") or {}), "") if "create" in detail else str((detail.get("delete") or detail.get("restore") or {}).get("type") or ""),
+                           "occurred_at": change["receipt"]["parent_id"],
                            "mime_type": str((data or {}).get("mimeType") or target.get("mimeType") or "")}}
         return current, event
