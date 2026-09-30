@@ -4,11 +4,12 @@ import time
 import traceback
 from pathlib import Path
 
-from flask import Response, jsonify, render_template
+from flask import Response, jsonify, redirect, render_template
 
 from ..setup import *
 from ..services.bookoasis_db import BookOasisDatabaseAdapter
 from ..services.mate_service import BookOasisMateService
+from .mod_scan import ModuleScan
 
 
 class ModuleMain(PluginModuleBase):
@@ -65,13 +66,17 @@ class ModuleMain(PluginModuleBase):
         return P.bookoasis_mate_service
 
     def process_menu(self, page, req):
-        page = page if page in {"dashboard", "statistics", "issues", "scanner", "logs", "gaps", "covers", "orphan_covers", "history", "manual"} else "dashboard"
+        if page in {"scanner", "scheduler"}:
+            return redirect(f"/{P.package_name}/scan/{page}")
+        page = page if page in {"dashboard", "statistics", "issues", "logs", "gaps", "covers", "orphan_covers", "history", "manual"} else "dashboard"
         P.logger.debug(f"[BookOasisMate] 메인 메뉴 열기 page={page}")
         arg = P.ModelSetting.to_dict()
         arg["page"] = page
         return render_template(f"{P.package_name}_{self.name}_{page}.html", arg=arg)
 
     def process_ajax(self, command, req):
+        if command in ModuleScan.commands:
+            return ModuleScan(P).process_ajax(command, req)
         started = time.monotonic()
         safe_command = str(command or "").replace("\r", " ").replace("\n", " ")[:80]
         details = []
@@ -143,66 +148,6 @@ class ModuleMain(PluginModuleBase):
                     page_size=req.form.get("page_size", P.ModelSetting.get("page_size")),
                 )
                 return jsonify({"ret": "success", "data": data})
-            if command == "tts_status":
-                return jsonify({"ret": "success", "data": self.service.admin_client().tts_status()})
-            if command == "scanner":
-                data = self.service.scanner(
-                    db_type=req.form.get("db_type", "general"),
-                    limit=req.form.get("limit", 100),
-                    include_live=req.form.get("live", "false"),
-                )
-                return jsonify({"ret": "success", "data": data})
-            if command == "rescan":
-                data = self.service.request_rescan(
-                    db_type=req.form.get("db_type", "general"),
-                    library_id=req.form.get("library_id"),
-                    all_libraries=req.form.get("all_libraries") == "true",
-                    force=req.form.get("force"),
-                )
-                return jsonify({
-                    "ret": "success" if data["success"] else "warning",
-                    "msg": data.get("message") or (
-                        f"재스캔 요청 {data['requested']}건 중 "
-                        f"{data['queued']}건을 처리했습니다."
-                    ),
-                    "data": data,
-                })
-            if command == "cancel_library_scan":
-                data = self.service.cancel_library_scan(
-                    req.form.get("library_id"),
-                    req.form.get("db_type", "general"),
-                )
-                return jsonify({
-                    "ret": "success" if data.get("success") else "danger",
-                    "msg": data.get("message") or data.get("error") or "보관함 스캔 취소 요청을 처리했습니다.",
-                    "data": data,
-                })
-            if command == "scan_library_covers":
-                data = self.service.scan_library_covers(
-                    req.form.get("library_id"),
-                    req.form.get("db_type", "general"),
-                )
-                return jsonify({
-                    "ret": "success" if data.get("success") else "danger",
-                    "msg": data.get("message") or data.get("error") or "보관함 표지 스캔 요청을 처리했습니다.",
-                    "data": data,
-                })
-            if command == "clear_scan_queue":
-                data = self.service.clear_scan_queue()
-                return jsonify({
-                    "ret": "success" if data.get("success") else "danger",
-                    "msg": data.get("message") or data.get("error") or "스캔 대기열 정리를 처리했습니다.",
-                    "data": data,
-                })
-            if command == "cancel_scan_queue_task":
-                data = self.service.cancel_scan_queue_task(
-                    req.form.get("task_key"),
-                )
-                return jsonify({
-                    "ret": "success" if data.get("success") else "danger",
-                    "msg": data.get("message") or data.get("error") or "대기 작업 취소를 처리했습니다.",
-                    "data": data,
-                })
             if command == "book_scan":
                 data = self.service.scan_book(
                     req.form.get("book_id"),

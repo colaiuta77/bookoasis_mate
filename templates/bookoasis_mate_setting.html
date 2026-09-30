@@ -966,6 +966,9 @@ function loadConfiguredComposeEditors() {
 }
 
 $('#setting-env-tab').on('shown.bs.tab', function() {
+  if (!envLoadedPath && !envRequestRunning && String($('#bookoasis_root_path').val() || '').trim()) {
+    $('#env_file_load_btn').trigger('click');
+  }
   loadConfiguredComposeEditors();
 });
 

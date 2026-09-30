@@ -2,6 +2,16 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+<style>
+.doctor-scanner-libraries { table-layout:fixed; min-width:1080px; }
+.doctor-scanner-libraries th, .doctor-scanner-libraries td { padding:12px 10px; overflow-wrap:anywhere; }
+.doctor-scanner-libraries .doctor-library-actions { display:table-cell; min-width:0; }
+.doctor-scanner-actions { display:flex; flex-wrap:wrap; gap:6px; }
+.doctor-scanner-libraries .doctor-plugin-switch { margin:0; gap:5px; }
+.doctor-scanner-libraries .doctor-plugin-switch-track { flex-shrink:0; }
+.doctor-scanner-libraries .doctor-plugin-switch input:disabled + .doctor-plugin-switch-track { opacity:.45; }
+.doctor-scanner-date { white-space:nowrap; font-variant-numeric:tabular-nums; }
+</style>
 
 <div class="doctor-toolbar">
   <select id="db_type" class="form-control form-control-sm">
@@ -55,8 +65,10 @@
 </div>
 
 <h4>보관함 상태</h4>
-<div class="doctor-table-wrap"><table class="table table-sm doctor-table">
-  <thead><tr><th>보관함</th><th>상태</th><th>마지막 스캔</th><th>스케줄</th><th>원격</th><th>VFS</th><th>체크포인트</th><th>작업</th></tr></thead>
+<p class="doctor-muted">스캔 사용은 자동 예약의 ON/OFF입니다. 수동 스캔과 실행 중인 작업에는 영향을 주지 않습니다.</p>
+<div class="doctor-table-wrap"><table class="table table-sm doctor-table doctor-scanner-libraries">
+  <colgroup><col style="width:18%"><col style="width:7%"><col style="width:16%"><col style="width:9%"><col style="width:5%"><col style="width:13%"><col style="width:10%"><col style="width:8%"><col style="width:14%"></colgroup>
+  <thead><tr><th>보관함</th><th>상태</th><th>마지막 스캔</th><th>스케줄</th><th>원격</th><th>VFS</th><th>체크포인트</th><th>스캔 사용</th><th>작업</th></tr></thead>
   <tbody id="library_rows"></tbody>
 </table></div>
 <div id="library_empty" class="doctor-empty" style="display:none">등록된 보관함이 없습니다.</div>
@@ -72,6 +84,7 @@
 var scannerPollTimer = null;
 var scannerRequestRunning = false;
 var ttsRequestRunning = false;
+var scannerScheduleSaving = false;
 
 function renderTtsStatus(data) {
   data = data || {};
@@ -105,7 +118,7 @@ function renderTtsStatus(data) {
 function loadTtsStatus() {
   if (ttsRequestRunning) return;
   ttsRequestRunning = true;
-  bookoasisMateAjax('main', 'tts_status', {}, function(ret) {
+  bookoasisMateAjax('scan', 'tts_status', {}, function(ret) {
     renderTtsStatus(ret.data || {success:false, message:ret.msg});
   }, function() { ttsRequestRunning = false; }, {
     global:false, silent:true,
@@ -198,7 +211,11 @@ function renderScanner(data) {
     var row = document.createElement('tr');
     row.appendChild(bookoasisMateText('td', '', item.name || '-'));
     row.appendChild(bookoasisMateText('td', '', item.scan_status || '-'));
-    row.appendChild(bookoasisMateText('td', 'doctor-muted', item.last_scanned_at || '미실행'));
+    var lastScan = item.last_scanned_at ? new Date(item.last_scanned_at) : null;
+    var dateCell = bookoasisMateText('td', 'doctor-muted doctor-scanner-date',
+      lastScan && !isNaN(lastScan.getTime()) ? lastScan.toLocaleString('sv-SE') : (item.last_scanned_at || '미실행'));
+    dateCell.title = item.last_scanned_at || '';
+    row.appendChild(dateCell);
     row.appendChild(bookoasisMateText('td', '', item.cron_schedule || '-'));
     row.appendChild(bookoasisMateText('td', '', Number(item.is_remote || 0) ? '예' : '아니요'));
     row.appendChild(bookoasisMateText(
@@ -214,16 +231,39 @@ function renderScanner(data) {
       Number(item.checkpoint_folders || 0) ? 'doctor-live-status' : 'doctor-muted',
       Number(item.checkpoint_folders || 0) ? item.checkpoint_folders + '개 폴더' : '-'
     ));
+    var toggleCell = document.createElement('td');
+    var toggleLabel = document.createElement('label');
+    toggleLabel.className = 'doctor-plugin-switch';
+    var toggle = document.createElement('input');
+    toggle.type = 'checkbox';
+    toggle.setAttribute('role', 'switch');
+    toggle.setAttribute('aria-label', (item.name || item.id) + ' 자동 스캔 사용');
+    var hasSchedule = !!String(item.cron_schedule || '').trim();
+    toggle.checked = hasSchedule && (item.schedule_enabled == null || ['true', '1'].indexOf(String(item.schedule_enabled).toLowerCase()) >= 0);
+    toggle.disabled = !hasSchedule || data.library_source !== 'api';
+    toggleLabel.title = !hasSchedule ? '스캔 스케줄러에서 예약을 먼저 등록해 주세요.' :
+      data.library_source !== 'api' ? '코어 API 상태를 확인한 후 변경할 수 있습니다.' : '자동 예약만 변경합니다.';
+    var toggleText = bookoasisMateText('span', 'doctor-plugin-switch-text', toggle.checked ? 'ON' : 'OFF');
+    var dbType = $('#db_type').val();
+    toggle.addEventListener('change', function() { toggleScannerSchedule(toggle, item, dbType); });
+    toggleLabel.appendChild(toggle);
+    toggleLabel.appendChild(bookoasisMateText('span', 'doctor-plugin-switch-track', ''));
+    toggleLabel.appendChild(toggleText);
+    toggleCell.appendChild(toggleLabel);
+    row.appendChild(toggleCell);
     var actionCell = document.createElement('td');
     actionCell.className = 'doctor-library-actions';
+    var actionButtons = document.createElement('div');
+    actionButtons.className = 'doctor-scanner-actions';
+    actionCell.appendChild(actionButtons);
     var scanButton = bookoasisMateText('button', 'btn btn-sm btn-outline-warning', '재스캔');
     scanButton.type = 'button';
     scanButton.addEventListener('click', function() { requestRescan(item.id, item.name || item.id, false); });
     var coverButton = bookoasisMateText('button', 'btn btn-sm btn-outline-primary', '표지 스캔');
     coverButton.type = 'button';
     coverButton.addEventListener('click', function() { requestCoverScan(item.id, item.name || item.id); });
-    actionCell.appendChild(scanButton);
-    if (['audiobook', 'video'].indexOf($('#db_type').val()) === -1) actionCell.appendChild(coverButton);
+    actionButtons.appendChild(scanButton);
+    if (['audiobook', 'video'].indexOf($('#db_type').val()) === -1) actionButtons.appendChild(coverButton);
     if (['scanning', 'running', 'cancelling'].indexOf(String(item.scan_status || '').toLowerCase()) >= 0) {
       var cancelButton = bookoasisMateText(
         'button',
@@ -233,7 +273,7 @@ function renderScanner(data) {
       cancelButton.type = 'button';
       cancelButton.disabled = String(item.scan_status || '').toLowerCase() === 'cancelling';
       cancelButton.addEventListener('click', function() { requestLibraryCancel(item.id, item.name || item.id); });
-      actionCell.appendChild(cancelButton);
+      actionButtons.appendChild(cancelButton);
     }
     row.appendChild(actionCell);
     libraryBody.appendChild(row);
@@ -252,36 +292,56 @@ function renderScanner(data) {
     taskBody.appendChild(row);
   });
 }
+function toggleScannerSchedule(input, item, dbType) {
+  var enabled = input.checked;
+  if (scannerScheduleSaving || !confirm('보관함 [' + (item.name || item.id) + ']의 자동 스캔 예약을 ' + (enabled ? '켜시겠습니까?' : '끄시겠습니까?'))) {
+    input.checked = !enabled;
+    return;
+  }
+  scannerScheduleSaving = true;
+  input.disabled = true;
+  var saved = false;
+  bookoasisMateAjax('scan', 'scheduler_enabled', {
+    db_type:dbType, library_id:item.id, enabled:enabled ? 'true' : 'false'
+  }, function(ret) {
+    saved = !!(ret.data && ret.data.success);
+  }, function() {
+    input.checked = saved ? enabled : !enabled;
+    input.disabled = false;
+    scannerScheduleSaving = false;
+    loadScanner(true);
+  });
+}
 function requestCoverScan(libraryId, label) {
   if (!confirm('보관함 [' + label + ']의 표지만 다시 스캔하시겠습니까?')) return;
-  bookoasisMateAjax('main', 'scan_library_covers', {
+  bookoasisMateAjax('scan', 'scan_library_covers', {
     db_type:$('#db_type').val(),
     library_id:libraryId
   }, function(ret) { if (ret.data) loadScanner(true); });
 }
 function requestLibraryCancel(libraryId, label) {
   if (!confirm('보관함 [' + label + ']의 실행 중 스캔에 취소를 요청하시겠습니까? 즉시 중단되지 않을 수 있습니다.')) return;
-  bookoasisMateAjax('main', 'cancel_library_scan', {
+  bookoasisMateAjax('scan', 'cancel_library_scan', {
     db_type:$('#db_type').val(),
     library_id:libraryId
   }, function(ret) { if (ret.data) loadScanner(true); });
 }
 function cancelPendingTask(taskKey, label) {
   if (!taskKey || !confirm('대기 작업 [' + label + ']을 취소하시겠습니까?')) return;
-  bookoasisMateAjax('main', 'cancel_scan_queue_task', {
+  bookoasisMateAjax('scan', 'cancel_scan_queue_task', {
     task_key:taskKey
   }, function(ret) { if (ret.data) loadScanner(true); });
 }
 function clearPendingQueue() {
   if (!confirm('실행 중 작업은 유지하고 대기 중인 스캔 작업을 모두 제거하시겠습니까?')) return;
-  bookoasisMateAjax('main', 'clear_scan_queue', {}, function(ret) {
+  bookoasisMateAjax('scan', 'clear_scan_queue', {}, function(ret) {
     if (ret.data) loadScanner(true);
   });
 }
 function requestRescan(libraryId, label, allLibraries) {
   var target = allLibraries ? '현재 DB의 모든 보관함' : '보관함 [' + label + ']';
   if (!confirm(target + '에 재스캔을 요청하시겠습니까?')) return;
-  bookoasisMateAjax('main', 'rescan', {
+  bookoasisMateAjax('scan', 'rescan', {
     db_type: $('#db_type').val(),
     library_id: libraryId || '',
     all_libraries: allLibraries ? 'true' : 'false',
@@ -296,10 +356,10 @@ function scheduleScannerPoll() {
 }
 function loadScanner(showLoading) {
   loadTtsStatus();
-  if (scannerRequestRunning) return;
+  if (scannerRequestRunning || scannerScheduleSaving) return;
   scannerRequestRunning = true;
-  bookoasisMateAjax('main', 'scanner', {db_type:$('#db_type').val(), live:'true'}, function(ret) {
-    if (ret.ret === 'success') {
+  bookoasisMateAjax('scan', 'scanner', {db_type:$('#db_type').val(), live:'true'}, function(ret) {
+    if (ret.ret === 'success' && !scannerScheduleSaving) {
       renderScanner(ret.data);
       document.getElementById('scanner_updated_at').textContent =
         '마지막 갱신 ' + new Date().toLocaleTimeString() +
