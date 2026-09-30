@@ -272,6 +272,47 @@ class BookOasisClient:
             query={"type": db_type},
         )
 
+    def update_library_schedule(
+        self,
+        library_id,
+        db_type="general",
+        cron_schedule="",
+        vfs_refresh_before_scan=False,
+        rclone_rc_url="",
+    ):
+        library_id, error = self._valid_positive_id(library_id, "보관함 ID")
+        if error:
+            return error
+        db_type = self._valid_library_db_type(db_type)
+        if not db_type:
+            return self._admin_error("DB 유형이 올바르지 않습니다.")
+        cron_schedule = str(cron_schedule or "").strip()
+        if len(cron_schedule) > 50:
+            return self._admin_error("Cron 표현식은 50자를 초과할 수 없습니다.")
+        return self._admin_request(
+            f"api/media/libraries/{library_id}/schedule",
+            method="POST",
+            form={
+                "type": db_type,
+                "cron_schedule": cron_schedule,
+                "vfs_refresh_before_scan": "true" if vfs_refresh_before_scan else "false",
+                "rclone_rc_url": str(rclone_rc_url or "").strip(),
+            },
+        )
+
+    def update_library_schedule_enabled(self, library_id, db_type="general", enabled=True):
+        library_id, error = self._valid_positive_id(library_id, "보관함 ID")
+        if error:
+            return error
+        db_type = self._valid_library_db_type(db_type)
+        if not db_type:
+            return self._admin_error("DB 유형이 올바르지 않습니다.")
+        return self._admin_request(
+            f"api/media/libraries/{library_id}/schedule-enabled",
+            method="POST",
+            form={"type": db_type, "enabled": "true" if enabled else "false"},
+        )
+
     def scan_library(self, library_id, db_type="general", force=False):
         library_id, error = self._valid_positive_id(library_id, "보관함 ID")
         if error:

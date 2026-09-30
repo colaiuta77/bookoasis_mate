@@ -1,0 +1,1493 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+
+<style>
+.scan-scheduler { --scheduler-label-width:225px; }
+.scan-scheduler-toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px; }
+.scan-scheduler-toolbar .form-control { width:auto; min-width:145px; }
+.scan-scheduler-toolbar .scan-scheduler-search { min-width:240px; flex:1 1 260px; }
+.scan-scheduler-kpis { display:grid; grid-template-columns:repeat(5,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
+.scan-scheduler-kpi { min-width:0; padding:13px 14px; border:1px solid #dee2e6; border-radius:9px; background:rgba(127,127,127,.035); }
+.scan-scheduler-kpi span { display:block; color:#6c757d; font-size:.76rem; }
+.scan-scheduler-kpi strong { display:block; margin-top:3px; font-size:1.22rem; }
+.scan-scheduler-kpi-warning { box-shadow:inset 0 3px 0 #f0ad00; }
+.scan-scheduler-kpi-danger { box-shadow:inset 0 3px 0 #dc3545; }
+.scan-scheduler-alert { display:none; margin-bottom:14px; padding:10px 12px; border:1px solid rgba(240,173,0,.45); border-radius:7px; background:rgba(255,193,7,.08); color:#8a5a00; font-size:.84rem; }
+.scan-scheduler-card { margin-bottom:16px; }
+.scan-scheduler-card-header { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:12px; }
+.scan-scheduler-card-header h5 { margin:0 0 3px; }
+.scan-scheduler-card-header .form-control { width:auto; min-width:150px; }
+.scan-scheduler-legend { display:flex; flex-wrap:wrap; gap:10px; color:#6c757d; font-size:.76rem; }
+.scan-scheduler-legend span { display:inline-flex; align-items:center; gap:5px; }
+.scan-scheduler-legend i { width:11px; height:7px; border-radius:3px; background:#0d6efd; }
+.scan-scheduler-legend .warning { background:#f0ad00; }
+.scan-scheduler-legend .danger { background:#dc3545; }
+.scan-scheduler-legend .remote { background:#6f42c1; }
+.scan-scheduler-db-filter-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:0 0 10px; }
+.scan-scheduler-db-filter-row .doctor-muted { margin-right:4px; }
+.scan-scheduler-db-filter-btn { min-width:72px; }
+.scan-scheduler-db-filter-btn.active { background:#6f2da8; border-color:#6f2da8; color:#fff; }
+.scan-scheduler-view-toggle { display:flex; align-items:center; gap:4px; margin-left:auto; }
+.scan-scheduler-view-btn.active { background:#6f2da8; border-color:#6f2da8; color:#fff; }
+.scan-scheduler-weekday-filter { display:flex; flex-wrap:wrap; align-items:center; gap:5px; margin:0 0 10px; }
+.scan-scheduler-weekday-filter.compact { margin:0; justify-content:flex-end; }
+.scan-scheduler-weekday-btn { min-width:64px; padding-left:8px; padding-right:8px; }
+.scan-scheduler-weekday-btn.active { background:#6f2da8; border-color:#6f2da8; color:#fff; }
+.scan-scheduler-weekday-btn .ko { font-weight:700; }
+.scan-scheduler-weekday-btn .en { margin-left:3px; font-size:.64rem; opacity:.72; }
+.scan-scheduler-weekday-wrap { max-height:clamp(360px,68vh,760px); overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:rgba(111,45,168,.45) transparent; border:1px solid #dee2e6; border-radius:8px; }
+.scan-scheduler-weekday-table { width:100%; min-width:900px; border-collapse:separate; border-spacing:0; table-layout:fixed; }
+.scan-scheduler-weekday-table th, .scan-scheduler-weekday-table td { border-right:1px solid #eef0f2; border-bottom:1px solid #eef0f2; }
+.scan-scheduler-weekday-table th:last-child, .scan-scheduler-weekday-table td:last-child { border-right:0; }
+.scan-scheduler-weekday-table tr:last-child td { border-bottom:0; }
+.scan-scheduler-weekday-time { width:78px; padding:6px 8px; background:#fff; color:#6c757d; text-align:center; font-size:.7rem; font-weight:700; position:sticky; left:0; z-index:3; }
+.scan-scheduler-weekday-day { position:sticky; top:0; z-index:4; padding:8px 4px; background:#fff; color:#495057; text-align:center; font-size:.74rem; font-weight:700; }
+.scan-scheduler-weekday-table thead .scan-scheduler-weekday-time { top:0; z-index:5; }
+.scan-scheduler-weekday-cell { min-height:38px; height:42px; padding:3px; vertical-align:top; background:rgba(127,127,127,.018); cursor:crosshair; }
+.scan-scheduler-weekday-cell:hover { background:rgba(13,110,253,.045); }
+.scan-scheduler-weekday-cell.has-conflict { background:rgba(220,53,69,.055); }
+.scan-scheduler-weekday-cell.is-drop-target { background:rgba(111,45,168,.10); box-shadow:inset 0 0 0 2px rgba(111,45,168,.38); }
+.scan-scheduler-weekday-chip { display:block; width:100%; overflow:hidden; margin-bottom:2px; padding:3px 5px; border:1px solid rgba(13,110,253,.25); border-radius:4px; background:rgba(13,110,253,.10); color:#0d6efd; font-size:.66rem; font-weight:700; line-height:1.2; text-align:left; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
+.scan-scheduler-weekday-chip:last-child { margin-bottom:0; }
+.scan-scheduler-weekday-chip:hover { outline:1px solid rgba(13,110,253,.28); }
+.scan-scheduler-weekday-chip[data-pointer-draggable="true"] { cursor:grab; user-select:none; -webkit-user-drag:none; touch-action:none; }
+.scan-scheduler-weekday-chip.is-dragging { opacity:.48; cursor:grabbing; }
+.scan-scheduler-weekday-drag-ghost { position:fixed; z-index:20000; width:auto !important; min-width:120px; max-width:260px; margin:0 !important; pointer-events:none; opacity:.92; box-shadow:0 8px 24px rgba(0,0,0,.22); transform:translate(12px,12px); }
+.scan-scheduler-weekday-chip-adult { border-color:rgba(220,53,69,.28); background:rgba(220,53,69,.09); color:#b02a37; }
+.scan-scheduler-weekday-chip-audiobook { border-color:rgba(111,66,193,.28); background:rgba(111,66,193,.09); color:#6f42c1; }
+.scan-scheduler-weekday-chip-video { border-color:rgba(25,135,84,.28); background:rgba(25,135,84,.09); color:#198754; }
+.scan-scheduler-weekday-chip-conflict { box-shadow:inset 0 0 0 1px rgba(220,53,69,.65); }
+.scan-scheduler-grid-target { padding:10px 12px; border:1px solid rgba(111,45,168,.22); border-radius:7px; background:rgba(111,45,168,.035); }
+.scan-scheduler-grid-target-summary { margin-top:5px; color:#6f2da8; font-size:.76rem; font-weight:700; }
+.scan-scheduler-heatmap-wrap { overflow-x:auto; }
+.scan-scheduler-heatmap { display:grid; grid-template-columns:repeat(24,minmax(34px,1fr)); min-width:820px; gap:3px; }
+.scan-scheduler-heat { position:relative; min-height:54px; padding:5px 3px; border:1px solid #e9ecef; border-radius:5px; background:rgba(127,127,127,.035); text-align:center; }
+.scan-scheduler-heat strong { display:block; margin-top:7px; font-size:.9rem; }
+.scan-scheduler-heat small { color:#6c757d; font-size:.65rem; }
+.scan-scheduler-heat-active { background:rgba(13,110,253,.10); border-color:rgba(13,110,253,.22); }
+.scan-scheduler-heat-busy { background:rgba(240,173,0,.16); border-color:rgba(240,173,0,.42); }
+.scan-scheduler-heat-conflict { background:rgba(220,53,69,.12); border-color:rgba(220,53,69,.42); }
+.scan-scheduler-timeline-wrap { max-height:clamp(360px,68vh,760px); overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:rgba(111,45,168,.45) transparent; border:1px solid #dee2e6; border-radius:8px; }
+.scan-scheduler-timeline { width:100%; min-width:0; }
+.scan-scheduler-time-header, .scan-scheduler-row { display:grid; grid-template-columns:var(--scheduler-label-width) minmax(0,1fr); }
+.scan-scheduler-time-header { position:sticky; top:0; z-index:4; border-bottom:1px solid #dee2e6; background:#fff; }
+.scan-scheduler-time-label { position:sticky; left:0; z-index:5; padding:7px 8px; border-right:1px solid #dee2e6; background:#fff; color:#6c757d; font-size:.72rem; font-weight:700; }
+.scan-scheduler-hours { display:grid; grid-template-columns:repeat(24,1fr); }
+.scan-scheduler-hour { min-width:0; padding:7px 0; border-right:1px solid #f1f3f5; color:#6c757d; text-align:center; font-size:.64rem; }
+.scan-scheduler-row { min-height:60px; border-bottom:1px solid #eef0f2; }
+.scan-scheduler-row:last-child { border-bottom:0; }
+.scan-scheduler-row:hover { background:rgba(13,110,253,.025); }
+.scan-scheduler-label { position:sticky; left:0; z-index:2; display:flex; align-items:center; justify-content:space-between; gap:6px; padding:7px 8px; border-right:1px solid #dee2e6; background:#fff; }
+.scan-scheduler-label-main { min-width:0; flex:1 1 auto; overflow:hidden; }
+.scan-scheduler-label-main strong { display:block; overflow:hidden; font-size:.80rem; text-overflow:ellipsis; white-space:nowrap; }
+.scan-scheduler-label-meta { display:flex; flex-wrap:wrap; gap:3px 5px; margin-top:3px; color:#6c757d; font-size:.64rem; }
+.scan-scheduler-label > .btn { flex:0 0 auto; padding:3px 7px; font-size:.70rem; line-height:1.2; }
+.scan-scheduler-db-badge { display:inline-block; padding:1px 5px; border-radius:999px; background:rgba(13,110,253,.10); color:#0d6efd; font-weight:700; }
+.scan-scheduler-db-adult { background:rgba(220,53,69,.10); color:#b02a37; }
+.scan-scheduler-db-audiobook { background:rgba(111,66,193,.11); color:#6f42c1; }
+.scan-scheduler-db-video { background:rgba(25,135,84,.11); color:#198754; }
+.scan-scheduler-track { position:relative; min-width:0; min-height:60px; overflow:hidden; background-image:linear-gradient(to right, rgba(127,127,127,.12) 1px, transparent 1px); background-size:calc(100% / 24) 100%; }
+.scan-scheduler-track[data-droppable="true"] { cursor:copy; }
+.scan-scheduler-track[data-addable="true"] { cursor:crosshair; }
+.scan-scheduler-track[data-addable="true"]:hover { background-color:rgba(13,110,253,.025); }
+.scan-scheduler-event { position:absolute; top:11px; height:36px; min-width:4px; overflow:hidden; border:1px solid rgba(13,110,253,.42); border-radius:6px; background:rgba(13,110,253,.18); color:#084298; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.06); }
+.scan-scheduler-timeline-wrap::-webkit-scrollbar,
+.scan-scheduler-weekday-wrap::-webkit-scrollbar { width:9px; height:9px; }
+.scan-scheduler-timeline-wrap::-webkit-scrollbar-track,
+.scan-scheduler-weekday-wrap::-webkit-scrollbar-track { background:transparent; }
+.scan-scheduler-timeline-wrap::-webkit-scrollbar-thumb,
+.scan-scheduler-weekday-wrap::-webkit-scrollbar-thumb { background:rgba(111,45,168,.34); border:2px solid transparent; border-radius:999px; background-clip:padding-box; }
+.scan-scheduler-timeline-wrap::-webkit-scrollbar-thumb:hover,
+.scan-scheduler-weekday-wrap::-webkit-scrollbar-thumb:hover { background:rgba(111,45,168,.52); border:2px solid transparent; background-clip:padding-box; }
+.scan-scheduler-event:hover, .scan-scheduler-event:focus { z-index:3; outline:2px solid rgba(13,110,253,.25); }
+.scan-scheduler-event-warning { border-color:rgba(240,173,0,.65); background:rgba(240,173,0,.28); color:#7a4c00; }
+.scan-scheduler-event-critical { border-color:rgba(220,53,69,.65); background:rgba(220,53,69,.20); color:#a71d2a; }
+.scan-scheduler-event-remote { box-shadow:inset 0 -4px 0 rgba(111,66,193,.72); }
+.scan-scheduler-empty-track { position:absolute; inset:0; display:flex; align-items:center; padding-left:12px; color:#adb5bd; font-size:.74rem; pointer-events:none; }
+.scan-scheduler-suggestions { display:grid; gap:7px; }
+.scan-scheduler-suggestion { display:grid; grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto; gap:12px; align-items:center; padding:10px 12px; border:1px solid #e9ecef; border-radius:7px; }
+.scan-scheduler-suggestion code { color:#495057; }
+.scan-scheduler-conflicts { max-height:360px; overflow:auto; }
+.scan-scheduler-conflict-row { display:grid; grid-template-columns:95px minmax(160px,1fr) minmax(160px,1fr) 100px minmax(180px,1fr); gap:8px; padding:8px 6px; border-bottom:1px solid #eef0f2; align-items:center; font-size:.78rem; }
+.scan-scheduler-conflict-level { display:inline-block; width:max-content; padding:2px 7px; border-radius:999px; background:rgba(240,173,0,.16); color:#9a6200; font-weight:700; }
+.scan-scheduler-conflict-level-critical { background:rgba(220,53,69,.13); color:#b02a37; }
+.scan-scheduler-drawer-backdrop { display:none; position:fixed; inset:0; z-index:1088; background:rgba(0,0,0,.38); }
+.scan-scheduler-drawer { position:fixed; z-index:1089; top:0; right:0; width:min(480px,96vw); height:100vh; transform:translateX(102%); transition:transform .18s ease; background:#fff; box-shadow:-10px 0 32px rgba(0,0,0,.22); }
+.scan-scheduler-drawer-open .scan-scheduler-drawer-backdrop { display:block; }
+.scan-scheduler-drawer-open .scan-scheduler-drawer { transform:translateX(0); }
+.scan-scheduler-drawer-body { height:100%; overflow-y:auto; padding:18px; }
+.scan-scheduler-drawer-header { display:flex; justify-content:space-between; gap:12px; padding-bottom:12px; border-bottom:1px solid #dee2e6; }
+.scan-scheduler-drawer-header h4 { margin:0 0 4px; font-size:1.05rem; }
+.scan-scheduler-close { border:0; background:transparent; color:#6c757d; font-size:1.6rem; line-height:1; }
+.scan-scheduler-detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0; }
+.scan-scheduler-detail { padding:8px 10px; border-radius:6px; background:rgba(127,127,127,.045); }
+.scan-scheduler-detail span { display:block; color:#6c757d; font-size:.69rem; }
+.scan-scheduler-detail strong { display:block; margin-top:2px; font-size:.82rem; }
+.scan-scheduler-form-group { margin-top:13px; }
+.scan-scheduler-form-group label { display:block; margin-bottom:5px; font-size:.79rem; font-weight:700; }
+.scan-scheduler-toggle-wrap { display:flex; align-items:center; gap:10px; min-height:32px; }
+.scan-scheduler-toggle { position:relative; display:inline-flex !important; align-items:center; margin:0 !important; cursor:pointer; }
+.scan-scheduler-toggle input { position:absolute; opacity:0; width:1px; height:1px; pointer-events:none; }
+.scan-scheduler-toggle-track { position:relative; display:inline-block; width:46px; height:24px; border-radius:999px; background:#c8ccd0; transition:background .15s ease; box-shadow:inset 0 0 0 1px rgba(0,0,0,.08); }
+.scan-scheduler-toggle-track::after { content:''; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.28); transition:transform .15s ease; }
+.scan-scheduler-toggle input:checked + .scan-scheduler-toggle-track { background:#28a745; }
+.scan-scheduler-toggle input:checked + .scan-scheduler-toggle-track::after { transform:translateX(22px); }
+.scan-scheduler-toggle input:disabled + .scan-scheduler-toggle-track { opacity:.55; cursor:not-allowed; }
+.scan-scheduler-toggle-state { font-size:.8rem; font-weight:700; color:#6c757d; }
+.scan-scheduler-toggle-state.is-on { color:#198754; }
+.scan-scheduler-helper { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+.scan-scheduler-helper-full { grid-column:1 / -1; }
+.scan-scheduler-preview { margin-top:12px; padding:10px; border:1px solid #dee2e6; border-radius:7px; background:rgba(127,127,127,.025); font-size:.78rem; }
+.scan-scheduler-preview ul { margin:6px 0 0; padding-left:18px; }
+.scan-scheduler-preview-warning { border-color:rgba(240,173,0,.5); background:rgba(255,193,7,.07); }
+.scan-scheduler-preview-danger { border-color:rgba(220,53,69,.5); background:rgba(220,53,69,.05); }
+.scan-scheduler-actions { display:flex; flex-wrap:wrap; gap:7px; margin-top:15px; padding-top:13px; border-top:1px solid #dee2e6; }
+.scan-scheduler-disabled { opacity:.58; }
+@media (max-width:900px) {
+  .scan-scheduler { --scheduler-label-width:190px; }
+  .scan-scheduler-timeline-wrap { overflow-x:auto; }
+  .scan-scheduler-timeline { min-width:900px; }
+  .scan-scheduler-kpis { grid-template-columns:repeat(2,minmax(130px,1fr)); }
+  .scan-scheduler-suggestion { grid-template-columns:1fr; }
+  .scan-scheduler-conflict-row { grid-template-columns:80px 1fr; }
+  .scan-scheduler-conflict-row > :nth-child(n+3) { grid-column:2; }
+}
+</style>
+
+<div class="scan-scheduler">
+  <div class="scan-scheduler-toolbar">
+    <button id="scheduler_refresh" class="btn btn-sm btn-primary" type="button">새로고침</button>
+    <select id="scheduler_db_filter" class="form-control form-control-sm">
+      <option value="all">모든 DB</option>
+      <option value="general">일반 DB</option>
+      <option value="adult">성인 DB</option>
+      <option value="audiobook">오디오북 DB</option>
+      <option value="video">비디오북 DB</option>
+    </select>
+    <input id="scheduler_search" class="form-control form-control-sm scan-scheduler-search" type="search" placeholder="보관함 이름 검색">
+    <label class="doctor-check"><input id="scheduler_conflict_only" type="checkbox"> 충돌만</label>
+    <label class="doctor-check"><input id="scheduler_remote_only" type="checkbox"> 원격만</label>
+    <span id="scheduler_updated_at" class="doctor-muted"></span>
+  </div>
+
+  <div class="scan-scheduler-kpis">
+    <div class="scan-scheduler-kpi"><span>전체 보관함</span><strong id="scheduler_kpi_total">-</strong></div>
+    <div class="scan-scheduler-kpi"><span>활성 스케줄</span><strong id="scheduler_kpi_active">-</strong></div>
+    <div class="scan-scheduler-kpi"><span>비활성 스케줄</span><strong id="scheduler_kpi_disabled">-</strong></div>
+    <div class="scan-scheduler-kpi scan-scheduler-kpi-warning"><span>7일 충돌 횟수</span><strong id="scheduler_kpi_conflicts">-</strong></div>
+    <div class="scan-scheduler-kpi scan-scheduler-kpi-danger"><span>중요 충돌</span><strong id="scheduler_kpi_critical">-</strong></div>
+  </div>
+
+  <div id="scheduler_source_alert" class="scan-scheduler-alert"></div>
+
+  <div class="doctor-card scan-scheduler-card">
+    <div class="scan-scheduler-card-header">
+      <div>
+        <h5>보관함 타임라인</h5>
+        <div class="doctor-muted">일자 타임라인의 막대와 요일×시간의 보관함 칩을 드래그하면 변경 미리보기를 열 수 있습니다. 드롭만으로는 저장되지 않습니다.</div>
+      </div>
+      <div class="scan-scheduler-legend">
+        <span><i></i>정상</span>
+        <span><i class="warning"></i>구간 중첩</span>
+        <span><i class="danger"></i>동시 시작/원격·VFS 중첩</span>
+        <span><i class="remote"></i>원격 보관함</span>
+      </div>
+    </div>
+    <div class="scan-scheduler-db-filter-row">
+      <span class="doctor-muted">보관함 종류</span>
+      <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-db-filter-btn active" data-db-type="all">전체</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-db-filter-btn" data-db-type="general">일반</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-db-filter-btn" data-db-type="adult">성인</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-db-filter-btn" data-db-type="audiobook">오디오</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-db-filter-btn" data-db-type="video">비디오</button>
+      <div class="scan-scheduler-view-toggle">
+        <span class="doctor-muted">보기</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-view-btn active" data-view="timeline">일자 타임라인</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-view-btn" data-view="weekday">요일×시간</button>
+      </div>
+    </div>
+    <div id="scheduler_timeline_view">
+      <div class="scan-scheduler-weekday-filter">
+        <span class="doctor-muted">요일</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="all" data-weekday-scope="timeline"><span class="ko">전체</span><span class="en">ALL</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="1" data-weekday-scope="timeline"><span class="ko">월</span><span class="en">MON</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="2" data-weekday-scope="timeline"><span class="ko">화</span><span class="en">TUE</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="3" data-weekday-scope="timeline"><span class="ko">수</span><span class="en">WED</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="4" data-weekday-scope="timeline"><span class="ko">목</span><span class="en">THU</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="5" data-weekday-scope="timeline"><span class="ko">금</span><span class="en">FRI</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="6" data-weekday-scope="timeline"><span class="ko">토</span><span class="en">SAT</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="0" data-weekday-scope="timeline"><span class="ko">일</span><span class="en">SUN</span></button>
+      </div>
+      <div class="scan-scheduler-timeline-wrap">
+        <div id="scheduler_timeline" class="scan-scheduler-timeline"></div>
+      </div>
+      <div id="scheduler_empty" class="doctor-empty" style="display:none">조건에 맞는 보관함이 없습니다.</div>
+    </div>
+    <div id="scheduler_weekday_view" style="display:none">
+      <div class="scan-scheduler-weekday-wrap">
+        <div id="scheduler_weekday_grid"></div>
+      </div>
+      <div id="scheduler_weekday_empty" class="doctor-empty" style="display:none">요일×시간으로 표시할 활성 스케줄이 없습니다.</div>
+    </div>
+  </div>
+
+  <div id="scheduler_suggestion_card" class="doctor-card scan-scheduler-card" style="display:none">
+    <div class="scan-scheduler-card-header">
+      <div>
+        <h5>자동 분산 후보</h5>
+        <div class="doctor-muted">현재 Cron을 자동 변경하지 않고, 30분 단위 이동으로 충돌이 줄어드는 후보만 제시합니다.</div>
+      </div>
+    </div>
+    <div id="scheduler_suggestions" class="scan-scheduler-suggestions"></div>
+  </div>
+
+  <div class="doctor-card scan-scheduler-card">
+    <div class="scan-scheduler-card-header">
+      <div>
+        <h5>시간대별 예상 부하</h5>
+        <div class="doctor-muted">최근 스캔 소요시간을 기준으로 선택한 요일의 동시 실행 가능성을 표시합니다.</div>
+      </div>
+      <div class="scan-scheduler-weekday-filter compact">
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="1" data-weekday-scope="heatmap"><span class="ko">월</span><span class="en">MON</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="2" data-weekday-scope="heatmap"><span class="ko">화</span><span class="en">TUE</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="3" data-weekday-scope="heatmap"><span class="ko">수</span><span class="en">WED</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="4" data-weekday-scope="heatmap"><span class="ko">목</span><span class="en">THU</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="5" data-weekday-scope="heatmap"><span class="ko">금</span><span class="en">FRI</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="6" data-weekday-scope="heatmap"><span class="ko">토</span><span class="en">SAT</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-weekday-btn" data-weekday="0" data-weekday-scope="heatmap"><span class="ko">일</span><span class="en">SUN</span></button>
+      </div>
+    </div>
+    <div class="scan-scheduler-heatmap-wrap"><div id="scheduler_heatmap" class="scan-scheduler-heatmap"></div></div>
+  </div>
+
+  <div class="doctor-card scan-scheduler-card">
+    <div class="scan-scheduler-card-header">
+      <div>
+        <h5>예상 충돌 상세</h5>
+        <div class="doctor-muted">동일 시각뿐 아니라 예상 실행 구간이 겹치는 경우도 포함합니다.</div>
+      </div>
+    </div>
+    <div id="scheduler_conflicts" class="scan-scheduler-conflicts"></div>
+    <div id="scheduler_conflicts_empty" class="doctor-empty" style="display:none">향후 7일 내 예상 충돌이 없습니다.</div>
+  </div>
+</div>
+
+<div id="scheduler_drawer_backdrop" class="scan-scheduler-drawer-backdrop"></div>
+<aside id="scheduler_drawer" class="scan-scheduler-drawer" aria-hidden="true">
+  <div class="scan-scheduler-drawer-body">
+    <div class="scan-scheduler-drawer-header">
+      <div>
+        <h4 id="scheduler_drawer_title">스캔 스케줄</h4>
+        <div id="scheduler_drawer_subtitle" class="doctor-muted"></div>
+      </div>
+      <button id="scheduler_drawer_close" class="scan-scheduler-close" type="button" aria-label="닫기">&times;</button>
+    </div>
+
+    <div class="scan-scheduler-detail-grid">
+      <div class="scan-scheduler-detail"><span>다음 실행</span><strong id="scheduler_detail_next">-</strong></div>
+      <div class="scan-scheduler-detail"><span>예상 소요시간</span><strong id="scheduler_detail_duration">-</strong></div>
+      <div class="scan-scheduler-detail"><span>최근 스캔</span><strong id="scheduler_detail_last">-</strong></div>
+      <div class="scan-scheduler-detail"><span>예상 충돌</span><strong id="scheduler_detail_conflicts">-</strong></div>
+      <div class="scan-scheduler-detail"><span>현재 상태</span><strong id="scheduler_detail_status">-</strong></div>
+      <div class="scan-scheduler-detail"><span>보관함 특성</span><strong id="scheduler_detail_remote">-</strong></div>
+    </div>
+
+    <div id="scheduler_grid_target_group" class="scan-scheduler-form-group scan-scheduler-grid-target" style="display:none">
+      <label for="scheduler_grid_library">추가할 보관함</label>
+      <select id="scheduler_grid_library" class="form-control form-control-sm"></select>
+      <div id="scheduler_grid_target_summary" class="scan-scheduler-grid-target-summary"></div>
+      <div class="doctor-muted" style="margin-top:5px">현재 스케줄이 없는 보관함만 표시합니다. 기존 스케줄은 타임라인의 편집 기능으로 변경하세요.</div>
+    </div>
+
+    <div class="scan-scheduler-form-group">
+      <label>스케줄 활성 상태</label>
+      <div class="scan-scheduler-toggle-wrap">
+        <label class="scan-scheduler-toggle" for="scheduler_toggle_enabled">
+          <input id="scheduler_toggle_enabled" type="checkbox">
+          <span class="scan-scheduler-toggle-track" aria-hidden="true"></span>
+        </label>
+        <span id="scheduler_toggle_state" class="scan-scheduler-toggle-state">OFF</span>
+      </div>
+      <div class="doctor-muted" style="margin-top:5px">Cron 값은 유지한 채 자동 실행만 켜거나 끕니다.</div>
+    </div>
+
+    <div class="scan-scheduler-form-group">
+      <label>간편 설정</label>
+      <div class="scan-scheduler-helper">
+        <select id="scheduler_helper_type" class="form-control form-control-sm">
+          <option value="daily">매일</option>
+          <option value="weekly">매주</option>
+          <option value="monthly">매월</option>
+          <option value="manual">직접 입력</option>
+        </select>
+        <input id="scheduler_helper_time" class="form-control form-control-sm" type="time" value="03:00">
+        <select id="scheduler_helper_weekday" class="form-control form-control-sm" style="display:none">
+          <option value="1">월요일</option><option value="2">화요일</option><option value="3">수요일</option>
+          <option value="4">목요일</option><option value="5">금요일</option><option value="6">토요일</option>
+          <option value="0">일요일</option>
+        </select>
+        <input id="scheduler_helper_monthday" class="form-control form-control-sm" type="number" min="1" max="31" value="1" style="display:none">
+      </div>
+    </div>
+
+    <div class="scan-scheduler-form-group">
+      <label for="scheduler_cron_input">Cron 표현식</label>
+      <input id="scheduler_cron_input" class="form-control form-control-sm" type="text" maxlength="50" placeholder="0 3 * * *">
+      <div class="doctor-muted" style="margin-top:5px">분 · 시 · 일 · 월 · 요일 순서의 5필드 Cron입니다. 기존 스케줄 제거는 아래의 삭제 버튼을 사용합니다.</div>
+    </div>
+
+    <div id="scheduler_preview_box" class="scan-scheduler-preview">
+      저장 전에 <strong>미리보기</strong>를 실행하면 다음 실행 시각과 충돌 변화를 서버에서 계산합니다.
+    </div>
+
+    <div class="scan-scheduler-actions">
+      <button id="scheduler_preview_btn" class="btn btn-sm btn-outline-primary" type="button">변경 미리보기</button>
+      <button id="scheduler_save_btn" class="btn btn-sm btn-primary" type="button">스케줄 저장</button>
+      <button id="scheduler_run_btn" class="btn btn-sm btn-outline-warning" type="button">지금 스캔</button>
+      <button id="scheduler_delete_btn" class="btn btn-sm btn-outline-danger" type="button" style="margin-left:auto;display:none">스케줄 삭제</button>
+    </div>
+  </div>
+</aside>
+
+<script>
+var schedulerData = null;
+var schedulerSelected = null;
+var schedulerRequestRunning = false;
+var schedulerLastPreviewCron = null;
+var schedulerAutoPreviewTimer = null;
+var schedulerPreviewSerial = 0;
+var schedulerDraggedKey = null;
+var schedulerTimelineView = 'timeline';
+var schedulerGridAddContext = null;
+var schedulerSelectedWeekday = new Date().getDay();
+var schedulerTimelineAllWeekdays = true;
+var schedulerWeekdayPointerDrag = null;
+var schedulerSuppressWeekdayClickUntil = 0;
+var schedulerDragMutationObserver = null;
+var schedulerDragAddedNodes = [];
+
+function schedulerWeekdayInfo(index) {
+  var map = {
+    0:{ko:'일', en:'SUN', label:'일요일'},
+    1:{ko:'월', en:'MON', label:'월요일'},
+    2:{ko:'화', en:'TUE', label:'화요일'},
+    3:{ko:'수', en:'WED', label:'수요일'},
+    4:{ko:'목', en:'THU', label:'목요일'},
+    5:{ko:'금', en:'FRI', label:'금요일'},
+    6:{ko:'토', en:'SAT', label:'토요일'}
+  };
+  return map[Number(index)] || map[1];
+}
+function schedulerSyncWeekdayButtons() {
+  document.querySelectorAll('.scan-scheduler-weekday-btn').forEach(function(button) {
+    var scope = button.dataset.weekdayScope || 'timeline';
+    var value = button.dataset.weekday;
+    var active = false;
+    if (scope === 'timeline') {
+      active = value === 'all'
+        ? schedulerTimelineAllWeekdays
+        : (!schedulerTimelineAllWeekdays && Number(value) === Number(schedulerSelectedWeekday));
+    } else {
+      active = Number(value) === Number(schedulerSelectedWeekday);
+    }
+    button.classList.toggle('active', active);
+  });
+}
+function schedulerSetSelectedWeekday(value, switchToTimeline, scope) {
+  if (scope === 'timeline' && value === 'all') {
+    schedulerTimelineAllWeekdays = true;
+    schedulerSyncWeekdayButtons();
+    if (switchToTimeline === true) schedulerSetTimelineView('timeline');
+    else if (schedulerTimelineView === 'timeline') schedulerRenderTimeline();
+    return;
+  }
+  var parsed = Number(value);
+  if (isNaN(parsed) || parsed < 0 || parsed > 6) parsed = 1;
+  schedulerTimelineAllWeekdays = false;
+  schedulerSelectedWeekday = parsed;
+  schedulerSyncWeekdayButtons();
+  schedulerRenderHeatmap();
+  if (switchToTimeline === true) schedulerSetTimelineView('timeline');
+  else if (schedulerTimelineView === 'timeline') schedulerRenderTimeline();
+}
+function schedulerForwardFixedColumnWheel(event) {
+  if (!event.deltaY || !event.target || !event.target.closest) return;
+  var fixedColumn = event.target.closest(
+    '.scan-scheduler-time-label, .scan-scheduler-label, .scan-scheduler-weekday-time'
+  );
+  if (!fixedColumn) return;
+  var wrap = fixedColumn.closest('.scan-scheduler-timeline-wrap, .scan-scheduler-weekday-wrap');
+  if (!wrap || wrap.scrollHeight <= wrap.clientHeight + 1) return;
+  event.preventDefault();
+  event.stopPropagation();
+  wrap.scrollTop += event.deltaY;
+}
+function schedulerLooksLikeDragDecoration(node) {
+  if (!(node instanceof HTMLElement)) return false;
+  if (node.classList.contains('scan-scheduler-weekday-drag-ghost')) return false;
+  if (node.closest && node.closest('#scheduler_drawer')) return false;
+  var classText = String(node.className || '').toLowerCase();
+  if (/ripple|wave|ink|trail|cursor|gesture|click-effect|pointer-effect/.test(classText)) return true;
+  if (String(node.textContent || '').trim()) return false;
+  if (node.querySelector && node.querySelector('input,button,a,select,textarea,img,svg,canvas,video,audio')) return false;
+  var style;
+  try { style = window.getComputedStyle(node); } catch (ignore) { return false; }
+  if (!style) return false;
+  var width = parseFloat(style.width || '0');
+  var height = parseFloat(style.height || '0');
+  var radius = String(style.borderRadius || '');
+  var positioned = style.position === 'fixed' || style.position === 'absolute';
+  return positioned
+    && width >= 4 && width <= 96
+    && height >= 4 && height <= 96
+    && (radius.indexOf('%') !== -1 || parseFloat(radius || '0') >= Math.min(width, height) * .35);
+}
+function schedulerStartDragMutationWatch() {
+  schedulerStopDragMutationWatch(false);
+  schedulerDragAddedNodes = [];
+  if (!window.MutationObserver || !document.body) return;
+  schedulerDragMutationObserver = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+      Array.prototype.forEach.call(mutation.addedNodes || [], function(node) {
+        if (node instanceof HTMLElement) schedulerDragAddedNodes.push(node);
+      });
+    });
+  });
+  schedulerDragMutationObserver.observe(document.body, {childList:true, subtree:true});
+}
+function schedulerStopDragMutationWatch(cleanup) {
+  if (schedulerDragMutationObserver) {
+    schedulerDragMutationObserver.disconnect();
+    schedulerDragMutationObserver = null;
+  }
+  if (cleanup) {
+    schedulerDragAddedNodes.forEach(function(node) {
+      if (node && node.isConnected && schedulerLooksLikeDragDecoration(node)) {
+        node.remove();
+      }
+    });
+  }
+  schedulerDragAddedNodes = [];
+}
+function schedulerClearWeekdayPointerDrag(suppressClick) {
+  var drag = schedulerWeekdayPointerDrag;
+  schedulerWeekdayPointerDrag = null;
+  if (suppressClick) schedulerSuppressWeekdayClickUntil = Date.now() + 300;
+  if (drag && drag.ghost && drag.ghost.parentNode) drag.ghost.parentNode.removeChild(drag.ghost);
+  schedulerStopDragMutationWatch(true);
+  document.querySelectorAll('.scan-scheduler-weekday-chip.is-dragging').forEach(function(chip) {
+    chip.classList.remove('is-dragging');
+  });
+  document.querySelectorAll('.scan-scheduler-weekday-cell.is-drop-target').forEach(function(cell) {
+    cell.classList.remove('is-drop-target');
+  });
+}
+function schedulerWeekdayPointerTarget(clientX, clientY) {
+  var element = document.elementFromPoint(clientX, clientY);
+  return element && element.closest ? element.closest('.scan-scheduler-weekday-cell') : null;
+}
+function schedulerMoveWeekdayPointerDrag(event) {
+  var drag = schedulerWeekdayPointerDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  var dx = event.clientX - drag.startX;
+  var dy = event.clientY - drag.startY;
+  if (!drag.active && Math.sqrt(dx * dx + dy * dy) < 6) return;
+  if (!drag.active) {
+    drag.active = true;
+    drag.chip.classList.add('is-dragging');
+    drag.ghost = drag.chip.cloneNode(true);
+    drag.ghost.removeAttribute('tabindex');
+    drag.ghost.removeAttribute('role');
+    drag.ghost.removeAttribute('data-pointer-draggable');
+    drag.ghost.classList.remove('is-dragging');
+    drag.ghost.classList.add('scan-scheduler-weekday-drag-ghost');
+    document.body.appendChild(drag.ghost);
+  }
+  event.preventDefault();
+  drag.ghost.style.left = event.clientX + 'px';
+  drag.ghost.style.top = event.clientY + 'px';
+  var target = schedulerWeekdayPointerTarget(event.clientX, event.clientY);
+  if (target !== drag.target) {
+    if (drag.target) drag.target.classList.remove('is-drop-target');
+    drag.target = target;
+    if (drag.target) drag.target.classList.add('is-drop-target');
+  }
+}
+function schedulerFinishWeekdayPointerDrag(event, cancelled) {
+  var drag = schedulerWeekdayPointerDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  var wasActive = !!drag.active;
+  var target = !cancelled && wasActive
+    ? schedulerWeekdayPointerTarget(event.clientX, event.clientY)
+    : null;
+  var library = wasActive ? schedulerFindLibrary(drag.key) : null;
+  schedulerClearWeekdayPointerDrag(wasActive);
+  if (!target || !library || !library.can_edit) return;
+  var weekday = Number(target.dataset.weekday);
+  var hour = Number(target.dataset.hour);
+  var minute = Number(target.dataset.minute);
+  if ([weekday, hour, minute].some(function(value) { return isNaN(value); })) return;
+  var candidateCron = minute + ' ' + hour + ' * * ' + weekday;
+  schedulerOpenDrawer(library, candidateCron, true);
+}
+
+function schedulerDbLabel(type) {
+  return {general:'일반', adult:'성인', audiobook:'오디오북', video:'비디오'}[type] || type || '-';
+}
+function schedulerDbClass(type) {
+  return 'scan-scheduler-db-badge ' + (type === 'general' ? '' : 'scan-scheduler-db-' + type);
+}
+function schedulerDate(value) {
+  if (!value) return null;
+  var date = new Date(value.length === 16 ? value + ':00' : value);
+  return isNaN(date.getTime()) ? null : date;
+}
+function schedulerFormatDate(value) {
+  var date = schedulerDate(value);
+  return date ? date.toLocaleString() : '-';
+}
+function schedulerFindLibrary(key, data) {
+  var list = (data || schedulerData || {}).libraries || [];
+  return list.find(function(item) { return item.key === key; }) || null;
+}
+function schedulerSimpleCronTime(cron) {
+  var parts = String(cron || '').trim().split(/\s+/);
+  if (parts.length !== 5 || !/^\d+$/.test(parts[0]) || !/^\d+$/.test(parts[1])) return null;
+  var minute = Number(parts[0]), hour = Number(parts[1]);
+  if (minute > 59 || hour > 23) return null;
+  return {minute:minute, hour:hour, parts:parts};
+}
+function schedulerCronAtMinutes(cron, totalMinutes) {
+  var simple = schedulerSimpleCronTime(cron);
+  if (!simple || totalMinutes < 0 || totalMinutes >= 1440) return null;
+  var parts = simple.parts.slice();
+  parts[0] = String(totalMinutes % 60);
+  parts[1] = String(Math.floor(totalMinutes / 60));
+  return parts.join(' ');
+}
+function schedulerFilteredLibraries() {
+  if (!schedulerData) return [];
+  var type = $('#scheduler_db_filter').val();
+  var search = String($('#scheduler_search').val() || '').trim().toLowerCase();
+  var conflictOnly = $('#scheduler_conflict_only').is(':checked');
+  var remoteOnly = $('#scheduler_remote_only').is(':checked');
+  return schedulerData.libraries.filter(function(item) {
+    if (type !== 'all' && item.db_type !== type) return false;
+    if (search && String(item.name || '').toLowerCase().indexOf(search) === -1) return false;
+    if (conflictOnly && Number(item.conflict_count || 0) <= 0) return false;
+    if (remoteOnly && !item.is_remote) return false;
+    return true;
+  });
+}
+function schedulerSetSourceAlert(data) {
+  var alertBox = document.getElementById('scheduler_source_alert');
+  var errors = data.source_errors || [];
+  if (!errors.length) {
+    alertBox.style.display = 'none';
+    alertBox.textContent = '';
+    return;
+  }
+  var unique = [];
+  errors.forEach(function(item) {
+    var text = schedulerDbLabel(item.db_type) + ' DB ' + item.source + ': ' + item.message;
+    if (unique.indexOf(text) === -1) unique.push(text);
+  });
+  alertBox.textContent = '일부 데이터가 대체 경로로 표시됩니다. ' + unique.slice(0, 4).join(' / ');
+  alertBox.style.display = 'block';
+}
+function schedulerRenderKpis(data) {
+  document.getElementById('scheduler_kpi_total').textContent = data.libraries.length;
+  document.getElementById('scheduler_kpi_active').textContent = data.active_count || 0;
+  document.getElementById('scheduler_kpi_disabled').textContent = data.disabled_count || 0;
+  document.getElementById('scheduler_kpi_conflicts').textContent = data.collision_count || 0;
+  document.getElementById('scheduler_kpi_critical').textContent = data.critical_collision_count || 0;
+}
+function schedulerRenderHeatmap() {
+  var root = document.getElementById('scheduler_heatmap');
+  bookoasisMateClear(root);
+  if (!schedulerData) return;
+  var day = schedulerWeekdayDay(schedulerSelectedWeekday);
+  var date = day ? day.date : null;
+  var cells = schedulerData.heatmap.filter(function(item) { return item.date === date; });
+  for (var hour = 0; hour < 24; hour++) {
+    var item = cells.find(function(value) { return Number(value.hour) === hour; }) || {active_count:0, conflict_count:0};
+    var cell = document.createElement('div');
+    cell.className = 'scan-scheduler-heat';
+    if (Number(item.conflict_count || 0) > 0) cell.className += ' scan-scheduler-heat-conflict';
+    else if (Number(item.active_count || 0) >= 3) cell.className += ' scan-scheduler-heat-busy';
+    else if (Number(item.active_count || 0) > 0) cell.className += ' scan-scheduler-heat-active';
+    var label = document.createElement('small');
+    label.textContent = String(hour).padStart(2, '0') + ':00';
+    var count = document.createElement('strong');
+    count.textContent = Number(item.active_count || 0);
+    cell.title = '예상 실행 ' + Number(item.active_count || 0) + '개 · 충돌 포함 ' + Number(item.conflict_count || 0) + '개';
+    cell.appendChild(label);
+    cell.appendChild(count);
+    root.appendChild(cell);
+  }
+}
+function schedulerDayBounds(dateText) {
+  var start = new Date(dateText + 'T00:00:00');
+  return {start:start, end:new Date(start.getTime() + 86400000)};
+}
+function schedulerEventsForDay(item, dateText) {
+  var bounds = schedulerDayBounds(dateText);
+  return (item.occurrences || []).filter(function(event) {
+    var start = schedulerDate(event.start), end = schedulerDate(event.end);
+    return start && end && start < bounds.end && bounds.start < end;
+  });
+}
+function schedulerTimelineEvents(item) {
+  if (!schedulerTimelineAllWeekdays) {
+    var day = schedulerWeekdayDay(schedulerSelectedWeekday);
+    if (!day) return [];
+    return schedulerEventsForDay(item, day.date).map(function(event) {
+      var start = schedulerDate(event.start);
+      var end = schedulerDate(event.end);
+      return {
+        event:event,
+        startMinute:start ? (start.getHours() * 60 + start.getMinutes()) : 0,
+        durationMinutes:start && end ? Math.max(1, Math.round((end - start) / 60000)) : Number(event.duration_minutes || 1),
+        weekdays:[schedulerSelectedWeekday]
+      };
+    });
+  }
+  var grouped = {};
+  [1,2,3,4,5,6,0].forEach(function(weekdayIndex) {
+    var day = schedulerWeekdayDay(weekdayIndex);
+    if (!day) return;
+    schedulerEventsForDay(item, day.date).forEach(function(event) {
+      var start = schedulerDate(event.start);
+      var end = schedulerDate(event.end);
+      if (!start || !end) return;
+      var startMinute = start.getHours() * 60 + start.getMinutes();
+      var durationMinutes = Math.max(1, Math.round((end - start) / 60000));
+      var key = startMinute + ':' + durationMinutes;
+      if (!grouped[key]) {
+        grouped[key] = {
+          event:Object.assign({}, event),
+          startMinute:startMinute,
+          durationMinutes:durationMinutes,
+          weekdays:[]
+        };
+      }
+      grouped[key].weekdays.push(weekdayIndex);
+      grouped[key].event.conflict_count = Math.max(
+        Number(grouped[key].event.conflict_count || 0),
+        Number(event.conflict_count || 0)
+      );
+      if (event.conflict_level === 'critical') grouped[key].event.conflict_level = 'critical';
+      else if (event.conflict_level === 'warning' && grouped[key].event.conflict_level !== 'critical') grouped[key].event.conflict_level = 'warning';
+    });
+  });
+  return Object.keys(grouped).map(function(key) { return grouped[key]; });
+}
+function schedulerWeekdayShortList(values) {
+  var order = [1,2,3,4,5,6,0];
+  return order.filter(function(value) { return values.indexOf(value) !== -1; })
+    .map(function(value) { return schedulerWeekdayInfo(value).ko; })
+    .join('·');
+}
+function schedulerRenderTimeline() {
+  var root = document.getElementById('scheduler_timeline');
+  bookoasisMateClear(root);
+  var libraries = schedulerFilteredLibraries();
+  $('#scheduler_empty').toggle(libraries.length === 0);
+  if (!libraries.length) return;
+  var weekdayInfo = schedulerWeekdayInfo(schedulerSelectedWeekday);
+  var header = document.createElement('div');
+  header.className = 'scan-scheduler-time-header';
+  var labelHeader = document.createElement('div');
+  labelHeader.className = 'scan-scheduler-time-label';
+  labelHeader.textContent = schedulerTimelineAllWeekdays
+    ? '보관함 / Cron · 전체 ALL'
+    : '보관함 / Cron · ' + weekdayInfo.ko + ' ' + weekdayInfo.en;
+  var hours = document.createElement('div');
+  hours.className = 'scan-scheduler-hours';
+  for (var hour = 0; hour < 24; hour++) {
+    var hourCell = document.createElement('div');
+    hourCell.className = 'scan-scheduler-hour';
+    hourCell.textContent = String(hour).padStart(2, '0');
+    hours.appendChild(hourCell);
+  }
+  header.appendChild(labelHeader); header.appendChild(hours); root.appendChild(header);
+
+  libraries.forEach(function(item) {
+    var row = document.createElement('div');
+    row.className = 'scan-scheduler-row' + (item.schedule_enabled ? '' : ' scan-scheduler-disabled');
+    var label = document.createElement('div');
+    label.className = 'scan-scheduler-label';
+    var labelMain = document.createElement('div');
+    labelMain.className = 'scan-scheduler-label-main';
+    var name = document.createElement('strong'); name.textContent = item.name || '-';
+    var meta = document.createElement('div'); meta.className = 'scan-scheduler-label-meta';
+    var db = document.createElement('span'); db.className = schedulerDbClass(item.db_type); db.textContent = schedulerDbLabel(item.db_type);
+    var cron = document.createElement('span'); cron.textContent = item.cron_schedule || '수동';
+    var duration = document.createElement('span'); duration.textContent = '약 ' + Number(item.estimated_duration_minutes || 0) + '분';
+    meta.appendChild(db); meta.appendChild(cron); meta.appendChild(duration);
+    if (item.is_remote) meta.appendChild(bookoasisMateText('span', '', '원격'));
+    if (item.cron_error) meta.appendChild(bookoasisMateText('span', 'doctor-error', 'Cron 오류'));
+    labelMain.appendChild(name); labelMain.appendChild(meta);
+    var edit = bookoasisMateText(
+      'button',
+      'btn btn-sm ' + (item.cron_schedule ? 'btn-outline-secondary' : 'btn-outline-primary'),
+      item.cron_schedule ? '편집' : '스케줄 추가'
+    );
+    edit.type = 'button'; edit.addEventListener('click', function() { schedulerOpenDrawer(item); });
+    label.appendChild(labelMain); label.appendChild(edit);
+
+    var track = document.createElement('div');
+    track.className = 'scan-scheduler-track';
+    var canDrag = item.can_edit && item.schedule_enabled && !!schedulerSimpleCronTime(item.cron_schedule);
+    var canAdd = item.can_edit && !String(item.cron_schedule || '').trim();
+    track.dataset.droppable = canDrag ? 'true' : 'false';
+    track.dataset.addable = canAdd ? 'true' : 'false';
+    track.dataset.libraryKey = item.key;
+    if (canAdd) {
+      track.title = '빈 시간대를 클릭하면 해당 시간으로 새 스케줄을 추가할 수 있습니다.';
+      track.addEventListener('click', function(event) {
+        if (event.target.closest && event.target.closest('.scan-scheduler-event')) return;
+        var rect = track.getBoundingClientRect();
+        if (!rect.width) return;
+        var ratio = Math.max(0, Math.min(.9999, (event.clientX - rect.left) / rect.width));
+        var totalMinutes = Math.round((ratio * 1440) / 30) * 30;
+        totalMinutes = Math.max(0, Math.min(1410, totalMinutes));
+        var hour = Math.floor(totalMinutes / 60);
+        var minute = totalMinutes % 60;
+        var candidateCron = minute + ' ' + hour + ' * * *';
+        schedulerOpenDrawer(item, candidateCron, false);
+      });
+    }
+    if (canDrag) {
+      track.addEventListener('dragover', function(event) {
+        if (schedulerDraggedKey === item.key) event.preventDefault();
+      });
+      track.addEventListener('drop', function(event) {
+        if (schedulerDraggedKey !== item.key) return;
+        event.preventDefault();
+        var rect = track.getBoundingClientRect();
+        var ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+        var minutes = Math.max(0, Math.min(1439, Math.round((ratio * 1440) / 30) * 30));
+        var candidate = schedulerCronAtMinutes(item.cron_schedule, minutes);
+        schedulerDraggedKey = null;
+        if (candidate) schedulerOpenDrawer(item, candidate, true);
+      });
+    }
+    var events = schedulerTimelineEvents(item);
+    if (!events.length) {
+      var empty = document.createElement('div'); empty.className = 'scan-scheduler-empty-track';
+      empty.textContent = item.schedule_enabled && item.cron_schedule
+        ? (schedulerTimelineAllWeekdays ? '주간 예정 없음' : weekdayInfo.label + ' 예정 없음')
+        : (item.cron_schedule ? '스케줄 비활성' : '스케줄 미설정');
+      track.appendChild(empty);
+    }
+    events.forEach(function(timelineEvent) {
+      var eventItem = timelineEvent.event;
+      var startMinute = timelineEvent.startMinute;
+      var durationMinutes = timelineEvent.durationMinutes;
+      var left = (startMinute / 1440) * 100;
+      var width = Math.max(.45, (Math.min(durationMinutes, 1440 - startMinute) / 1440) * 100);
+      var bar = document.createElement('div');
+      bar.className = 'scan-scheduler-event';
+      if (eventItem.conflict_level === 'warning') bar.className += ' scan-scheduler-event-warning';
+      if (eventItem.conflict_level === 'critical') bar.className += ' scan-scheduler-event-critical';
+      if (item.is_remote) bar.className += ' scan-scheduler-event-remote';
+      bar.style.left = left + '%'; bar.style.width = width + '%'; bar.tabIndex = 0;
+      bar.draggable = canDrag;
+      if (canDrag) bar.addEventListener('dragstart', function() { schedulerDraggedKey = item.key; });
+      bar.addEventListener('dragend', function() { schedulerDraggedKey = null; });
+      var startHour = Math.floor(startMinute / 60);
+      var startMinutePart = startMinute % 60;
+      var endTotal = Math.min(1439, startMinute + durationMinutes);
+      var endHour = Math.floor(endTotal / 60);
+      var endMinutePart = endTotal % 60;
+      var dayText = schedulerTimelineAllWeekdays
+        ? schedulerWeekdayShortList(timelineEvent.weekdays)
+        : weekdayInfo.label;
+      bar.title = item.name
+        + ' · ' + dayText + ' '
+        + String(startHour).padStart(2,'0') + ':' + String(startMinutePart).padStart(2,'0')
+        + ' ~ ' + String(endHour).padStart(2,'0') + ':' + String(endMinutePart).padStart(2,'0')
+        + '\n' + (item.is_remote ? '원격 보관함' : '로컬 보관함')
+        + (eventItem.conflict_with && eventItem.conflict_with.length ? '\n겹침: ' + eventItem.conflict_with.join(', ') : '');
+      bar.setAttribute('aria-label', bar.title);
+      bar.addEventListener('click', function() { schedulerOpenDrawer(item); });
+      bar.addEventListener('keydown', function(e) { if (e.key === 'Enter' || e.key === ' ') schedulerOpenDrawer(item); });
+      track.appendChild(bar);
+    });
+    row.appendChild(label); row.appendChild(track); root.appendChild(row);
+  });
+}
+function schedulerWeekdayDay(weekdayIndex) {
+  if (!schedulerData) return null;
+  return (schedulerData.days || []).find(function(day) {
+    var date = new Date(day.date + 'T00:00:00');
+    return !isNaN(date.getTime()) && date.getDay() === weekdayIndex;
+  }) || null;
+}
+function schedulerWeekdayCellItems(libraries, weekdayIndex, slot) {
+  var day = schedulerWeekdayDay(weekdayIndex);
+  if (!day) return [];
+  var items = [];
+  libraries.forEach(function(library) {
+    if (!library.schedule_enabled || !String(library.cron_schedule || '').trim()) return;
+    schedulerEventsForDay(library, day.date).forEach(function(eventItem) {
+      var start = schedulerDate(eventItem.start);
+      if (!start) return;
+      var eventSlot = start.getHours() * 2 + (start.getMinutes() >= 30 ? 1 : 0);
+      if (eventSlot !== slot) return;
+      items.push({library:library, event:eventItem, start:start});
+    });
+  });
+  items.sort(function(a, b) {
+    return a.start.getTime() - b.start.getTime()
+      || String(a.library.name || '').localeCompare(String(b.library.name || ''));
+  });
+  return items;
+}
+function schedulerGridAddCandidates() {
+  if (!schedulerData) return [];
+  var type = $('#scheduler_db_filter').val();
+  var search = String($('#scheduler_search').val() || '').trim().toLowerCase();
+  var remoteOnly = $('#scheduler_remote_only').is(':checked');
+  return schedulerData.libraries.filter(function(item) {
+    if (!item.can_edit || String(item.cron_schedule || '').trim()) return false;
+    if (type !== 'all' && item.db_type !== type) return false;
+    if (search && String(item.name || '').toLowerCase().indexOf(search) === -1) return false;
+    if (remoteOnly && !item.is_remote) return false;
+    return true;
+  });
+}
+function schedulerWeekdayLabel(weekdayIndex) {
+  return ['일요일','월요일','화요일','수요일','목요일','금요일','토요일'][weekdayIndex] || '-';
+}
+function schedulerGridCandidateCron(context) {
+  if (!context) return '';
+  return context.minute + ' ' + context.hour + ' * * ' + context.weekday;
+}
+function schedulerOpenGridAdd(weekdayIndex, hour, minute) {
+  schedulerGridAddContext = {
+    weekday:weekdayIndex,
+    hour:hour,
+    minute:minute
+  };
+  schedulerSelected = null;
+  schedulerLastPreviewCron = null;
+
+  var group = document.getElementById('scheduler_grid_target_group');
+  var select = document.getElementById('scheduler_grid_library');
+  var summary = document.getElementById('scheduler_grid_target_summary');
+  group.style.display = 'block';
+  bookoasisMateClear(select);
+  var placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '보관함을 선택하세요';
+  select.appendChild(placeholder);
+  schedulerGridAddCandidates().forEach(function(item) {
+    var option = document.createElement('option');
+    option.value = item.key;
+    option.textContent = '[' + schedulerDbLabel(item.db_type) + '] ' + item.name
+      + (item.is_remote ? ' · 원격' : '');
+    select.appendChild(option);
+  });
+  select.disabled = select.options.length <= 1;
+
+  var timeText = String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0');
+  summary.textContent = schedulerWeekdayLabel(weekdayIndex) + ' · ' + timeText;
+  document.body.classList.add('scan-scheduler-drawer-open');
+  document.getElementById('scheduler_drawer').setAttribute('aria-hidden', 'false');
+  document.getElementById('scheduler_drawer_title').textContent = '스캔 스케줄 추가';
+  document.getElementById('scheduler_drawer_subtitle').textContent =
+    schedulerWeekdayLabel(weekdayIndex) + ' · ' + timeText;
+  ['scheduler_detail_next','scheduler_detail_duration','scheduler_detail_last',
+   'scheduler_detail_conflicts','scheduler_detail_status','scheduler_detail_remote'].forEach(function(id) {
+    document.getElementById(id).textContent = '-';
+  });
+
+  var toggle = document.getElementById('scheduler_toggle_enabled');
+  var toggleState = document.getElementById('scheduler_toggle_state');
+  toggle.checked = true;
+  toggle.disabled = true;
+  toggleState.textContent = '저장 시 ON';
+  toggleState.className = 'scan-scheduler-toggle-state is-on';
+
+  var cron = schedulerGridCandidateCron(schedulerGridAddContext);
+  $('#scheduler_cron_input').val(cron);
+  schedulerSetHelperFromCron(cron);
+  document.getElementById('scheduler_preview_box').className = 'scan-scheduler-preview';
+  document.getElementById('scheduler_preview_box').textContent =
+    '보관함을 선택하면 ' + schedulerWeekdayLabel(weekdayIndex) + ' ' + timeText
+    + ' 스케줄로 미리보기와 저장을 진행할 수 있습니다.';
+  document.getElementById('scheduler_preview_btn').style.display = 'none';
+  document.getElementById('scheduler_preview_btn').disabled = true;
+  document.getElementById('scheduler_save_btn').disabled = true;
+  document.getElementById('scheduler_run_btn').disabled = true;
+  document.getElementById('scheduler_delete_btn').style.display = 'none';
+}
+function schedulerRenderWeekdayTimeline() {
+  var root = document.getElementById('scheduler_weekday_grid');
+  bookoasisMateClear(root);
+  var libraries = schedulerFilteredLibraries();
+  var activeLibraries = libraries.filter(function(item) {
+    return item.schedule_enabled && String(item.cron_schedule || '').trim();
+  });
+  var canAddAny = schedulerGridAddCandidates().length > 0;
+  $('#scheduler_weekday_empty').toggle(activeLibraries.length === 0 && !canAddAny);
+  var weekdays = [
+    {index:1, label:'월요일'}, {index:2, label:'화요일'}, {index:3, label:'수요일'},
+    {index:4, label:'목요일'}, {index:5, label:'금요일'}, {index:6, label:'토요일'},
+    {index:0, label:'일요일'}
+  ];
+
+  var table = document.createElement('table');
+  table.className = 'scan-scheduler-weekday-table';
+  var thead = document.createElement('thead');
+  var headRow = document.createElement('tr');
+  var corner = document.createElement('th');
+  corner.className = 'scan-scheduler-weekday-time';
+  corner.textContent = '시간';
+  headRow.appendChild(corner);
+  weekdays.forEach(function(weekday) {
+    var th = document.createElement('th');
+    th.className = 'scan-scheduler-weekday-day';
+    th.textContent = weekday.label;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  for (var slot = 0; slot < 48; slot++) {
+    (function(currentSlot) {
+      var hour = Math.floor(currentSlot / 2);
+      var minute = currentSlot % 2 ? 30 : 0;
+      var row = document.createElement('tr');
+      var timeCell = document.createElement('td');
+      timeCell.className = 'scan-scheduler-weekday-time';
+      timeCell.textContent = String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0');
+      row.appendChild(timeCell);
+
+      weekdays.forEach(function(weekday) {
+        var items = schedulerWeekdayCellItems(activeLibraries, weekday.index, currentSlot);
+        var td = document.createElement('td');
+        td.className = 'scan-scheduler-weekday-cell';
+        td.dataset.weekday = String(weekday.index);
+        td.dataset.hour = String(hour);
+        td.dataset.minute = String(minute);
+        if (items.some(function(entry) { return Number(entry.event.conflict_count || 0) > 0; })) {
+          td.className += ' has-conflict';
+        }
+        items.forEach(function(entry) {
+          var chip = document.createElement('span');
+          chip.setAttribute('role', 'button');
+          chip.tabIndex = 0;
+          chip.className = 'scan-scheduler-weekday-chip'
+            + (entry.library.db_type === 'general' ? '' : ' scan-scheduler-weekday-chip-' + entry.library.db_type)
+            + (Number(entry.event.conflict_count || 0) > 0 ? ' scan-scheduler-weekday-chip-conflict' : '');
+          chip.textContent = entry.library.name;
+          chip.title = schedulerDbLabel(entry.library.db_type) + ' DB · '
+            + entry.library.name + ' · '
+            + entry.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+            + (entry.library.is_remote ? ' · 원격' : '')
+            + (entry.library.can_edit ? '\n드래그해서 요일/시간 변경 미리보기' : '');
+          chip.draggable = false;
+          chip.addEventListener('dragstart', function(event) {
+            event.preventDefault();
+          });
+          if (entry.library.can_edit) {
+            chip.dataset.pointerDraggable = 'true';
+            chip.addEventListener('pointerdown', function(event) {
+              if (event.button !== 0 || schedulerWeekdayPointerDrag) return;
+              schedulerStartDragMutationWatch();
+              schedulerWeekdayPointerDrag = {
+                pointerId:event.pointerId,
+                key:entry.library.key,
+                chip:chip,
+                startX:event.clientX,
+                startY:event.clientY,
+                active:false,
+                target:null,
+                ghost:null
+              };
+              if (chip.setPointerCapture) {
+                try { chip.setPointerCapture(event.pointerId); } catch (ignore) {}
+              }
+            });
+          }
+          chip.addEventListener('click', function(event) {
+            event.stopPropagation();
+            if (Date.now() < schedulerSuppressWeekdayClickUntil) return;
+            schedulerOpenDrawer(entry.library);
+          });
+          chip.addEventListener('keydown', function(event) {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            event.stopPropagation();
+            schedulerOpenDrawer(entry.library);
+          });
+          td.appendChild(chip);
+        });
+        td.title = items.length
+          ? weekday.label + ' '
+            + String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0')
+            + ' · 빈 부분 클릭 시 신규 스케줄 추가'
+          : weekday.label + ' '
+            + String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0')
+            + ' · 클릭하여 신규 스케줄 추가';
+        td.addEventListener('click', function() {
+          if (Date.now() < schedulerSuppressWeekdayClickUntil) return;
+          schedulerOpenGridAdd(weekday.index, hour, minute);
+        });
+        row.appendChild(td);
+      });
+      tbody.appendChild(row);
+    })(slot);
+  }
+  table.appendChild(tbody);
+  root.appendChild(table);
+}
+function schedulerRenderTimelineView() {
+  if (schedulerTimelineView === 'weekday') schedulerRenderWeekdayTimeline();
+  else schedulerRenderTimeline();
+}
+function schedulerSetTimelineView(view) {
+  schedulerTimelineView = view === 'weekday' ? 'weekday' : 'timeline';
+  document.querySelectorAll('.scan-scheduler-view-btn').forEach(function(button) {
+    button.classList.toggle('active', button.dataset.view === schedulerTimelineView);
+  });
+  $('#scheduler_timeline_view').toggle(schedulerTimelineView === 'timeline');
+  $('#scheduler_weekday_view').toggle(schedulerTimelineView === 'weekday');
+  schedulerRenderTimelineView();
+}
+function schedulerRenderSuggestions() {
+  var root = document.getElementById('scheduler_suggestions');
+  bookoasisMateClear(root);
+  var items = schedulerFilteredLibraries().filter(function(item) { return !!item.suggestion; });
+  document.getElementById('scheduler_suggestion_card').style.display = items.length ? 'block' : 'none';
+  items.forEach(function(item) {
+    var row = document.createElement('div'); row.className = 'scan-scheduler-suggestion';
+    var info = document.createElement('div');
+    info.appendChild(bookoasisMateText('strong', '', item.name));
+    info.appendChild(bookoasisMateText('div', 'doctor-muted', schedulerDbLabel(item.db_type) + ' DB · 현재 충돌 ' + item.suggestion.conflicts_before + '회'));
+    var cron = document.createElement('div');
+    cron.appendChild(bookoasisMateText('code', '', item.cron_schedule));
+    cron.appendChild(document.createTextNode(' → '));
+    cron.appendChild(bookoasisMateText('code', '', item.suggestion.cron_schedule));
+    cron.appendChild(bookoasisMateText('div', 'doctor-muted', '예상 충돌 ' + item.suggestion.conflicts_after + '회 · ' + (item.suggestion.shift_minutes > 0 ? '+' : '') + item.suggestion.shift_minutes + '분'));
+    var button = bookoasisMateText('button', 'btn btn-sm btn-outline-primary', '후보 미리보기');
+    button.type = 'button';
+    button.disabled = !item.can_edit;
+    button.addEventListener('click', function() { schedulerOpenDrawer(item, item.suggestion.cron_schedule, true); });
+    row.appendChild(info); row.appendChild(cron); row.appendChild(button); root.appendChild(row);
+  });
+}
+function schedulerRenderConflicts() {
+  var root = document.getElementById('scheduler_conflicts');
+  bookoasisMateClear(root);
+  var pairs = (schedulerData && schedulerData.collision_pairs) || [];
+  $('#scheduler_conflicts_empty').toggle(pairs.length === 0);
+  pairs.slice(0, 100).forEach(function(pair) {
+    var row = document.createElement('div'); row.className = 'scan-scheduler-conflict-row';
+    var level = bookoasisMateText('span', 'scan-scheduler-conflict-level' + (pair.level === 'critical' ? ' scan-scheduler-conflict-level-critical' : ''), pair.level === 'critical' ? '중요' : '중첩');
+    row.appendChild(level);
+    row.appendChild(bookoasisMateText('div', '', pair.first.name + ' (' + schedulerDbLabel(pair.first.db_type) + ')'));
+    row.appendChild(bookoasisMateText('div', '', pair.second.name + ' (' + schedulerDbLabel(pair.second.db_type) + ')'));
+    row.appendChild(bookoasisMateText('div', 'doctor-muted', pair.minutes + '분'));
+    row.appendChild(bookoasisMateText('div', 'doctor-muted', pair.reason));
+    root.appendChild(row);
+  });
+}
+function schedulerRenderAll() {
+  if (!schedulerData) return;
+  schedulerRenderKpis(schedulerData);
+  schedulerSetSourceAlert(schedulerData);
+  schedulerSyncWeekdayButtons();
+  schedulerRenderHeatmap();
+  schedulerRenderTimelineView();
+  schedulerRenderSuggestions();
+  schedulerRenderConflicts();
+}
+function schedulerSyncDbFilterButtons(value) {
+  var selected = value || 'all';
+  document.querySelectorAll('.scan-scheduler-db-filter-btn').forEach(function(button) {
+    button.classList.toggle('active', button.dataset.dbType === selected);
+  });
+}
+function schedulerApplyDbFilter(value) {
+  var selected = value || 'all';
+  $('#scheduler_db_filter').val(selected);
+  schedulerSyncDbFilterButtons(selected);
+  schedulerRenderTimelineView();
+  schedulerRenderSuggestions();
+}
+function schedulerLoad(showLoading) {
+  if (schedulerRequestRunning) return;
+  schedulerRequestRunning = true;
+  bookoasisMateAjax('scan', 'scan_scheduler_data', {}, function(ret) {
+    if (ret.ret === 'success') {
+      schedulerData = ret.data || {libraries:[], days:[], heatmap:[], collision_pairs:[]};
+      schedulerRenderAll();
+      document.getElementById('scheduler_updated_at').textContent = '마지막 갱신 ' + new Date().toLocaleTimeString();
+    }
+  }, function() { schedulerRequestRunning = false; }, {
+    global:showLoading === true,
+    silent:true,
+    error:function(xhr) {
+      var message = '스케줄러 데이터를 불러오지 못했습니다.';
+      if (xhr && xhr.status === 400) {
+        message = 'Mate 백엔드가 이전 코드로 실행 중입니다. FlaskFarm(또는 Mate를 호스팅하는 프로세스)을 재시작한 뒤 다시 열어 주세요.';
+      } else if (xhr && xhr.responseJSON && xhr.responseJSON.msg) {
+        message = xhr.responseJSON.msg;
+      }
+      notify(message, 'danger');
+    }
+  });
+}
+function schedulerSetHelperFromCron(cron) {
+  var parts = String(cron || '').trim().split(/\s+/);
+  var type = 'manual', time = '03:00';
+  if (parts.length === 5 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) {
+    time = String(Number(parts[1])).padStart(2,'0') + ':' + String(Number(parts[0])).padStart(2,'0');
+    if (parts[2] === '*' && parts[3] === '*' && parts[4] === '*') type = 'daily';
+    else if (parts[2] === '*' && parts[3] === '*' && /^(?:[0-7]|SUN|MON|TUE|WED|THU|FRI|SAT)$/i.test(parts[4])) {
+      type = 'weekly';
+      var weekdayMap = {SUN:'0',MON:'1',TUE:'2',WED:'3',THU:'4',FRI:'5',SAT:'6'};
+      $('#scheduler_helper_weekday').val(weekdayMap[String(parts[4]).toUpperCase()] || (parts[4] === '7' ? '0' : parts[4]));
+    } else if (/^\d+$/.test(parts[2]) && parts[3] === '*' && parts[4] === '*') {
+      type = 'monthly'; $('#scheduler_helper_monthday').val(parts[2]);
+    }
+  }
+  $('#scheduler_helper_type').val(type);
+  $('#scheduler_helper_time').val(time);
+  schedulerUpdateHelperVisibility();
+}
+function schedulerUpdateHelperVisibility() {
+  var type = $('#scheduler_helper_type').val();
+  $('#scheduler_helper_weekday').toggle(type === 'weekly');
+  $('#scheduler_helper_monthday').toggle(type === 'monthly');
+}
+function schedulerApplyHelper() {
+  var type = $('#scheduler_helper_type').val();
+  if (type === 'manual') return;
+  var time = String($('#scheduler_helper_time').val() || '03:00').split(':');
+  var hour = Number(time[0] || 0), minute = Number(time[1] || 0);
+  var cron = '';
+  if (type === 'daily') cron = minute + ' ' + hour + ' * * *';
+  if (type === 'weekly') cron = minute + ' ' + hour + ' * * ' + $('#scheduler_helper_weekday').val();
+  if (type === 'monthly') cron = minute + ' ' + hour + ' ' + $('#scheduler_helper_monthday').val() + ' * *';
+  $('#scheduler_cron_input').val(cron).trigger('input');
+}
+function schedulerIsNewScheduleMode() {
+  return !!schedulerSelected && !String(schedulerSelected.cron_schedule || '').trim();
+}
+function schedulerCancelAutoPreview() {
+  if (schedulerAutoPreviewTimer) {
+    clearTimeout(schedulerAutoPreviewTimer);
+    schedulerAutoPreviewTimer = null;
+  }
+}
+function schedulerScheduleAutoPreview(delay) {
+  schedulerCancelAutoPreview();
+  if (!schedulerIsNewScheduleMode() || !schedulerSelected || !schedulerSelected.can_edit) return;
+  schedulerPreviewSerial += 1;
+  schedulerLastPreviewCron = null;
+  document.getElementById('scheduler_save_btn').disabled = true;
+  var box = document.getElementById('scheduler_preview_box');
+  box.className = 'scan-scheduler-preview';
+  box.textContent = '설정값 변경을 반영해 자동 미리보기를 준비하고 있습니다...';
+  schedulerAutoPreviewTimer = setTimeout(function() {
+    schedulerAutoPreviewTimer = null;
+    schedulerPreview(true);
+  }, typeof delay === 'number' ? delay : 350);
+}
+function schedulerOpenDrawer(item, candidateCron, autoPreview, keepGridContext) {
+  if (!keepGridContext) {
+    schedulerGridAddContext = null;
+    document.getElementById('scheduler_grid_target_group').style.display = 'none';
+    document.getElementById('scheduler_grid_library').value = '';
+  } else {
+    document.getElementById('scheduler_grid_target_group').style.display = 'block';
+    document.getElementById('scheduler_grid_library').value = item.key;
+  }
+  schedulerSelected = item;
+  schedulerLastPreviewCron = null;
+  var canEdit = !!item.can_edit;
+  var isNewSchedule = !String(item.cron_schedule || '').trim();
+  document.body.classList.add('scan-scheduler-drawer-open');
+  document.getElementById('scheduler_drawer').setAttribute('aria-hidden', 'false');
+  document.getElementById('scheduler_drawer_title').textContent =
+    (item.name || '보관함') + (isNewSchedule ? ' · 스케줄 추가' : ' · 스케줄 편집');
+  var subtitle = schedulerDbLabel(item.db_type) + ' DB · ID ' + item.id + (item.is_remote ? ' · 원격' : '');
+  if (keepGridContext && schedulerGridAddContext) {
+    subtitle += ' · ' + schedulerWeekdayLabel(schedulerGridAddContext.weekday)
+      + ' ' + String(schedulerGridAddContext.hour).padStart(2, '0')
+      + ':' + String(schedulerGridAddContext.minute).padStart(2, '0');
+  }
+  document.getElementById('scheduler_drawer_subtitle').textContent = subtitle;
+  document.getElementById('scheduler_detail_next').textContent = item.next_run ? schedulerFormatDate(item.next_run) : '-';
+  document.getElementById('scheduler_detail_duration').textContent = '약 ' + Number(item.estimated_duration_minutes || 0) + '분 · ' + ({library_history:'보관함 이력',db_history:'DB 이력',default:'기본값'}[item.duration_source] || item.duration_source);
+  document.getElementById('scheduler_detail_last').textContent = item.last_scanned_at || '미실행';
+  document.getElementById('scheduler_detail_conflicts').textContent = Number(item.conflict_count || 0) + '회';
+  document.getElementById('scheduler_detail_status').textContent = item.scan_status || '-';
+  document.getElementById('scheduler_detail_remote').textContent = item.is_remote
+    ? ('원격 · VFS ' + (item.vfs_refresh_before_scan ? 'On' : '자동/Off') + (item.rclone_rc_configured ? ' · RC 설정' : ''))
+    : '로컬';
+  var toggle = document.getElementById('scheduler_toggle_enabled');
+  var toggleState = document.getElementById('scheduler_toggle_state');
+  toggle.checked = isNewSchedule ? true : !!item.schedule_enabled;
+  toggle.disabled = !canEdit || isNewSchedule;
+  toggleState.textContent = isNewSchedule ? '저장 시 ON' : (item.schedule_enabled ? 'ON' : 'OFF');
+  toggleState.className = 'scan-scheduler-toggle-state' + ((isNewSchedule || item.schedule_enabled) ? ' is-on' : '');
+  var cron = candidateCron === undefined
+    ? (isNewSchedule ? '0 3 * * *' : (item.cron_schedule || ''))
+    : candidateCron;
+  $('#scheduler_cron_input').val(cron);
+  schedulerSetHelperFromCron(cron);
+  document.getElementById('scheduler_preview_box').className = 'scan-scheduler-preview';
+  document.getElementById('scheduler_preview_box').textContent = candidateCron !== undefined
+    ? '변경 후보가 입력되었습니다. 서버 미리보기 후 저장할 수 있습니다.'
+    : (isNewSchedule
+      ? '신규 스케줄 기본값은 매일 03:00입니다. 설정값을 바꾸면 미리보기가 자동으로 갱신됩니다.'
+      : '저장 전에 미리보기를 실행하면 다음 실행 시각과 충돌 변화를 서버에서 계산합니다.');
+  var previewButton = document.getElementById('scheduler_preview_btn');
+  previewButton.style.display = isNewSchedule ? 'none' : 'inline-block';
+  previewButton.disabled = !canEdit;
+  document.getElementById('scheduler_save_btn').disabled = !canEdit || isNewSchedule;
+  document.getElementById('scheduler_run_btn').disabled = !!keepGridContext;
+  var deleteButton = document.getElementById('scheduler_delete_btn');
+  deleteButton.style.display = isNewSchedule ? 'none' : 'inline-block';
+  deleteButton.disabled = !canEdit;
+  if (isNewSchedule && canEdit) schedulerScheduleAutoPreview(60);
+  else if (autoPreview && canEdit) schedulerPreview(false);
+}
+function schedulerCloseDrawer() {
+  schedulerCancelAutoPreview();
+  schedulerPreviewSerial += 1;
+  document.body.classList.remove('scan-scheduler-drawer-open');
+  document.getElementById('scheduler_drawer').setAttribute('aria-hidden', 'true');
+  schedulerSelected = null;
+  schedulerLastPreviewCron = null;
+  schedulerGridAddContext = null;
+  document.getElementById('scheduler_grid_target_group').style.display = 'none';
+}
+function schedulerPreview(isAuto) {
+  if (!schedulerSelected) return;
+  var cron = String($('#scheduler_cron_input').val() || '').trim();
+  var box = document.getElementById('scheduler_preview_box');
+  var saveButton = document.getElementById('scheduler_save_btn');
+  var requestSerial = ++schedulerPreviewSerial;
+  if (isAuto) saveButton.disabled = true;
+  box.className = 'scan-scheduler-preview';
+  box.textContent = isAuto
+    ? '설정값을 기준으로 자동 미리보기 계산 중입니다...'
+    : '변경 후 스케줄과 충돌을 계산하는 중입니다...';
+  bookoasisMateAjax('scan', 'scheduler_preview', {
+    db_type:schedulerSelected.db_type,
+    library_id:schedulerSelected.id,
+    cron_schedule:cron
+  }, function(ret) {
+    if (requestSerial !== schedulerPreviewSerial || !schedulerSelected) return;
+    var previewData = ret.data || {};
+    var item = schedulerFindLibrary(schedulerSelected.key, previewData);
+    if (!item) {
+      box.className = 'scan-scheduler-preview scan-scheduler-preview-danger';
+      box.textContent = '미리보기 결과에서 보관함을 찾지 못했습니다.';
+      if (isAuto) saveButton.disabled = true;
+      return;
+    }
+    schedulerLastPreviewCron = cron;
+    box.className = 'scan-scheduler-preview' + (item.cron_error ? ' scan-scheduler-preview-danger' : (item.conflict_count ? ' scan-scheduler-preview-warning' : ''));
+    bookoasisMateClear(box);
+    if (item.cron_error) {
+      box.appendChild(bookoasisMateText('strong', 'doctor-error', item.cron_error));
+      schedulerLastPreviewCron = null;
+      if (isAuto) saveButton.disabled = true;
+      return;
+    }
+    box.appendChild(bookoasisMateText('strong', '', '미리보기 결과'));
+    box.appendChild(bookoasisMateText('div', 'doctor-muted', '현재 충돌 ' + Number(schedulerSelected.conflict_count || 0) + '회 → 변경 후 ' + Number(item.conflict_count || 0) + '회'));
+    box.appendChild(bookoasisMateText('div', 'doctor-muted', '다음 실행 ' + (item.next_run ? schedulerFormatDate(item.next_run) : '7일 이후 또는 없음')));
+    var upcoming = (item.occurrences || []).filter(function(event) { return schedulerDate(event.start) >= new Date(); }).slice(0, 5);
+    if (upcoming.length) {
+      var list = document.createElement('ul');
+      upcoming.forEach(function(event) {
+        var li = document.createElement('li');
+        li.textContent = schedulerFormatDate(event.start) + ' · 약 ' + event.duration_minutes + '분' + (event.conflict_count ? ' · 충돌 ' + event.conflict_count : '');
+        list.appendChild(li);
+      });
+      box.appendChild(list);
+    }
+    if (isAuto && schedulerLastPreviewCron === String($('#scheduler_cron_input').val() || '').trim()) {
+      saveButton.disabled = false;
+    }
+  });
+}
+function schedulerSave() {
+  if (!schedulerSelected) return;
+  var cron = String($('#scheduler_cron_input').val() || '').trim();
+  if (schedulerLastPreviewCron !== cron) {
+    alert(schedulerIsNewScheduleMode()
+      ? '자동 미리보기가 완료된 뒤 저장할 수 있습니다.'
+      : '저장 전에 현재 Cron 값으로 변경 미리보기를 실행해 주세요.');
+    return;
+  }
+  if (!confirm('보관함 [' + schedulerSelected.name + ']의 스캔 스케줄을 저장하시겠습니까?')) return;
+  bookoasisMateAjax('scan', 'scheduler_update', {
+    db_type:schedulerSelected.db_type,
+    library_id:schedulerSelected.id,
+    cron_schedule:cron
+  }, function(ret) {
+    if (ret.data && ret.data.success) {
+      schedulerCloseDrawer();
+      schedulerLoad(true);
+    }
+  });
+}
+function schedulerDelete() {
+  if (!schedulerSelected || !String(schedulerSelected.cron_schedule || '').trim()) return;
+  if (!confirm(
+    '보관함 [' + schedulerSelected.name + ']의 스캔 스케줄을 삭제하시겠습니까?\n\n'
+    + 'Cron 스케줄과 자동 실행 등록이 제거됩니다. 보관함 자체나 스캔 데이터는 삭제되지 않습니다.'
+  )) return;
+  var button = document.getElementById('scheduler_delete_btn');
+  button.disabled = true;
+  bookoasisMateAjax('scan', 'scheduler_update', {
+    db_type:schedulerSelected.db_type,
+    library_id:schedulerSelected.id,
+    cron_schedule:''
+  }, function(ret) {
+    if (ret.data && ret.data.success) {
+      schedulerCloseDrawer();
+      schedulerLoad(true);
+    }
+  }, function() {
+    if (schedulerSelected) button.disabled = false;
+  });
+}
+function schedulerToggleEnabled() {
+  if (!schedulerSelected) return;
+  var toggle = document.getElementById('scheduler_toggle_enabled');
+  var enabled = !!toggle.checked;
+  if (!confirm('보관함 [' + schedulerSelected.name + ']의 자동 스캔을 ' + (enabled ? '활성화' : '비활성화') + '하시겠습니까?')) {
+    toggle.checked = !!schedulerSelected.schedule_enabled;
+    return;
+  }
+  toggle.disabled = true;
+  bookoasisMateAjax('scan', 'scheduler_enabled', {
+    db_type:schedulerSelected.db_type,
+    library_id:schedulerSelected.id,
+    enabled:enabled ? 'true' : 'false'
+  }, function(ret) {
+    if (ret.data && ret.data.success) {
+      schedulerCloseDrawer();
+      schedulerLoad(true);
+    } else {
+      toggle.checked = !!schedulerSelected.schedule_enabled;
+    }
+  }, function() {
+    if (schedulerSelected) toggle.disabled = false;
+  });
+}
+function schedulerRunNow() {
+  if (!schedulerSelected) return;
+  if (!confirm('보관함 [' + schedulerSelected.name + ']을 지금 스캔하시겠습니까?')) return;
+  bookoasisMateAjax('scan', 'rescan', {
+    db_type:schedulerSelected.db_type,
+    library_id:schedulerSelected.id,
+    all_libraries:'false',
+    force:'false'
+  }, function(ret) {
+    if (ret.data) schedulerLoad(false);
+  });
+}
+
+$('#scheduler_refresh').click(function() { schedulerLoad(true); });
+$('#scheduler_db_filter').change(function() {
+  schedulerApplyDbFilter($(this).val());
+});
+$('.scan-scheduler-db-filter-btn').click(function() {
+  schedulerApplyDbFilter(this.dataset.dbType || 'all');
+});
+$('.scan-scheduler-view-btn').click(function() {
+  schedulerSetTimelineView(this.dataset.view || 'timeline');
+});
+$('.scan-scheduler-weekday-btn').click(function() {
+  schedulerSetSelectedWeekday(
+    this.dataset.weekday,
+    false,
+    this.dataset.weekdayScope || 'timeline'
+  );
+});
+$('#scheduler_conflict_only, #scheduler_remote_only').change(function() {
+  schedulerRenderTimelineView(); schedulerRenderSuggestions();
+});
+$('#scheduler_search').on('input', function() { schedulerRenderTimelineView(); schedulerRenderSuggestions(); });
+$('#scheduler_drawer_close, #scheduler_drawer_backdrop').click(schedulerCloseDrawer);
+$('#scheduler_preview_btn').click(function() { schedulerPreview(false); });
+$('#scheduler_save_btn').click(schedulerSave);
+$('#scheduler_delete_btn').click(schedulerDelete);
+$('#scheduler_grid_library').change(function() {
+  if (!schedulerGridAddContext) return;
+  var key = String($(this).val() || '');
+  if (!key) {
+    schedulerOpenGridAdd(
+      schedulerGridAddContext.weekday,
+      schedulerGridAddContext.hour,
+      schedulerGridAddContext.minute
+    );
+    return;
+  }
+  var item = schedulerFindLibrary(key);
+  if (!item) return;
+  schedulerOpenDrawer(
+    item,
+    schedulerGridCandidateCron(schedulerGridAddContext),
+    true,
+    true
+  );
+});
+$('#scheduler_toggle_enabled').change(schedulerToggleEnabled);
+$('#scheduler_run_btn').click(schedulerRunNow);
+$('#scheduler_helper_type').change(function() { schedulerUpdateHelperVisibility(); schedulerApplyHelper(); });
+$('#scheduler_helper_time, #scheduler_helper_weekday, #scheduler_helper_monthday').change(schedulerApplyHelper);
+$('#scheduler_cron_input').on('input', function() {
+  schedulerLastPreviewCron = null;
+  var box = document.getElementById('scheduler_preview_box');
+  box.className = 'scan-scheduler-preview';
+  if (schedulerIsNewScheduleMode()) {
+    document.getElementById('scheduler_save_btn').disabled = true;
+    box.textContent = '설정값이 변경되었습니다. 자동 미리보기를 갱신합니다...';
+    schedulerScheduleAutoPreview(350);
+  } else {
+    box.textContent = 'Cron 값이 변경되었습니다. 저장 전에 다시 미리보기를 실행해 주세요.';
+  }
+});
+document.addEventListener('pointermove', schedulerMoveWeekdayPointerDrag, {passive:false});
+document.addEventListener('wheel', schedulerForwardFixedColumnWheel, {passive:false});
+document.addEventListener('pointerup', function(event) {
+  schedulerFinishWeekdayPointerDrag(event, false);
+}, true);
+document.addEventListener('pointercancel', function(event) {
+  schedulerFinishWeekdayPointerDrag(event, true);
+}, true);
+window.addEventListener('blur', function() {
+  if (schedulerWeekdayPointerDrag) schedulerClearWeekdayPointerDrag(true);
+});
+document.addEventListener('keydown', function(event) {
+  if (event.key !== 'Escape') return;
+  if (schedulerWeekdayPointerDrag) {
+    schedulerClearWeekdayPointerDrag(true);
+    return;
+  }
+  schedulerCloseDrawer();
+});
+$(document).ready(function() {
+  schedulerSyncDbFilterButtons($('#scheduler_db_filter').val() || 'all');
+  schedulerSyncWeekdayButtons();
+  schedulerSetTimelineView('timeline');
+  schedulerLoad(false);
+});
+</script>
+{% endblock %}

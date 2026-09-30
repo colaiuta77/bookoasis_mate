@@ -10,7 +10,7 @@ import sys
 import tempfile
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 try:
@@ -62,6 +62,19 @@ SUMMARY_WATCHDOG_SECONDS = 1800
 LIBRARY_STATISTICS_WATCHDOG_SECONDS = 3600
 EXTERNAL_JOB_POLL_SECONDS = 0.2
 WORKER_START_GRACE_SECONDS = 30
+SCHEDULER_DB_TYPES = ("general", "adult", "audiobook", "video")
+SCHEDULER_LOOKAHEAD_DAYS = 7
+SCHEDULER_DEFAULT_DURATION_MINUTES = 30
+SCHEDULER_MAX_DURATION_MINUTES = 360
+SCHEDULER_MAX_OCCURRENCES = 512
+SCHEDULER_MONTH_NAMES = {
+    "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+    "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
+}
+SCHEDULER_WEEKDAY_NAMES = {
+    "SUN": 0, "MON": 1, "TUE": 2, "WED": 3,
+    "THU": 4, "FRI": 5, "SAT": 6,
+}
 
 
 def _is_mariadb_statement_timeout(error):
@@ -160,6 +173,173 @@ def infer_bookoasis_root(values):
     if general_db_path.endswith(suffix):
         return general_db_path[: -len(suffix)] or "/"
     return ""
+
+
+def _scheduler_median(values, default=SCHEDULER_DEFAULT_DURATION_MINUTES):
+    numbers = sorted(float(value) for value in values if value is not None)
+    if not numbers:
+        return int(default)
+    middle = len(numbers) // 2
+    value = (
+        numbers[middle]
+        if len(numbers) % 2
+        else (numbers[middle - 1] + numbers[middle]) / 2
+    )
+    return max(5, min(SCHEDULER_MAX_DURATION_MINUTES, int(round(value))))
+
+
+def _scheduler_datetime(value):
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        return parsed.replace(tzinfo=None)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _scheduler_alias_value(value, aliases):
+    text = str(value or "").strip().upper()
+    if aliases and text in aliases:
+        return aliases[text]
+    return int(text)
+
+
+def _scheduler_cron_values(expression, low, high, aliases=None, sunday=False):
+    expression = str(expression or "").strip().upper()
+    if not expression:
+        raise ValueError("비어 있는 Cron 필드가 있습니다.")
+    values = set()
+    for raw_part in expression.split(","):
+        part = raw_part.strip()
+        if not part:
+            raise ValueError("Cron 목록에 비어 있는 값이 있습니다.")
+        if "/" in part:
+            base, step_text = part.split("/", 1)
+            try:
+                step = int(step_text)
+            except ValueError as error:
+                raise ValueError("Cron 간격 값이 올바르지 않습니다.") from error
+            if step <= 0:
+                raise ValueError("Cron 간격 값은 1 이상이어야 합니다.")
+        else:
+            base = part
+            step = 1
+        if base == "*":
+            start, end = low, high
+        elif "-" in base:
+            start_text, end_text = base.split("-", 1)
+            try:
+                start = _scheduler_alias_value(start_text, aliases)
+                end = _scheduler_alias_value(end_text, aliases)
+            except ValueError as error:
+                raise ValueError("Cron 범위 값이 올바르지 않습니다.") from error
+            if start > end:
+                raise ValueError("Cron 범위의 시작 값이 끝 값보다 큽니다.")
+        else:
+            try:
+                start = end = _scheduler_alias_value(base, aliases)
+            except ValueError as error:
+                raise ValueError("Cron 값이 올바르지 않습니다.") from error
+            if "/" in part:
+                end = high
+        if start < low or end > high:
+            raise ValueError(f"Cron 값은 {low}~{high} 범위여야 합니다.")
+        for value in range(start, end + 1, step):
+            values.add(0 if sunday and value == 7 else value)
+    return values
+
+
+def _scheduler_parse_cron(expression):
+    fields = str(expression or "").strip().split()
+    if len(fields) != 5:
+        raise ValueError("Cron 표현식은 '분 시 일 월 요일' 5개 필드여야 합니다.")
+    return {
+        "minutes": _scheduler_cron_values(fields[0], 0, 59),
+        "hours": _scheduler_cron_values(fields[1], 0, 23),
+        "days": _scheduler_cron_values(fields[2], 1, 31),
+        "months": _scheduler_cron_values(fields[3], 1, 12, SCHEDULER_MONTH_NAMES),
+        "weekdays": _scheduler_cron_values(
+            fields[4], 0, 7, SCHEDULER_WEEKDAY_NAMES, sunday=True
+        ),
+    }
+
+
+def _scheduler_occurrences(
+    cron_schedule,
+    start_at,
+    duration_minutes,
+    days=SCHEDULER_LOOKAHEAD_DAYS,
+    max_count=SCHEDULER_MAX_OCCURRENCES,
+):
+    parsed = _scheduler_parse_cron(cron_schedule)
+    start_at = start_at.replace(second=0, microsecond=0)
+    end_at = start_at + timedelta(days=days)
+    current_date = start_at.date()
+    end_date = end_at.date()
+    events = []
+    truncated = False
+    while current_date <= end_date:
+        cron_weekday = (current_date.weekday() + 1) % 7
+        if (
+            current_date.month in parsed["months"]
+            and current_date.day in parsed["days"]
+            and cron_weekday in parsed["weekdays"]
+        ):
+            for hour in sorted(parsed["hours"]):
+                for minute in sorted(parsed["minutes"]):
+                    occurrence = datetime(
+                        current_date.year,
+                        current_date.month,
+                        current_date.day,
+                        hour,
+                        minute,
+                    )
+                    if occurrence < start_at or occurrence >= end_at:
+                        continue
+                    if len(events) >= max_count:
+                        truncated = True
+                        return events, truncated
+                    events.append({
+                        "_start": occurrence,
+                        "_end": occurrence + timedelta(minutes=duration_minutes),
+                    })
+        current_date += timedelta(days=1)
+    return events, truncated
+
+
+def _scheduler_simple_shift(cron_schedule, delta_minutes):
+    fields = str(cron_schedule or "").strip().split()
+    if len(fields) != 5 or not fields[0].isdigit() or not fields[1].isdigit():
+        return None
+    minute = int(fields[0])
+    hour = int(fields[1])
+    if minute > 59 or hour > 23:
+        return None
+    total = hour * 60 + minute + int(delta_minutes)
+    if total < 0 or total >= 24 * 60:
+        return None
+    fields[0] = str(total % 60)
+    fields[1] = str(total // 60)
+    return " ".join(fields)
+
+
+def _scheduler_task_matches_library(task_key, library_id):
+    key = str(task_key or "")
+    target = str(library_id)
+    for separator in (":", "/", "_", "-", "."):
+        key = key.replace(separator, " ")
+    return target in key.split()
 
 
 class BookOasisMateService:
@@ -1454,6 +1634,571 @@ class BookOasisMateService:
             duration_ms=self._duration_ms(started),
         )
         return data
+
+    @staticmethod
+    def _scheduler_duration(tasks, library_id):
+        library_samples = []
+        database_samples = []
+        for task in tasks or []:
+            if not isinstance(task, dict):
+                continue
+            task_type = str(task.get("task_type") or "").lower()
+            if "library" not in task_type:
+                continue
+            started_at = _scheduler_datetime(task.get("started_at"))
+            finished_at = _scheduler_datetime(task.get("finished_at"))
+            if not started_at or not finished_at or finished_at <= started_at:
+                continue
+            duration = (finished_at - started_at).total_seconds() / 60
+            if duration < 1 or duration > SCHEDULER_MAX_DURATION_MINUTES * 4:
+                continue
+            database_samples.append(duration)
+            if _scheduler_task_matches_library(task.get("task_key"), library_id):
+                library_samples.append(duration)
+        if library_samples:
+            return _scheduler_median(library_samples[:8]), "library_history"
+        if database_samples:
+            return _scheduler_median(database_samples[:20]), "db_history"
+        return SCHEDULER_DEFAULT_DURATION_MINUTES, "default"
+
+    def scan_scheduler(self, preview=None):
+        started = time.monotonic()
+        settings = self.settings()
+        client = self.admin_client(settings)
+        now = datetime.now().replace(second=0, microsecond=0)
+        window_start = datetime(now.year, now.month, now.day)
+        preview = preview if isinstance(preview, dict) else {}
+        preview_db_type = str(preview.get("db_type") or "").strip()
+        try:
+            preview_library_id = int(preview.get("library_id"))
+        except (TypeError, ValueError):
+            preview_library_id = None
+        preview_cron = str(preview.get("cron_schedule") or "").strip()
+        libraries = []
+        all_events = []
+        source_errors = []
+        api_success_count = 0
+
+        for db_type in SCHEDULER_DB_TYPES:
+            try:
+                database_data = self.engine(settings).scanner_status(
+                    db_type=db_type,
+                    limit=500,
+                )
+            except (BookOasisDatabaseError, RuntimeError, ValueError, OSError) as error:
+                database_data = {"libraries": [], "tasks": []}
+                source_errors.append({
+                    "db_type": db_type,
+                    "source": "database",
+                    "message": str(error),
+                })
+
+            database_libraries = {
+                str(item.get("id")): item
+                for item in database_data.get("libraries", [])
+                if isinstance(item, dict) and item.get("id") is not None
+            }
+            response = (
+                client.library_schedules(db_type)
+                if self._admin_credentials_configured(settings)
+                else {"success": False, "message": "BookOasis 관리자 계정이 설정되지 않았습니다."}
+            )
+            if (
+                isinstance(response, dict)
+                and response.get("success")
+                and isinstance(response.get("libraries"), list)
+            ):
+                rows = response["libraries"]
+                source = "api"
+                api_success_count += 1
+            else:
+                rows = list(database_libraries.values())
+                source = "database"
+                message = (
+                    response.get("message")
+                    or response.get("error")
+                    or "보관함 스케줄 API를 사용할 수 없습니다."
+                ) if isinstance(response, dict) else "보관함 스케줄 API 응답이 올바르지 않습니다."
+                if rows or db_type in {"general", "audiobook", "video"}:
+                    source_errors.append({
+                        "db_type": db_type,
+                        "source": "api",
+                        "message": str(message),
+                    })
+
+            for raw_item in rows:
+                if not isinstance(raw_item, dict):
+                    continue
+                try:
+                    library_id = int(raw_item.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                database_item = database_libraries.get(str(library_id), {})
+                cron_schedule = str(raw_item.get("cron_schedule") or "").strip()
+                preview_applied = (
+                    preview_library_id == library_id
+                    and preview_db_type == db_type
+                )
+                if preview_applied:
+                    cron_schedule = preview_cron
+                enabled_value = raw_item.get("schedule_enabled")
+                if enabled_value is None:
+                    enabled_value = database_item.get("schedule_enabled")
+                schedule_enabled = (
+                    bool(cron_schedule)
+                    if enabled_value is None
+                    else _as_bool(enabled_value, bool(cron_schedule))
+                )
+                if preview_applied:
+                    schedule_enabled = bool(cron_schedule)
+                duration_minutes, duration_source = self._scheduler_duration(
+                    database_data.get("tasks", []),
+                    library_id,
+                )
+                rclone_rc_configured = bool(
+                    str(raw_item.get("rclone_rc_url") or "").strip()
+                    or raw_item.get("rclone_rc_configured")
+                    or database_item.get("rclone_rc_configured")
+                )
+                is_remote_value = raw_item.get("is_remote")
+                if is_remote_value is None:
+                    is_remote_value = database_item.get("is_remote")
+                vfs_value = raw_item.get("vfs_refresh_before_scan")
+                if vfs_value is None:
+                    vfs_value = database_item.get("vfs_refresh_before_scan")
+                item = {
+                    "key": f"{db_type}:{library_id}",
+                    "id": library_id,
+                    "db_type": db_type,
+                    "name": str(raw_item.get("name") or database_item.get("name") or f"보관함 {library_id}"),
+                    "cron_schedule": cron_schedule,
+                    "schedule_enabled": schedule_enabled,
+                    "last_scanned_at": raw_item.get("last_scanned_at") or database_item.get("last_scanned_at"),
+                    "scan_status": raw_item.get("scan_status") or database_item.get("scan_status"),
+                    "is_remote": bool(_as_bool(is_remote_value, False)),
+                    "vfs_refresh_before_scan": bool(_as_bool(vfs_value, False)),
+                    "rclone_rc_configured": rclone_rc_configured,
+                    "estimated_duration_minutes": duration_minutes,
+                    "duration_source": duration_source,
+                    "source": source,
+                    "can_edit": bool(
+                        source == "api"
+                        and self._admin_credentials_configured(settings)
+                    ),
+                    "preview_applied": preview_applied,
+                    "cron_error": "",
+                    "next_run": None,
+                    "occurrence_truncated": False,
+                    "conflict_count": 0,
+                    "conflict_level": "none",
+                    "suggestion": None,
+                    "_events": [],
+                }
+                if cron_schedule:
+                    try:
+                        _scheduler_parse_cron(cron_schedule)
+                        if schedule_enabled:
+                            raw_events, truncated = _scheduler_occurrences(
+                                cron_schedule,
+                                window_start,
+                                duration_minutes,
+                            )
+                            item["occurrence_truncated"] = truncated
+                            for index, raw_event in enumerate(raw_events):
+                                event = {
+                                    "id": f"{item['key']}:{raw_event['_start'].strftime('%Y%m%d%H%M')}:{index}",
+                                    "library_key": item["key"],
+                                    "library_id": library_id,
+                                    "db_type": db_type,
+                                    "library_name": item["name"],
+                                    "start": raw_event["_start"].isoformat(timespec="minutes"),
+                                    "end": raw_event["_end"].isoformat(timespec="minutes"),
+                                    "duration_minutes": duration_minutes,
+                                    "is_remote": item["is_remote"],
+                                    "vfs_refresh_before_scan": item["vfs_refresh_before_scan"],
+                                    "conflict_count": 0,
+                                    "conflict_level": "none",
+                                    "conflict_with": [],
+                                    "_start": raw_event["_start"],
+                                    "_end": raw_event["_end"],
+                                    "_library": item,
+                                }
+                                item["_events"].append(event)
+                                all_events.append(event)
+                            future = [
+                                event for event in item["_events"]
+                                if event["_start"] >= now
+                            ]
+                            if future:
+                                item["next_run"] = future[0]["start"]
+                            else:
+                                next_events, _ = _scheduler_occurrences(
+                                    cron_schedule,
+                                    now,
+                                    duration_minutes,
+                                    days=370,
+                                    max_count=1,
+                                )
+                                if next_events:
+                                    item["next_run"] = next_events[0]["_start"].isoformat(timespec="minutes")
+                    except ValueError as error:
+                        item["cron_error"] = str(error)
+                libraries.append(item)
+
+        severity_rank = {"none": 0, "warning": 1, "critical": 2}
+        collision_pairs = []
+        collision_count = 0
+        critical_collision_count = 0
+        active = []
+        for event in sorted(all_events, key=lambda value: (value["_start"], value["_end"])):
+            active = [other for other in active if other["_end"] > event["_start"]]
+            for other in active:
+                if not (
+                    event["_start"] < other["_end"]
+                    and other["_start"] < event["_end"]
+                ):
+                    continue
+                same_library = event["library_key"] == other["library_key"]
+                exact_start = event["_start"] == other["_start"]
+                heavy_remote = event["is_remote"] and other["is_remote"]
+                heavy_vfs = (
+                    event["vfs_refresh_before_scan"]
+                    and other["vfs_refresh_before_scan"]
+                )
+                level = "critical" if (
+                    same_library or exact_start or heavy_remote or heavy_vfs
+                ) else "warning"
+                if same_library:
+                    reason = "같은 보관함의 예상 실행 구간이 겹칩니다."
+                elif exact_start:
+                    reason = "동일 시각에 시작합니다."
+                elif heavy_remote or heavy_vfs:
+                    reason = "원격/VFS 스캔의 예상 실행 구간이 겹칩니다."
+                else:
+                    reason = "예상 실행 구간이 겹칩니다."
+                collision_count += 1
+                if level == "critical":
+                    critical_collision_count += 1
+                for current, peer in ((event, other), (other, event)):
+                    current["conflict_count"] += 1
+                    if severity_rank[level] > severity_rank[current["conflict_level"]]:
+                        current["conflict_level"] = level
+                    peer_name = peer["library_name"]
+                    if peer_name not in current["conflict_with"] and len(current["conflict_with"]) < 6:
+                        current["conflict_with"].append(peer_name)
+                first_library = event["_library"]
+                second_library = other["_library"]
+                first_library["conflict_count"] += 1
+                if second_library is not first_library:
+                    second_library["conflict_count"] += 1
+                for current_library in (first_library, second_library):
+                    if severity_rank[level] > severity_rank[current_library["conflict_level"]]:
+                        current_library["conflict_level"] = level
+                if len(collision_pairs) < 250:
+                    overlap_start = max(event["_start"], other["_start"])
+                    overlap_end = min(event["_end"], other["_end"])
+                    collision_pairs.append({
+                        "level": level,
+                        "reason": reason,
+                        "start": overlap_start.isoformat(timespec="minutes"),
+                        "end": overlap_end.isoformat(timespec="minutes"),
+                        "minutes": max(1, int((overlap_end - overlap_start).total_seconds() / 60)),
+                        "first": {
+                            "key": other["library_key"],
+                            "name": other["library_name"],
+                            "db_type": other["db_type"],
+                        },
+                        "second": {
+                            "key": event["library_key"],
+                            "name": event["library_name"],
+                            "db_type": event["db_type"],
+                        },
+                    })
+            active.append(event)
+
+        for item in libraries:
+            if (
+                item["conflict_count"] <= 0
+                or not item["schedule_enabled"]
+                or item["cron_error"]
+                or item["occurrence_truncated"]
+            ):
+                continue
+            best = None
+            other_events = [
+                event for event in all_events
+                if event["library_key"] != item["key"]
+            ]
+            for delta in (30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180, -180):
+                candidate_cron = _scheduler_simple_shift(item["cron_schedule"], delta)
+                if not candidate_cron:
+                    continue
+                try:
+                    candidate_events, candidate_truncated = _scheduler_occurrences(
+                        candidate_cron,
+                        window_start,
+                        item["estimated_duration_minutes"],
+                    )
+                except ValueError:
+                    continue
+                if candidate_truncated:
+                    continue
+                score = 0
+                for candidate in candidate_events:
+                    for other in other_events:
+                        if (
+                            candidate["_start"] < other["_end"]
+                            and other["_start"] < candidate["_end"]
+                        ):
+                            score += 1
+                if score >= item["conflict_count"]:
+                    continue
+                if best is None or score < best["conflicts_after"] or (
+                    score == best["conflicts_after"]
+                    and abs(delta) < abs(best["shift_minutes"])
+                ):
+                    best = {
+                        "cron_schedule": candidate_cron,
+                        "shift_minutes": delta,
+                        "conflicts_before": item["conflict_count"],
+                        "conflicts_after": score,
+                    }
+                    if score == 0:
+                        break
+            item["suggestion"] = best
+
+        weekday_names = ("월", "화", "수", "목", "금", "토", "일")
+        days = []
+        heatmap = []
+        for offset in range(SCHEDULER_LOOKAHEAD_DAYS):
+            day_start = window_start + timedelta(days=offset)
+            day_end = day_start + timedelta(days=1)
+            date_text = day_start.date().isoformat()
+            days.append({
+                "date": date_text,
+                "label": f"{day_start.month}/{day_start.day} ({weekday_names[day_start.weekday()]})",
+            })
+            for hour in range(24):
+                slot_start = day_start + timedelta(hours=hour)
+                slot_end = slot_start + timedelta(hours=1)
+                slot_events = [
+                    event for event in all_events
+                    if event["_start"] < slot_end and slot_start < event["_end"]
+                ]
+                heatmap.append({
+                    "date": date_text,
+                    "hour": hour,
+                    "active_count": len(slot_events),
+                    "conflict_count": sum(
+                        1 for event in slot_events if event["conflict_count"] > 0
+                    ),
+                })
+
+        for item in libraries:
+            events = item.pop("_events", [])
+            item["occurrences"] = [
+                {
+                    key: value
+                    for key, value in event.items()
+                    if not key.startswith("_")
+                }
+                for event in events
+            ]
+
+        data = {
+            "generated_at": now.isoformat(timespec="minutes"),
+            "days": days,
+            "libraries": libraries,
+            "heatmap": heatmap,
+            "collision_pairs": collision_pairs,
+            "collision_count": collision_count,
+            "critical_collision_count": critical_collision_count,
+            "active_count": sum(
+                1 for item in libraries
+                if item["schedule_enabled"] and bool(item["cron_schedule"])
+            ),
+            "disabled_count": sum(
+                1 for item in libraries
+                if bool(item["cron_schedule"]) and not item["schedule_enabled"]
+            ),
+            "scheduled_count": sum(
+                1 for item in libraries if bool(item["cron_schedule"])
+            ),
+            "source_errors": source_errors,
+            "can_edit": bool(
+                self._admin_credentials_configured(settings)
+                and api_success_count > 0
+            ),
+            "api_db_count": api_success_count,
+            "preview": {
+                "active": preview_library_id is not None and bool(preview_db_type),
+                "db_type": preview_db_type,
+                "library_id": preview_library_id,
+                "cron_schedule": preview_cron,
+            },
+        }
+        self._debug(
+            "스캔 스케줄러 조회 완료",
+            libraries=len(libraries),
+            scheduled=data["scheduled_count"],
+            collisions=data["collision_count"],
+            preview=str(data["preview"]["active"]).lower(),
+            duration_ms=self._duration_ms(started),
+        )
+        return data
+
+    def update_scan_schedule(self, db_type, library_id, cron_schedule):
+        started = time.monotonic()
+        db_type = str(db_type or "").strip()
+        if db_type not in SCHEDULER_DB_TYPES:
+            return {"success": False, "message": "DB 유형이 올바르지 않습니다."}
+        try:
+            library_id = int(library_id)
+        except (TypeError, ValueError):
+            return {"success": False, "message": "보관함 ID가 올바르지 않습니다."}
+        if library_id <= 0:
+            return {"success": False, "message": "보관함 ID가 올바르지 않습니다."}
+        cron_schedule = str(cron_schedule or "").strip()
+        if len(cron_schedule) > 50:
+            return {"success": False, "message": "Cron 표현식은 50자를 초과할 수 없습니다."}
+        if cron_schedule:
+            try:
+                _scheduler_parse_cron(cron_schedule)
+            except ValueError as error:
+                return {"success": False, "message": str(error)}
+        settings = self.settings()
+        if not self._admin_credentials_configured(settings):
+            return {
+                "success": False,
+                "message": "스케줄 수정에는 BookOasis 관리자 계정 설정이 필요합니다.",
+            }
+        client = self.admin_client(settings)
+        response = client.library_schedules(db_type)
+        if not (
+            isinstance(response, dict)
+            and response.get("success")
+            and isinstance(response.get("libraries"), list)
+        ):
+            return response if isinstance(response, dict) else {
+                "success": False,
+                "message": "보관함 스케줄 API 응답이 올바르지 않습니다.",
+            }
+        current = next(
+            (
+                item for item in response["libraries"]
+                if isinstance(item, dict) and str(item.get("id")) == str(library_id)
+            ),
+            None,
+        )
+        if not current:
+            return {"success": False, "message": "보관함을 찾을 수 없습니다."}
+        had_schedule = bool(str(current.get("cron_schedule") or "").strip())
+        result = client.update_library_schedule(
+            library_id,
+            db_type=db_type,
+            cron_schedule=cron_schedule,
+            vfs_refresh_before_scan=_as_bool(
+                current.get("vfs_refresh_before_scan"), False
+            ),
+            rclone_rc_url=str(current.get("rclone_rc_url") or ""),
+        )
+        if (
+            isinstance(result, dict)
+            and result.get("success")
+            and cron_schedule
+        ):
+            desired_enabled = (
+                True
+                if not had_schedule
+                else _as_bool(current.get("schedule_enabled"), True)
+            )
+            enabled_result = client.update_library_schedule_enabled(
+                library_id,
+                db_type=db_type,
+                enabled=desired_enabled,
+            )
+            if not (
+                isinstance(enabled_result, dict)
+                and enabled_result.get("success")
+            ):
+                action = "활성화" if desired_enabled else "기존 비활성 상태 복원"
+                return {
+                    "success": False,
+                    "message": (
+                        f"Cron은 저장됐지만 스케줄 {action}에 실패했습니다. "
+                        + str(
+                            (enabled_result or {}).get("message")
+                            or (enabled_result or {}).get("error")
+                            or "스케줄 활성 상태를 확인해 주세요."
+                        )
+                    ),
+                }
+        self._debug(
+            "스캔 스케줄 저장 완료",
+            db_type=db_type,
+            library_id=library_id,
+            enabled=str(bool(cron_schedule)).lower(),
+            success=str(bool(isinstance(result, dict) and result.get("success"))).lower(),
+            duration_ms=self._duration_ms(started),
+        )
+        return result
+
+    def update_scan_schedule_enabled(self, db_type, library_id, enabled):
+        started = time.monotonic()
+        db_type = str(db_type or "").strip()
+        if db_type not in SCHEDULER_DB_TYPES:
+            return {"success": False, "message": "DB 유형이 올바르지 않습니다."}
+        try:
+            library_id = int(library_id)
+        except (TypeError, ValueError):
+            return {"success": False, "message": "보관함 ID가 올바르지 않습니다."}
+        if library_id <= 0:
+            return {"success": False, "message": "보관함 ID가 올바르지 않습니다."}
+        enabled = _as_bool(enabled, False)
+        settings = self.settings()
+        if not self._admin_credentials_configured(settings):
+            return {
+                "success": False,
+                "message": "스케줄 수정에는 BookOasis 관리자 계정 설정이 필요합니다.",
+            }
+        client = self.admin_client(settings)
+        if enabled:
+            response = client.library_schedules(db_type)
+            if not (
+                isinstance(response, dict)
+                and response.get("success")
+                and isinstance(response.get("libraries"), list)
+            ):
+                return response if isinstance(response, dict) else {
+                    "success": False,
+                    "message": "보관함 스케줄 API 응답이 올바르지 않습니다.",
+                }
+            current = next(
+                (
+                    item for item in response["libraries"]
+                    if isinstance(item, dict) and str(item.get("id")) == str(library_id)
+                ),
+                None,
+            )
+            if not current or not str(current.get("cron_schedule") or "").strip():
+                return {
+                    "success": False,
+                    "message": "먼저 Cron 스케줄을 저장한 뒤 활성화해 주세요.",
+                }
+        result = client.update_library_schedule_enabled(
+            library_id,
+            db_type=db_type,
+            enabled=enabled,
+        )
+        self._debug(
+            "스캔 스케줄 활성 상태 변경 완료",
+            db_type=db_type,
+            library_id=library_id,
+            enabled=str(enabled).lower(),
+            success=str(bool(isinstance(result, dict) and result.get("success"))).lower(),
+            duration_ms=self._duration_ms(started),
+        )
+        return result
 
     @staticmethod
     def _queue_task(task):

@@ -1222,6 +1222,7 @@ class BookOasisMateEngine:
                         "scan_status",
                         "is_remote",
                         "cron_schedule",
+                        "schedule_enabled",
                         "vfs_refresh_before_scan",
                         "rclone_rc_url",
                     )
