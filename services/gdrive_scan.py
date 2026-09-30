@@ -428,7 +428,7 @@ def event_scan_targets(event, libraries):
     candidates = []
 
     if action in {"move", "rename"}:
-        if previous:
+        if previous and previous != current:
             candidates.append((previous, True))
         if current:
             candidates.append((current, False))
@@ -440,7 +440,7 @@ def event_scan_targets(event, libraries):
         candidates.append((current, False))
 
     targets = []
-    seen = set()
+    seen = {}
     for path, removed in candidates:
         library = find_library(path, libraries)
         if library is None:
@@ -466,9 +466,11 @@ def event_scan_targets(event, libraries):
             relative_path = directory
         key = (library["db_type"], library["id"], relative_path)
         if key in seen:
+            seen[key]["removed"] = seen[key]["removed"] and removed
             continue
-        seen.add(key)
-        targets.append({"library": library, "path": relative_path, "removed": removed})
+        target = {"library": library, "path": relative_path, "removed": removed}
+        seen[key] = target
+        targets.append(target)
     return targets
 
 
@@ -768,10 +770,10 @@ class GDriveScanProcessor:
                     request_key = ("path",) + library_key + (relative_path,)
                 scan_requests.setdefault(
                     request_key,
-                    {"library": library, "event_ids": set(), "removed": False},
+                    {"library": library, "event_ids": set(), "removed": True},
                 )["event_ids"].add(event_id)
-                if target.get("removed"):
-                    scan_requests[request_key]["removed"] = True
+                # 현재 대상이 포함되면 일시적인 404를 삭제로 간주해 범위를 넓히지 않습니다.
+                scan_requests[request_key]["removed"] &= bool(target.get("removed"))
                 event_scan_keys.setdefault(event_id, [])
                 if request_key not in event_scan_keys[event_id]:
                     event_scan_keys[event_id].append(request_key)
