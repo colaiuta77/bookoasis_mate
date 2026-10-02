@@ -306,10 +306,6 @@ function bookoasisMateBookDetailUrl(item) {
 
 function bookoasisMateAppendEventLinks(root, item) {
   if (!item.library_id || !item.db_type) return;
-  var link = bookoasisMateText('a', 'btn btn-sm btn-outline-primary', '보관함 문제 보기');
-  link.href = '/' + PACKAGE_NAME + '/scan/scanner?db_type=' + encodeURIComponent(item.db_type) +
-    '&library_id=' + encodeURIComponent(item.library_id) + '#core_problems';
-  root.appendChild(link);
   if (item.status !== 'completed') return;
   var detail = bookoasisMateText('button', 'btn btn-sm btn-outline-primary', 'BookOasis에서 상세 보기');
   detail.type = 'button';
