@@ -280,24 +280,52 @@ function bookoasisMateBookDetailUrl(item) {
   var seriesName = String((item && (item.series_name || item.title)) || '').trim();
   if (!seriesName) return '';
   var libraryId = item && item.library_id ? item.library_id : 'all';
+  var dbType = item && item.db_type ? item.db_type : bookoasisMateSelectedDbType();
+  var detailBaseUrl = baseUrl + '/?type=' + encodeURIComponent(dbType);
   try {
     var payload = {
       s: seriesName,
       l: libraryId,
       r: item && item.id ? item.id : null,
-      d: item && item.title ? String(item.title) : null
+      d: item && item.title ? String(item.title) : null,
+      t: dbType
     };
     var bytes = new TextEncoder().encode(JSON.stringify(payload));
     var binary = '';
     bytes.forEach(function(value) { binary += String.fromCharCode(value); });
     var token = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    return baseUrl + '/#detail?v=' + token;
+    return detailBaseUrl + '#detail?v=' + token;
   } catch (error) {
-    return baseUrl + '/#detail?series=' + encodeURIComponent(seriesName) +
+    return detailBaseUrl + '#detail?series=' + encodeURIComponent(seriesName) +
       '&libraryId=' + encodeURIComponent(libraryId) +
       '&repBookId=' + encodeURIComponent(item && item.id ? item.id : '') +
-      '&displayTitle=' + encodeURIComponent(item && item.title ? String(item.title) : '');
+      '&displayTitle=' + encodeURIComponent(item && item.title ? String(item.title) : '') +
+      '&type=' + encodeURIComponent(dbType);
   }
+}
+
+function bookoasisMateAppendEventLinks(root, item) {
+  if (!item.library_id || !item.db_type) return;
+  if (item.status !== 'completed') return;
+  var detail = bookoasisMateText('button', 'btn btn-sm btn-outline-primary', 'BookOasis에서 상세 보기');
+  detail.type = 'button';
+  detail.addEventListener('click', function() {
+    var popup = window.open('about:blank', '_blank');
+    if (popup) popup.opener = null;
+    detail.disabled = true;
+    bookoasisMateAjax('scan', 'event_book', {
+      db_type:item.db_type, library_id:item.library_id,
+      path:item.mapped_path || (item.result || {}).mapped_path || item.path, item_type:item.item_type
+    }, function(ret) {
+      var url = ret.data ? bookoasisMateBookDetailUrl(ret.data) : '';
+      if (url && popup) popup.location.replace(url);
+      else {
+        if (popup) popup.close();
+        notify(url ? '팝업을 허용한 뒤 다시 눌러 주세요.' : '도서를 찾지 못했거나 여러 작품이 포함된 폴더입니다. 삭제 여부·스캔 완료 상태와 BookOasis URL을 확인해 주세요.', 'warning');
+      }
+    }, function() { detail.disabled = false; }, {error:function() { if (popup) popup.close(); }});
+  });
+  root.appendChild(detail);
 }
 
 function bookoasisMateOpenSelectedBookDetail() {

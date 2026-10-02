@@ -2,6 +2,7 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+<script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate_scan_status.js') }}"></script>
 <style>
 .doctor-scanner-libraries { table-layout:fixed; min-width:1080px; }
 .doctor-scanner-libraries th, .doctor-scanner-libraries td { padding:12px 10px; overflow-wrap:anywhere; }
@@ -63,6 +64,23 @@
   <div id="tts_status_root" class="doctor-path"></div>
   <div id="tts_status_updated" class="doctor-muted"></div>
 </div>
+
+<section id="core_problems" class="doctor-section">
+  <h4>코어 문제·경고</h4>
+  <div class="doctor-toolbar">
+    <select id="core_library_filter" class="form-control form-control-sm" aria-label="코어 문제·이력 보관함 필터"><option value="">전체 보관함</option></select>
+    <span class="doctor-muted">위 DB 선택과 함께 적용 · 시스템 공통 경고는 항상 표시 · 10초 갱신</span>
+  </div>
+  <p class="doctor-muted">읽기 전용입니다. 문제 확인·해결·삭제 승인은 BookOasis 알림에서 처리하세요. ‘알고 있음’은 해결된 상태가 아닙니다.</p>
+  <div id="core_problem_rows" aria-live="polite">상태를 확인하는 중입니다.</div>
+  <h5>실제 스캔 완료 이력</h5>
+  <p class="doctor-muted">코어 API의 최근 20건에서 필터링합니다. Lazy 스캔은 제외되며, 이벤트 요청 접수 기록과 별개입니다.</p>
+  <div class="doctor-table-wrap"><table class="table table-sm doctor-table">
+    <thead><tr><th>보관함</th><th>유형</th><th>실행 계기</th><th>결과</th><th>요약</th><th>종료 시각</th><th>오류</th></tr></thead>
+    <tbody id="core_history_rows"></tbody>
+  </table></div>
+  <p id="core_history_message" class="doctor-muted"></p>
+</section>
 
 <h4>보관함 상태</h4>
 <p class="doctor-muted">스캔 사용은 자동 예약의 ON/OFF입니다. 수동 스캔과 실행 중인 작업에는 영향을 주지 않습니다.</p>
@@ -356,22 +374,40 @@ function scheduleScannerPoll() {
 }
 function loadScanner(showLoading) {
   loadTtsStatus();
+  loadCoreScanStatus(showLoading === true);
   if (scannerRequestRunning || scannerScheduleSaving) return;
   scannerRequestRunning = true;
-  bookoasisMateAjax('scan', 'scanner', {db_type:$('#db_type').val(), live:'true'}, function(ret) {
+  var requestedDb = $('#db_type').val();
+  bookoasisMateAjax('scan', 'scanner', {db_type:requestedDb, live:'true'}, function(ret) {
+    if ($('#db_type').val() !== requestedDb) return;
     if (ret.ret === 'success' && !scannerScheduleSaving) {
       renderScanner(ret.data);
+      var filter = document.getElementById('core_library_filter');
+      var selected = filter.value || new URLSearchParams(window.location.search).get('library_id') || '';
+      bookoasisMateClear(filter);
+      var all = bookoasisMateText('option', '', '전체 보관함'); all.value = ''; filter.appendChild(all);
+      (ret.data.libraries || []).forEach(function(item) {
+        var option = bookoasisMateText('option', '', item.name || ('보관함 #' + item.id));
+        option.value = String(item.id); filter.appendChild(option);
+      });
+      if (selected && !Array.from(filter.options).some(function(option) { return option.value === selected; })) {
+        var missing = bookoasisMateText('option', '', '보관함 #' + selected); missing.value = selected; filter.appendChild(missing);
+      }
+      filter.value = selected;
+      renderCoreScanStatus();
       document.getElementById('scanner_updated_at').textContent =
         '마지막 갱신 ' + new Date().toLocaleTimeString() +
         ' · 보관함 ' + (ret.data.library_source === 'api' ? 'API' : 'DB 대체');
     }
   }, function() {
     scannerRequestRunning = false;
-    scheduleScannerPoll();
+    if ($('#db_type').val() !== requestedDb) loadScanner(false);
+    else scheduleScannerPoll();
   }, {
     global:showLoading === true,
     silent:showLoading !== true,
     error:function(xhr, message) {
+      if ($('#db_type').val() !== requestedDb) return;
       var error = document.getElementById('live_queue_error');
       error.style.display = 'block';
       error.textContent = message;
@@ -381,13 +417,33 @@ function loadScanner(showLoading) {
 $('#refresh_btn').click(function(e) { e.preventDefault(); loadScanner(true); });
 $('#rescan_all_btn').click(function(e) { e.preventDefault(); requestRescan('', '', true); });
 $('#clear_queue_btn').click(function(e) { e.preventDefault(); clearPendingQueue(); });
-$('#db_type').change(function() { loadScanner(true); });
+$('#db_type').change(function() {
+  $('#core_library_filter').val('');
+  window.history.replaceState(null, '', window.location.pathname);
+  coreScanData = null;
+  bookoasisMateClear(document.getElementById('core_history_rows'));
+  document.getElementById('core_problem_rows').textContent = '상태를 확인하는 중입니다.';
+  loadScanner(true);
+});
+$('#core_library_filter').change(function() {
+  window.history.replaceState(null, '', window.location.pathname + '?db_type=' + encodeURIComponent($('#db_type').val()) +
+    '&library_id=' + encodeURIComponent(this.value) + '#core_problems');
+  renderCoreScanStatus();
+});
 $('#scanner_auto_refresh').change(scheduleScannerPoll);
 document.addEventListener('visibilitychange', function() {
   if (document.hidden) clearTimeout(scannerPollTimer);
   else loadScanner(false);
 });
 window.addEventListener('beforeunload', function() { clearTimeout(scannerPollTimer); });
-$(document).ready(function() { loadScanner(false); });
+$(document).ready(function() {
+  var params = new URLSearchParams(window.location.search), db = params.get('db_type'), library = params.get('library_id');
+  if (db && $('#db_type option').toArray().some(function(option) { return option.value === db; })) $('#db_type').val(db);
+  if (library && /^\d+$/.test(library)) {
+    var option = bookoasisMateText('option', '', '보관함 #' + library); option.value = library;
+    document.getElementById('core_library_filter').appendChild(option); $('#core_library_filter').val(library);
+  }
+  loadScanner(false);
+});
 </script>
 {% endblock %}

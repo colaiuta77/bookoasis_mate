@@ -411,6 +411,15 @@ class BookOasisClient:
             query={"_ts": str(time.time_ns())},
         )
 
+    def system_status(self, db_type="general"):
+        db_type = self._valid_library_db_type(db_type)
+        if not db_type:
+            return self._admin_error("DB 유형이 올바르지 않습니다.")
+        return self._admin_request("api/system/status", query={"type": db_type, "_ts": str(time.time_ns())})
+
+    def scan_history(self):
+        return self._admin_request("api/media/scan-history", query={"_ts": str(time.time_ns())})
+
     def tts_status(self):
         return self._admin_request(
             "api/media/tts/pregen/admin-status",

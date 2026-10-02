@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import posixpath
 import time
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
@@ -1203,6 +1204,42 @@ class BookOasisMateEngine:
             )
             for item in batch
         ]
+
+    def event_book(self, db_type, library_id, path, item_type="file"):
+        if db_type not in {"general", "adult"}:
+            raise ValueError("도서 상세보기는 일반·성인 DB에서 지원합니다.")
+        library_id = int(library_id)
+        if library_id <= 0:
+            raise ValueError("보관함 ID가 올바르지 않습니다.")
+        path = str(path or "").strip().replace("\\", "/").rstrip("/")
+        if not path or ".." in path.split("/"):
+            raise ValueError("도서 경로가 올바르지 않습니다.")
+        target = self.get_target(db_type)
+        with closing(self._connect(target)) as connection:
+            if "books" not in self._tables(connection):
+                return None
+            columns = self._columns(connection, "books")
+            if not {"id", "library_id", "file_path", "title"}.issubset(columns):
+                return None
+            series = "COALESCE(NULLIF(series_name, ''), title)" if "series_name" in columns else "title"
+            alive = " AND COALESCE(is_deleted, 0) = 0" if "is_deleted" in columns else ""
+            base = f"SELECT id, library_id, title, {series} AS series_name FROM books WHERE library_id = ?{alive}"
+            if item_type != "directory":
+                row = connection.execute(base + " AND file_path = ? ORDER BY id LIMIT 1", (library_id, path)).fetchone()
+                if row:
+                    return {**dict(row), "db_type": db_type}
+                if posixpath.basename(path).lower() not in {"kavita.yaml", "kavita.yml", "info.xml", "comicinfo.xml"}:
+                    return None
+                path = posixpath.dirname(path)
+            prefix = path.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "/%"
+            groups = connection.execute(
+                f"SELECT MIN(id) AS id FROM books WHERE library_id = ?{alive} AND file_path LIKE ? ESCAPE '!' GROUP BY {series} LIMIT 2",
+                (library_id, prefix),
+            ).fetchall()
+            if len(groups) != 1:
+                return None
+            row = connection.execute(base + " AND id = ?", (library_id, groups[0]["id"])).fetchone()
+            return {**dict(row), "db_type": db_type} if row else None
 
     def scanner_status(self, db_type="general", limit=100):
         target = self.get_target(db_type)
