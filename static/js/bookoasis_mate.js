@@ -281,6 +281,7 @@ function bookoasisMateBookDetailUrl(item) {
   if (!seriesName) return '';
   var libraryId = item && item.library_id ? item.library_id : 'all';
   var dbType = item && item.db_type ? item.db_type : bookoasisMateSelectedDbType();
+  var detailBaseUrl = baseUrl + '/?type=' + encodeURIComponent(dbType);
   try {
     var payload = {
       s: seriesName,
@@ -293,9 +294,9 @@ function bookoasisMateBookDetailUrl(item) {
     var binary = '';
     bytes.forEach(function(value) { binary += String.fromCharCode(value); });
     var token = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    return baseUrl + '/#detail?v=' + token;
+    return detailBaseUrl + '#detail?v=' + token;
   } catch (error) {
-    return baseUrl + '/#detail?series=' + encodeURIComponent(seriesName) +
+    return detailBaseUrl + '#detail?series=' + encodeURIComponent(seriesName) +
       '&libraryId=' + encodeURIComponent(libraryId) +
       '&repBookId=' + encodeURIComponent(item && item.id ? item.id : '') +
       '&displayTitle=' + encodeURIComponent(item && item.title ? String(item.title) : '') +
