@@ -3,6 +3,7 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+<input type="hidden" id="doctor_bookoasis_url" value="{{ arg.get('bookoasis_url', '') }}">
 
 <div class="doctor-gdrive-filter">
   <select id="gdrive_event_order" class="form-control form-control-sm" title="정렬">
@@ -392,6 +393,7 @@ function renderGdriveEvents(data) {
         });
       }));
     }
+    bookoasisMateAppendEventLinks(actionColumn, item);
     pathColumn.appendChild(actionColumn);
     body.appendChild(row);
   });

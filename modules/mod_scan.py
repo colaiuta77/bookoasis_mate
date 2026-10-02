@@ -11,6 +11,7 @@ class ModuleScan(PluginModuleBase):
         "tts_status", "scanner", "scan_scheduler_data", "scheduler_preview",
         "scheduler_update", "scheduler_enabled", "rescan", "cancel_library_scan",
         "scan_library_covers", "clear_scan_queue", "cancel_scan_queue_task",
+        "core_scan_status", "event_book",
     }
 
     def __init__(self, plugin):
@@ -28,6 +29,14 @@ class ModuleScan(PluginModuleBase):
 
     def process_ajax(self, command, req):
         try:
+            if command == "core_scan_status":
+                return jsonify({"ret": "success", "data": self.service.core_scan_status(req.form.get("db_type", "general"))})
+            if command == "event_book":
+                book = self.service.engine().event_book(
+                    req.form.get("db_type", "general"), req.form.get("library_id"),
+                    req.form.get("path"), req.form.get("item_type", "file"),
+                )
+                return jsonify({"ret": "success", "data": book})
             if command == "tts_status":
                 return jsonify({"ret": "success", "data": self.service.admin_client().tts_status()})
             if command == "scanner":

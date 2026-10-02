@@ -1525,6 +1525,49 @@ class BookOasisMateService:
         )
         return data
 
+    def core_scan_status(self, db_type="general"):
+        client = self.admin_client()
+        result = {}
+        for name, response, key in (
+            ("problems", client.system_status(db_type), "notifications"),
+            ("history", client.scan_history(), "history"),
+        ):
+            response = response if isinstance(response, dict) else {}
+            supported = isinstance(response.get(key), list)
+            items = response.get(key) if supported and response.get("success") else []
+            if name == "problems":
+                fields = ("id", "source", "severity", "title", "title_key", "raw_detail",
+                          "target", "card", "created_at", "updated_at")
+                items = [item for item in items if isinstance(item, dict) and item.get("kind") == "problem"]
+            else:
+                fields = ("id", "task_type", "status", "db_type", "library_id", "library_name",
+                          "trigger_type", "enqueue_at", "started_at", "finished_at", "error_message", "result_summary")
+                normalized = []
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    item = dict(item)
+                    kwargs = item.get("kwargs") or {}
+                    if isinstance(kwargs, str):
+                        try:
+                            kwargs = json.loads(kwargs)
+                        except ValueError:
+                            kwargs = {}
+                    if isinstance(kwargs, dict):
+                        trigger = kwargs.get("trigger_type") or kwargs.get("trigger")
+                        if trigger:
+                            item["trigger_type"] = str(trigger)
+                    normalized.append(item)
+                items = normalized
+            result[name] = {
+                "success": bool(response.get("success")) and supported,
+                "supported": supported,
+                "http_status": response.get("http_status"),
+                "message": response.get("message") or response.get("error") or "",
+                "items": [{field: item.get(field) for field in fields} for item in items if isinstance(item, dict)],
+            }
+        return result
+
     def scanner(self, db_type="general", limit=100, include_live=False):
         started = time.monotonic()
         settings = self.settings()

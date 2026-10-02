@@ -3,6 +3,7 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
+<input type="hidden" id="doctor_bookoasis_url" value="{{ arg.get('bookoasis_url', '') }}">
 <ul class="nav nav-pills bg-light shadow text-dark mb-3" role="tablist" aria-label="로컬 폴더 감지">
   <li class="nav-item"><a class="nav-link active" id="local_settings_tab" data-toggle="tab" href="#local_settings" role="tab" aria-controls="local_settings" aria-selected="true">설정</a></li>
   <li class="nav-item"><a class="nav-link" id="local_changes_tab" data-toggle="tab" href="#local_changes" role="tab" aria-controls="local_changes" aria-selected="false">변경 이벤트</a></li>
@@ -255,6 +256,7 @@ function localStatus() {
       if (item.status === 'completed' || item.status === 'failed') actions.append($('<button class="btn btn-sm btn-outline-danger">삭제</button>').on('click', function() {
         if (confirm('#' + item.id + ' 이벤트 기록만 삭제할까요? 실제 파일은 삭제하지 않습니다.')) localRequest('delete', {id:item.id}, localStatus);
       }));
+      bookoasisMateAppendEventLinks(actions[0], item);
       paths.append(actions); $('#local_events').append(tr);
     });
     $('#local_empty').prop('hidden', !!(list.items || []).length);
