@@ -7,7 +7,34 @@
 <style>
 .doctor-statistics-echart { height:340px; width:100%; min-width:0; }
 .doctor-statistics-chart-card { min-width:0; }
-#statistics_result[hidden] { display:none; }
+#statistics_result[hidden], .doctor-statistics-chart-card[hidden], #statistics_cards_empty[hidden] { display:none; }
+.statistics-card-wide { grid-column:1 / -1; }
+.statistics-card-header { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px; }
+.statistics-card-header h4 { margin:0; }
+.statistics-card-handle { border:0; background:transparent; color:#718096; padding:3px 8px; font-size:20px; cursor:grab; }
+.statistics-card-dragging { opacity:.5; }
+.statistics-settings-drawer { position:fixed; inset:0 0 0 auto; width:min(480px,96vw); height:100%; max-height:100%; max-width:96vw; margin:0; padding:0; border:0; background:#fff; color:#343a40; box-shadow:-10px 0 32px rgba(0,0,0,.22); }
+.statistics-settings-drawer::backdrop { background:rgba(0,0,0,.38); }
+.statistics-settings-body { min-height:100%; padding:18px; box-sizing:border-box; }
+.statistics-settings-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding-bottom:12px; border-bottom:1px solid #dee2e6; }
+.statistics-settings-header h4 { margin:0 0 4px; font-size:1.05rem; }
+.statistics-settings-close { border:0; background:transparent; color:#6c757d; font-size:1.6rem; line-height:1; }
+.statistics-setting-row { display:flex; align-items:center; gap:6px; padding:10px 0; border-bottom:1px solid #eef0f2; }
+.statistics-setting-row label { display:flex; align-items:center; gap:8px; flex:1; margin:0; min-width:0; font-size:.85rem; }
+.statistics-setting-row input { flex-shrink:0; }
+.statistics-setting-row .doctor-plugin-switch { position:relative; cursor:pointer; }
+.statistics-setting-row .doctor-plugin-switch input { width:38px; height:21px; left:0; top:50%; margin:0; transform:translateY(-50%); pointer-events:auto; }
+.statistics-setting-row .doctor-plugin-switch-track { flex-shrink:0; pointer-events:none; }
+.statistics-toggle-state { min-width:22px; font-size:.78rem; font-weight:700; color:#6c757d; }
+.statistics-setting-row input:checked ~ .statistics-toggle-state { color:#6f42c1; }
+@media (prefers-reduced-motion:no-preference) {
+  .statistics-settings-drawer[open] { animation:statistics-slide-in .18s ease; }
+  @keyframes statistics-slide-in { from { transform:translateX(100%); } to { transform:translateX(0); } }
+}
+@media (prefers-color-scheme:dark) {
+  .statistics-settings-drawer { background:#212529; color:#f8f9fa; }
+  .statistics-settings-header, .statistics-setting-row { border-color:#495057; }
+}
 </style>
 <div class="doctor-toolbar doctor-statistics-toolbar">
   <select id="statistics_db_type" class="form-control form-control-sm" aria-label="통계 DB">
@@ -18,6 +45,8 @@
   <select id="statistics_library" class="form-control form-control-sm" aria-label="통계 보관함"><option value="">전체 보관함</option></select>
   <button id="statistics_start" type="button" class="btn btn-sm btn-primary">통계 갱신</button>
   <button id="statistics_stop" type="button" class="btn btn-sm btn-outline-secondary" disabled>갱신 중지</button>
+  <button id="statistics_settings_open" type="button" class="btn btn-sm btn-outline-secondary" aria-haspopup="dialog" disabled>카드 설정</button>
+  <button id="statistics_layout_reset" type="button" class="btn btn-sm btn-outline-secondary" disabled>레이아웃 초기화</button>
 </div>
 <p class="doctor-muted">저장된 결과를 바로 표시합니다. 시작 후·6시간마다 DB별 순차 집계하며, 통계 갱신은 선택한 DB의 전체 보관함을 백그라운드에서 갱신합니다. 최초 집계 전에는 대기 안내가 표시됩니다. 실패·중지 시 마지막 정상 결과를 유지합니다.</p>
 <section class="doctor-card doctor-statistics-status" aria-live="polite">
@@ -31,6 +60,18 @@
   <p id="statistics_result_meta" class="doctor-muted"></p>
   <div id="statistics_kpis" class="doctor-statistics-kpis"></div>
   <div id="statistics_charts" class="doctor-statistics-grid"></div>
+  <p id="statistics_cards_empty" class="doctor-empty" hidden>모든 카드가 숨겨져 있습니다. 카드 설정에서 표시하거나 레이아웃을 초기화해 주세요.</p>
 </section>
+<dialog id="statistics_settings" class="statistics-settings-drawer" aria-labelledby="statistics_settings_title">
+  <div class="statistics-settings-body">
+    <div class="statistics-settings-header">
+      <div><h4 id="statistics_settings_title">카드 설정</h4><p class="doctor-muted">표시할 카드를 선택하고 위·아래 버튼으로 순서를 바꿉니다.</p></div>
+      <button id="statistics_settings_close" class="statistics-settings-close" type="button" aria-label="카드 설정 닫기">&times;</button>
+    </div>
+    <p class="doctor-muted">설정은 현재 브라우저에 DB별로 자동 저장됩니다. 카드의 ⠿ 손잡이를 드래그해도 이동할 수 있습니다.</p>
+    <div id="statistics_layout_message" class="doctor-muted" role="status"></div>
+    <div id="statistics_card_settings"></div>
+  </div>
+</dialog>
 <script src="{{ url_for('bookoasis_mate.static', filename='js/library_statistics.js') }}"></script>
 {% endblock %}
