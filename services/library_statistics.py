@@ -6,6 +6,7 @@ import time
 from collections import Counter
 from contextlib import closing
 from datetime import datetime
+from itertools import combinations
 
 try:
     from .bookoasis_db import BookOasisDatabaseAdapter
@@ -29,6 +30,7 @@ BOOK_METADATA_FIELDS = (
     ("genre", "장르", "text"),
     ("tags", "태그", "text"),
     ("isbn", "ISBN", "text"),
+    ("release_date", "출간일", "text"),
     ("total_pages", "페이지 수", "number"),
     ("file_size", "파일 크기", "number"),
 )
@@ -384,10 +386,42 @@ class LibraryStatisticsEngine:
                 )
             else:
                 raise RuntimeError("통계를 계산할 도서 테이블이 없습니다.")
+            if target.db_type in {"audiobook", "video"}:
+                self._media_file_charts(connection, target.db_type, selected_library_id, result, should_stop)
         result["generated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
         result["duration_ms"] = round((time.monotonic() - started) * 1000)
         self._notify(on_progress, "complete", 100, 100, "라이브러리 통계 분석을 완료했습니다.")
         return result
+
+    def _media_file_charts(self, connection, db_type, library_id, result, should_stop):
+        table, child, foreign = ("audiobooks", "audiobook_tracks", "audiobook_id") if db_type == "audiobook" else ("videos", "video_episodes", "video_id")
+        if child not in connection.tables():
+            return
+        columns, child_columns = connection.columns(table), connection.columns(child)
+        where, params = self._where("m", "is_deleted" if "is_deleted" in columns else "", "library_id" if "library_id" in columns else "", library_id)
+        if "format" not in child_columns:
+            return
+        date = "m.created_at" if "created_at" in columns else "''"
+        size = "COALESCE(c.file_size, 0)" if "file_size" in child_columns else "0"
+        cursor = connection.execute_stream(
+            f"SELECT m.id, m.title, {date} AS created_at, c.format, {size} AS size_bytes FROM {table} m JOIN {child} c ON c.{foreign} = m.id WHERE {where}", params,
+        )
+        timeline, sizes, labels = Counter(), Counter(), {}
+        try:
+            for batch in iter(lambda: cursor.fetchmany(2000), []):
+                self._check_cancel(should_stop)
+                for row in batch:
+                    period = str(row.get("created_at") or "")[:7]
+                    if re.fullmatch(r"\d{4}-\d{2}", period):
+                        timeline[(period, str(row.get("format") or "알 수 없음").upper())] += 1
+                    sizes[row["id"]] += int(row.get("size_bytes") or 0)
+                    labels[row["id"]] = str(row.get("title") or "")
+        finally:
+            cursor.close()
+        result.setdefault("charts", {})["format_timeline"] = [
+            {"period": period, "label": label, "count": count} for (period, label), count in sorted(timeline.items())
+        ]
+        result["largest_items"] = [{"id": key, "title": labels[key], "size_bytes": size} for key, size in sizes.most_common(100)]
 
     @staticmethod
     def _widget_key(source, widget_name):
@@ -618,6 +652,8 @@ class LibraryStatisticsEngine:
         library_labels=None,
     ):
         available = [field for field in fields if field[0] in columns]
+        if year_column not in columns:
+            year_column = next((name for name in ("release_date", "premiered") if name in columns), "")
         if not available:
             return [], [], [], [], [], {}, {
                 "formats": [],
@@ -636,6 +672,11 @@ class LibraryStatisticsEngine:
                 if name in columns and name not in selected_names:
                     select_columns.append(f"{alias}.{name} AS {name}")
                     selected_names.add(name)
+        for name in ("author", "publisher", "series_name", "library_id", "created_at",
+                     "file_format", "total_pages", "total_tracks", "total_episodes", "genres"):
+            if name in columns and name not in selected_names:
+                select_columns.append(f"{alias}.{name} AS {name}")
+                selected_names.add(name)
         cursor = connection.execute_stream(
             f"SELECT {', '.join(select_columns)} FROM {table} {alias} WHERE {where_sql}",
             params,
@@ -661,6 +702,13 @@ class LibraryStatisticsEngine:
         added_this_year = 0
         current_year = str(datetime.now().year)
         current = 0
+        rankings = {name: Counter() for name in ("author", "publisher", "series_name")}
+        lengths = Counter()
+        format_timeline = Counter()
+        heat_filled = Counter()
+        heat_total = Counter()
+        genre_pairs = Counter()
+        total_present = 0
         denominator = max(1, len(available))
         try:
             while True:
@@ -668,6 +716,31 @@ class LibraryStatisticsEngine:
                 if not rows:
                     break
                 for row in rows:
+                    for name, counts in rankings.items():
+                        value = _normalize_token(row.get(name))
+                        if value:
+                            counts[value] += 1
+                    length = int(row.get("total_pages") or row.get("total_tracks") or row.get("total_episodes") or 0)
+                    if length > 0:
+                        bounds = (200, 400, 800, 1200) if table == "books" else (5, 10, 25, 50)
+                        lower = 1
+                        for upper in bounds:
+                            if length <= upper:
+                                lengths[f"{lower}–{upper}"] += 1
+                                break
+                            lower = upper + 1
+                        else:
+                            lengths[f"{lower}+"] += 1
+                    lib = str(row.get("library_id") or "")
+                    heat_total[lib] += 1
+                    period_key = str(row.get("created_at") or "")[:7]
+                    if "file_format" in columns and re.fullmatch(r"\d{4}-\d{2}", period_key):
+                        format_timeline[(period_key, str(row.get("file_format") or "알 수 없음").upper())] += 1
+                    tokens = {token.casefold(): token for token in _split_tokens(row.get("genre") or row.get("genres"))}
+                    for key, token in tokens.items():
+                        genre_labels.setdefault(key, token)
+                        genre_counter[key] += 1
+                    genre_pairs.update(combinations(sorted(tokens), 2))
                     if collect_book_statistics:
                         size_bytes = int(row.get("file_size") or 0)
                         if "file_format" in columns:
@@ -691,19 +764,17 @@ class LibraryStatisticsEngine:
                     for name, label, value_type in available:
                         if _metadata_present(row.get(name), value_type):
                             present += 1
+                            heat_filled[(lib, label)] += 1
                         else:
                             missing_counts[label] += 1
                     score = round(present / denominator * 100)
+                    total_present += present
                     for minimum, maximum, bucket_label in SCORE_BUCKETS:
                         if minimum <= score <= maximum:
                             score_counts[bucket_label] += 1
                             break
                     if include_taxonomy:
-                        for token in _split_tokens(row.get("genre")):
-                            key = token.casefold()
-                            genre_labels.setdefault(key, token)
-                            genre_counter[key] += 1
-                        for token in _split_tokens(row.get("tags")):
+                        for key, token in {token.casefold(): token for token in _split_tokens(row.get("tags"))}.items():
                             key = token.casefold()
                             tag_labels.setdefault(key, token)
                             tag_counter[key] += 1
@@ -765,7 +836,20 @@ class LibraryStatisticsEngine:
                 ),
             )
         ]
+        top_genres = dict(genre_counter.most_common(12))
         stream_statistics = {
+            "charts": {
+                "authors": [{"label": label, "count": count} for label, count in rankings["author"].most_common(30)],
+                "publishers": [{"label": label, "count": count} for label, count in rankings["publisher"].most_common(30)],
+                "series": [{"label": label, "count": count} for label, count in rankings["series_name"].most_common(30)],
+                "lengths": [{"label": label, "count": count} for label, count in sorted(lengths.items(), key=lambda item: int(re.split(r"[–+]", item[0])[0]))],
+                "metadata_average": round(total_present / max(1, current * denominator) * 100, 2),
+                "metadata_heatmap": [{"library_id": lib, "label": label, "value": round(heat_filled[(lib, label)] / count * 100, 1)}
+                                     for lib, count in heat_total.items() for name, label, kind in available],
+                "genre_links": [{"source": a, "target": b, "value": count} for (a, b), count in genre_pairs.most_common(100)
+                                if a in top_genres and b in top_genres],
+                "format_timeline": [{"period": period, "label": label, "count": count} for (period, label), count in sorted(format_timeline.items())][-1200:],
+            },
             "formats": format_rows,
             "libraries": library_rows,
             "added_over_time": [
@@ -778,8 +862,8 @@ class LibraryStatisticsEngine:
         return (
             score_rows,
             missing_rows,
-            _top_tokens(genre_counter, genre_labels),
-            _top_tokens(tag_counter, tag_labels, limit=20),
+            _top_tokens(genre_counter, genre_labels, limit=60),
+            _top_tokens(tag_counter, tag_labels, limit=60),
             year_rows,
             {name: len(values) for name, values in distinct_values.items()},
             stream_statistics,
@@ -885,7 +969,7 @@ class LibraryStatisticsEngine:
                 {library_join}
                 WHERE {where_sql}
                 ORDER BY {size_expr} DESC, b.id
-                LIMIT 20
+                LIMIT 100
                 """,
                 params,
             ).fetchall()
@@ -1058,6 +1142,7 @@ class LibraryStatisticsEngine:
             "formats": format_rows,
             "libraries": library_rows,
             "metadata_scores": metadata,
+            "charts": metadata_result[6].get("charts", {}),
             "metadata_missing": missing,
             "genres": genres,
             "tags": tags,
@@ -1192,6 +1277,7 @@ class LibraryStatisticsEngine:
             "formats": formats,
             "libraries": libraries,
             "metadata_scores": metadata,
+            "charts": metadata_result[6].get("charts", {}),
             "metadata_missing": missing,
             "genres": genres,
             "tags": [],
@@ -1227,7 +1313,7 @@ class LibraryStatisticsEngine:
                 WHERE {where_sql}
                 GROUP BY a.id, a.title, {library_name_expr}
                 ORDER BY size_bytes DESC, a.id
-                LIMIT 20
+                LIMIT 100
                 """,
                 params,
             ).fetchall()
@@ -1240,7 +1326,7 @@ class LibraryStatisticsEngine:
                 {library_join}
                 WHERE {where_sql}
                 ORDER BY a.id
-                LIMIT 20
+                LIMIT 100
                 """,
                 params,
             ).fetchall()
@@ -1504,6 +1590,7 @@ class LibraryStatisticsEngine:
             "formats": format_rows,
             "libraries": library_rows,
             "metadata_scores": metadata,
+            "charts": metadata_result[6].get("charts", {}),
             "metadata_missing": missing,
             "genres": [],
             "tags": [],

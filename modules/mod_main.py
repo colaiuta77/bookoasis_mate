@@ -65,6 +65,12 @@ class ModuleMain(PluginModuleBase):
     def service(self):
         return P.bookoasis_mate_service
 
+    def plugin_load(self):
+        self.service.start_statistics_background()
+
+    def plugin_unload(self):
+        self.service.stop_statistics_background()
+
     def process_menu(self, page, req):
         if page in {"scanner", "scheduler"}:
             return redirect(f"/{P.package_name}/scan/{page}")
@@ -113,6 +119,7 @@ class ModuleMain(PluginModuleBase):
                 data = self.service.start_library_statistics(
                     db_type=req.form.get("db_type", "general"),
                     library_id=req.form.get("library_id"),
+                    all_libraries=True,
                 )
                 return jsonify({
                     "ret": "success" if data.get("started") else "warning",
@@ -122,7 +129,9 @@ class ModuleMain(PluginModuleBase):
             if command == "statistics_status":
                 return jsonify({
                     "ret": "success",
-                    "data": self.service.library_statistics_status(),
+                    "data": self.service.library_statistics_view(
+                        req.form.get("db_type", "general"), req.form.get("library_id"),
+                    ),
                 })
             if command == "statistics_stop":
                 data = self.service.stop_library_statistics()

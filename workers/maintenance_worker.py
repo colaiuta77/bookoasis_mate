@@ -720,14 +720,36 @@ def _run_library_statistics(config, writer, stop_file):
     engine = LibraryStatisticsEngine(dict(config.get("settings") or {}))
     db_type = str(config.get("db_type") or "general")
     library_id = str(config.get("library_id") or "").strip() or None
+    catalog = engine.catalog(db_type) if config.get("all_libraries") else None
+    scope_count = len(catalog["libraries"]) + 1 if catalog else 1
+    scope_index = 0
+
+    def progress(stage, current, total, message):
+        percent = (scope_index + current / max(1, total)) / scope_count * 100
+        writer.analysis_progress(stage, int(percent), 100, message)
+
     source = engine.source_fingerprint(db_type=db_type, library_id=library_id)
     result = engine.analyze(
         db_type=db_type,
         library_id=library_id,
-        on_progress=writer.analysis_progress,
+        on_progress=progress,
         should_stop=stop_file.exists,
         source=source,
     )
+    if config.get("all_libraries"):
+        scopes = {"": result}
+        for scope_index, library in enumerate(catalog["libraries"], 1):
+            engine._check_cancel(stop_file.exists)
+            scopes[str(library["id"])] = engine.analyze(
+                db_type=db_type, library_id=library["id"],
+                on_progress=progress, should_stop=stop_file.exists,
+            )
+        engine._check_cancel(stop_file.exists)
+        _write_json(config["snapshot_path"], {
+            "db_type": db_type, "engine": catalog["engine"],
+            "libraries": catalog["libraries"], "scopes": scopes,
+            "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        })
     writer.complete_analysis(result, source, "라이브러리 통계 분석을 완료했습니다.")
 
 
