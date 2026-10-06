@@ -5,7 +5,8 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
   var storage = kind.indexOf('storage') === 0;
   if (storage) kind = {storage:'bar', storagePie:'pie', storageTree:'treemap'}[kind];
   var option = {animation:false, aria:{enabled:true},
-    color:['#58ace0', '#61c4aa', '#f2ba63', '#ec887d', '#9c8cdb', '#85bc72', '#e58fb5'],
+    color:kind === 'bar' || kind === 'line' || kind === 'gauge' ? ['#58ace0'] :
+      ['#3b82f6', '#a3d900', '#8b5cf6', '#ff922b', '#06b6d4', '#facc15', '#f43f5e', '#10b981'],
     tooltip:{trigger:'item', renderMode:'richText', confine:true}, textStyle:{color:'#718096'}, series:[]};
   var data = rows.map(function(row) { return {name:row.label || row.period || '', value:Number(row.count || 0)}; });
   if (storageTree) {
@@ -39,8 +40,8 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
   } else if (kind === 'calendar') {
     option.tooltip.formatter = function(item) { return item.value[0] + '\n' + item.value[1] + '권'; };
     option.visualMap = {type:'piecewise', orient:'horizontal', left:'center', top:10,
-      pieces:[{value:0,label:'기록 없음',color:'#eef0f3'},{value:1,label:'1권',color:'#d9edf9'},
-        {min:2,max:3,label:'2–3권',color:'#a9d6f1'},{min:4,max:6,label:'4–6권',color:'#78bee8'},{min:7,label:'7권 이상',color:'#58ace0'}]};
+      pieces:[{value:0,label:'기록 없음',color:'#eef0f3'},{value:1,label:'1권',color:'#38bdf8'},
+        {min:2,max:3,label:'2–3권',color:'#3b82f6'},{min:4,max:6,label:'4–6권',color:'#6366f1'},{min:7,label:'7권 이상',color:'#a855f7'}]};
     option.calendar = {range:String(nodes), top:90, left:40, right:25, cellSize:['auto',18],
       yearLabel:{show:false}, monthLabel:{nameMap:'cn', formatter:'{MM}월'},
       dayLabel:{firstDay:1,nameMap:['일','월','화','수','목','금','토']}, itemStyle:{borderWidth:1,borderColor:'#fff'}};
@@ -59,17 +60,23 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
     option.grid = {left:110, right:30, top:20, bottom:85};
     option.xAxis = {type:'category', data:fields, axisLabel:{rotate:35}};
     option.yAxis = {type:'category', data:libraries, axisLabel:{width:95, overflow:'truncate'}};
-    option.visualMap = {min:0, max:100, bottom:0, left:'center', orient:'horizontal', inRange:{color:['#eaf4fb', '#add8f2', '#58ace0']}};
-    option.series = [{type:'heatmap', data:rows.map(function(row) { return [fields.indexOf(row.label), libraries.indexOf(row.library), row.value]; })}];
+    option.visualMap = {min:0, max:100, bottom:0, left:'center', orient:'horizontal', text:['100%', '0%'],
+      inRange:{color:['#ef4444', '#f59e0b', '#facc15', '#38bdf8']}};
+    option.series = [{type:'heatmap', label:{show:true, color:'#172033', fontSize:11,
+      formatter:function(item) { return Math.round(item.value[2]) + '%'; }},
+      data:rows.map(function(row) { return [fields.indexOf(row.label), libraries.indexOf(row.library), row.value]; })}];
     if (libraries.length > 10) option.dataZoom = [{type:'slider', yAxisIndex:0, start:0, end:1000 / libraries.length}];
   } else if (kind === 'stack') {
     var periods = Array.from(new Set(rows.map(function(row) { return row.period; }))).sort().slice(-60);
     var formats = Array.from(new Set(rows.map(function(row) { return row.label; })));
     option.grid = {left:55, right:20, top:40, bottom:55};
-    option.legend = {type:'scroll', textStyle:{color:'#718096'}};
-    option.xAxis = {type:'category', data:periods};
+    option.legend = {type:'scroll', top:0, textStyle:{color:'#718096'}};
+    option.tooltip.trigger = 'axis';
+    option.xAxis = {type:'category', boundaryGap:false, data:periods};
     option.yAxis = {type:'value', max:100, axisLabel:{formatter:'{value}%'}};
-    option.series = formats.map(function(format) { return {name:format, type:'bar', stack:'format', data:periods.map(function(period) {
+    option.series = formats.map(function(format) { return {name:format, type:'line', stack:'format',
+      showSymbol:false, areaStyle:{opacity:0.22}, lineStyle:{width:2},
+      data:periods.map(function(period) {
       var selected = rows.filter(function(row) { return row.period === period; });
       var total = selected.reduce(function(sum, row) { return sum + row.count; }, 0);
       var amount = selected.filter(function(row) { return row.label === format; }).reduce(function(sum, row) { return sum + row.count; }, 0);
@@ -219,7 +226,7 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
     var article = bookoasisMateText('article', 'doctor-statistics-chart-card', '');
     var content = bookoasisMateText('div', 'doctor-card statistics-card-content', ''); article.appendChild(content);
     article.dataset.cardId = id;
-    if (kind === 'treemap' || kind === 'storageTree' || kind === 'heatmap' || kind === 'calendar') article.classList.add('statistics-card-wide');
+    if (kind === 'treemap' || kind === 'storageTree' || kind === 'heatmap' || kind === 'calendar' || kind === 'stack') article.classList.add('statistics-card-wide');
     var header = bookoasisMateText('div', 'statistics-card-header', '');
     header.appendChild(bookoasisMateText('h4', '', title));
     var handle = bookoasisMateText('button', 'statistics-card-handle', '⠿');
