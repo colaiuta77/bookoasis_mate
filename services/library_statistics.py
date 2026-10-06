@@ -736,7 +736,9 @@ class LibraryStatisticsEngine:
                     period_key = str(row.get("created_at") or "")[:7]
                     if "file_format" in columns and re.fullmatch(r"\d{4}-\d{2}", period_key):
                         format_timeline[(period_key, str(row.get("file_format") or "알 수 없음").upper())] += 1
-                    tokens = {token.casefold(): token for token in _split_tokens(row.get("genre") or row.get("genres"))}
+                    tokens = {}
+                    for token in _split_tokens(row.get("genre") or row.get("genres")):
+                        tokens.setdefault(token.casefold(), token)
                     for key, token in tokens.items():
                         genre_labels.setdefault(key, token)
                         genre_counter[key] += 1
@@ -836,7 +838,12 @@ class LibraryStatisticsEngine:
                 ),
             )
         ]
-        top_genres = dict(genre_counter.most_common(12))
+        top_genres = sorted(genre_counter, key=lambda key: (-genre_counter[key], genre_labels[key].casefold()))[:12]
+        top_genre_set = set(top_genres)
+        chord_pairs = sorted(
+            ((pair, count) for pair, count in genre_pairs.items() if pair[0] in top_genre_set and pair[1] in top_genre_set),
+            key=lambda item: (-item[1], genre_labels[item[0][0]].casefold(), genre_labels[item[0][1]].casefold()),
+        )
         stream_statistics = {
             "charts": {
                 "authors": [{"label": label, "count": count} for label, count in rankings["author"].most_common(30)],
@@ -846,8 +853,8 @@ class LibraryStatisticsEngine:
                 "metadata_average": round(total_present / max(1, current * denominator) * 100, 2),
                 "metadata_heatmap": [{"library_id": lib, "label": label, "value": round(heat_filled[(lib, label)] / count * 100, 1)}
                                      for lib, count in heat_total.items() for name, label, kind in available],
-                "genre_links": [{"source": a, "target": b, "value": count} for (a, b), count in genre_pairs.most_common(100)
-                                if a in top_genres and b in top_genres],
+                "genre_nodes": [{"name": genre_labels[key], "value": genre_counter[key]} for key in top_genres],
+                "genre_links": [{"source": genre_labels[a], "target": genre_labels[b], "value": count} for (a, b), count in chord_pairs],
                 "format_timeline": [{"period": period, "label": label, "count": count} for (period, label), count in sorted(format_timeline.items())][-1200:],
             },
             "formats": format_rows,
