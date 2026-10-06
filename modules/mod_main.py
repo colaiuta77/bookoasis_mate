@@ -115,6 +115,12 @@ class ModuleMain(PluginModuleBase):
                     req.form.get("db_type", "general")
                 )
                 return jsonify({"ret": "success", "data": data})
+            if command == "statistics_users":
+                return jsonify({"ret": "success", "data": self.service.library_statistics_users(req.form.get("db_type", "general"))})
+            if command == "statistics_reading_calendar":
+                return jsonify({"ret": "success", "data": self.service.library_statistics_reading_calendar(
+                    req.form.get("db_type", "general"), req.form.get("user_id"), req.form.get("library_id"),
+                )})
             if command == "statistics_start":
                 data = self.service.start_library_statistics(
                     db_type=req.form.get("db_type", "general"),

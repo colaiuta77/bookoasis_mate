@@ -5,7 +5,7 @@ import re
 import time
 from collections import Counter
 from contextlib import closing
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from itertools import combinations
 
 try:
@@ -157,6 +157,52 @@ class LibraryStatisticsEngine:
     def _notify(callback, stage, current, total, message):
         if callback:
             callback(stage, int(current or 0), int(total or 0), message)
+
+    def reading_users(self, db_type="general"):
+        target = self._target(db_type)
+        if target.db_type not in {"general", "adult"}:
+            raise ValueError("독서 달력은 일반·성인 도서에서만 지원합니다.")
+        with closing(self.database_adapter.connect(target)) as connection:
+            if "users" not in connection.tables():
+                raise ValueError("사용자 목록을 지원하지 않는 DB 스키마입니다.")
+            return [{"id": int(row["id"]), "username": str(row["username"] or "")}
+                    for row in connection.execute("SELECT id, username FROM users ORDER BY id").fetchall()]
+
+    def reading_calendar(self, db_type, user_id, library_id=None):
+        target = self._target(db_type)
+        if target.db_type not in {"general", "adult"}:
+            raise ValueError("독서 달력은 일반·성인 도서에서만 지원합니다.")
+        if not str(user_id).isdigit() or not 0 < int(user_id) < 2 ** 63:
+            raise ValueError("사용자를 선택해 주세요.")
+        user_id = int(user_id)
+        library_id = self._selected_library_id(library_id)
+        if library_id is not None and library_id >= 2 ** 63:
+            raise ValueError("보관함 ID가 올바르지 않습니다.")
+        today = date.today()
+        start, end = date(today.year, 1, 1), date(today.year + 1, 1, 1)
+        with closing(self.database_adapter.connect(target)) as connection:
+            required = {"users", "books", "user_reading_log", "user_category_permissions"}
+            if not required.issubset(connection.tables()):
+                raise ValueError("독서 기록 또는 사용자 권한 테이블이 없습니다. 코어 버전을 확인해 주세요.")
+            if connection.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone() is None:
+                raise ValueError("선택한 사용자를 찾을 수 없습니다.")
+            self._resolve_library(connection, library_id)
+            query = """
+                SELECT l.read_date, COUNT(DISTINCT l.book_id) AS book_count
+                FROM user_reading_log l JOIN books b ON b.id = l.book_id
+                WHERE l.user_id = ? AND l.read_date >= ? AND l.read_date <= ?
+                  AND l.pages_read_delta > 0 AND COALESCE(b.is_deleted, 0) = 0
+                  AND EXISTS (SELECT 1 FROM user_category_permissions p
+                    WHERE p.user_id = l.user_id AND p.library_id = b.library_id AND p.has_access = 1)
+            """
+            params = [user_id, start.isoformat(), today.isoformat()]
+            if library_id is not None:
+                query += " AND b.library_id = ?"
+                params.append(library_id)
+            rows = connection.execute(query + " GROUP BY l.read_date ORDER BY l.read_date", params).fetchall()
+        counts = {str(row["read_date"]): int(row["book_count"]) for row in rows}
+        days = [(start + timedelta(days=offset)).isoformat() for offset in range((end - start).days)]
+        return {"year": today.year, "days": [[day, counts.get(day, 0)] for day in days]}
 
     def catalog(self, db_type="general"):
         target = self._target(db_type)
@@ -406,7 +452,7 @@ class LibraryStatisticsEngine:
         cursor = connection.execute_stream(
             f"SELECT m.id, m.title, {date} AS created_at, c.format, {size} AS size_bytes FROM {table} m JOIN {child} c ON c.{foreign} = m.id WHERE {where}", params,
         )
-        timeline, sizes, labels = Counter(), Counter(), {}
+        timeline, sizes, labels, formats = Counter(), Counter(), {}, {}
         try:
             for batch in iter(lambda: cursor.fetchmany(2000), []):
                 self._check_cancel(should_stop)
@@ -416,12 +462,15 @@ class LibraryStatisticsEngine:
                         timeline[(period, str(row.get("format") or "알 수 없음").upper())] += 1
                     sizes[row["id"]] += int(row.get("size_bytes") or 0)
                     labels[row["id"]] = str(row.get("title") or "")
+                    formats.setdefault(row["id"], set()).add(str(row.get("format") or "기타").strip().lower())
         finally:
             cursor.close()
         result.setdefault("charts", {})["format_timeline"] = [
             {"period": period, "label": label, "count": count} for (period, label), count in sorted(timeline.items())
         ]
-        result["largest_items"] = [{"id": key, "title": labels[key], "size_bytes": size} for key, size in sizes.most_common(100)]
+        result["largest_items"] = [{"id": key, "title": labels[key], "size_bytes": size,
+                                    "format": next(iter(formats[key])) if len(formats[key]) == 1 else "혼합"}
+                                   for key, size in sizes.most_common(100)]
 
     @staticmethod
     def _widget_key(source, widget_name):
@@ -952,6 +1001,7 @@ class LibraryStatisticsEngine:
     def _book_largest(connection, columns, where_sql, params):
         title_expr = "b.title" if "title" in columns else "''"
         series_expr = "b.series_name" if "series_name" in columns else "''"
+        format_expr = "b.file_format" if "file_format" in columns else "''"
         size_expr = "COALESCE(b.file_size, 0)" if "file_size" in columns else "0"
         library_join = ""
         library_name_expr = "''"
@@ -967,11 +1017,12 @@ class LibraryStatisticsEngine:
                 "series_name": str(item["series_name"] or ""),
                 "library_name": str(item["library_name"] or ""),
                 "size_bytes": int(item["size_bytes"] or 0),
+                "format": str(item["format"] or "기타").strip().lower(),
             }
             for item in connection.execute(
                 f"""
                 SELECT b.id, {title_expr} AS title, {series_expr} AS series_name,
-                       {library_name_expr} AS library_name, {size_expr} AS size_bytes
+                       {library_name_expr} AS library_name, {size_expr} AS size_bytes, {format_expr} AS format
                 FROM books b
                 {library_join}
                 WHERE {where_sql}

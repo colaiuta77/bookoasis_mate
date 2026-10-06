@@ -839,6 +839,15 @@ class BookOasisMateService:
         )
         return data
 
+    def library_statistics_users(self, db_type="general"):
+        return LibraryStatisticsEngine(self.settings()).reading_users(db_type)
+
+    def library_statistics_reading_calendar(self, db_type, user_id, library_id=None):
+        engine = LibraryStatisticsEngine(self.settings())
+        if gevent is not None and gevent_monkey is not None and gevent_monkey.is_module_patched("threading"):
+            return gevent.get_hub().threadpool.apply(engine.reading_calendar, (db_type, user_id, library_id))
+        return engine.reading_calendar(db_type, user_id, library_id)
+
     def _statistics_snapshot_path(self, db_type):
         if db_type not in {"general", "adult", "audiobook", "video"}:
             raise ValueError("지원하지 않는 DB 유형입니다.")

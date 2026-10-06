@@ -1,12 +1,26 @@
 // 저장된 라이브러리 통계와 ECharts 카드를 표시하고 별도 갱신을 요청합니다.
 function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
   rows = rows || [];
+  var storageTree = kind === 'storageTree';
   var storage = kind.indexOf('storage') === 0;
   if (storage) kind = {storage:'bar', storagePie:'pie', storageTree:'treemap'}[kind];
   var option = {animation:false, aria:{enabled:true},
     color:['#7353ba', '#38a3a5', '#6096ba', '#e9c46a', '#e76f51', '#90be6d', '#f284b6'],
     tooltip:{trigger:'item', renderMode:'richText', confine:true}, textStyle:{color:'#718096'}, series:[]};
   var data = rows.map(function(row) { return {name:row.label || row.period || '', value:Number(row.count || 0)}; });
+  if (storageTree) {
+    data = data.map(function(item, index) { item.id = String(rows[index].id == null ? index : rows[index].id); return item; });
+    if (nodes !== 'size') {
+      var groups = new Map();
+      data.forEach(function(item, index) {
+        var format = String(rows[index].format || '기타').trim().toLowerCase() || '기타';
+        if (!groups.has(format)) groups.set(format, {name:format, value:0, children:[]});
+        groups.get(format).children.push(item); groups.get(format).value += item.value;
+      });
+      data = Array.from(groups.values());
+    }
+    data.sort(function(a, b) { return b.value - a.value; });
+  }
   if (kind === 'pie') {
     option.legend = {type:'scroll', bottom:0, left:'center', selectedMode:true, textStyle:{color:'#718096'}};
     option.series = [{type:'pie', radius:['42%', '70%'], center:['50%', '44%'], data:data,
@@ -16,6 +30,20 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
       roam:false, nodeClick:'zoomToNode', label:{show:true, overflow:'truncate'},
       breadcrumb:{show:true, bottom:0, height:24, emptyItemWidth:28},
       itemStyle:{borderColor:'#fff', borderWidth:1, gapWidth:2}}];
+    if (storageTree) {
+      option.series[0].sort = 'desc';
+      option.series[0].upperLabel = {show:nodes !== 'size', height:24};
+      option.series[0].label.formatter = function(item) { return item.name + '\n' + bookoasisMateBytes(item.value); };
+    }
+  } else if (kind === 'calendar') {
+    option.tooltip.formatter = function(item) { return item.value[0] + '\n' + item.value[1] + '권'; };
+    option.visualMap = {type:'piecewise', orient:'horizontal', left:'center', top:10,
+      pieces:[{value:0,label:'기록 없음',color:'#eef0f3'},{value:1,label:'1권',color:'#ddd3fa'},
+        {min:2,max:3,label:'2–3권',color:'#bda6f4'},{min:4,max:6,label:'4–6권',color:'#9470e3'},{min:7,label:'7권 이상',color:'#38bdf8'}]};
+    option.calendar = {range:String(nodes), top:90, left:40, right:25, cellSize:['auto',18],
+      yearLabel:{show:false}, monthLabel:{nameMap:'cn', formatter:'{MM}월'},
+      dayLabel:{firstDay:1,nameMap:['일','월','화','수','목','금','토']}, itemStyle:{borderWidth:1,borderColor:'#fff'}};
+    option.series = [{type:'heatmap', coordinateSystem:'calendar', data:rows}];
   } else if (kind === 'gauge') {
     option.series = [{type:'gauge', min:0, max:100, progress:{show:true},
       detail:{formatter:'{value}%', fontSize:24}, data:[{value:Number((rows[0] || {}).count || 0)}]}];
@@ -73,7 +101,7 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
 (function() {
   'use strict';
   var charts = [], observer = null, timer = null, generation = 0, resultKey = '', busy = false;
-  var cards = [], summaryCards = [], layout = {order:[], hidden:[]}, layoutDb = '', cardGrid = null, lastDrag = 0;
+  var cards = [], summaryCards = [], layout = {order:[], hidden:[]}, layoutDb = '', cardGrid = null, lastDrag = 0, calendarGeneration = 0;
   function el(id) { return document.getElementById(id); }
   function layoutKey() { return 'bookoasis-mate-statistics-layout-v1-' + layoutDb; }
   function layoutEnabled(enabled) {
@@ -104,7 +132,12 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
     });
     el('statistics_cards_empty').hidden = !cards.length || cards.some(function(item) { return !item.node.hidden; });
     initGrid();
-    requestAnimationFrame(function() { charts.forEach(function(chart) { if (chart.getDom().offsetWidth) chart.resize(); }); });
+    requestAnimationFrame(function() {
+      el('statistics_charts').querySelectorAll('.doctor-statistics-echart').forEach(function(canvas) {
+        if (canvas._redrawStatistics) canvas._redrawStatistics();
+      });
+      charts.forEach(function(chart) { if (chart.getDom().offsetWidth) chart.resize(); });
+    });
   }
   function destroyGrid() {
     if (cardGrid) { cardGrid.destroy(); cardGrid = null; }
@@ -175,6 +208,7 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
     }
   }
   function dispose() {
+    calendarGeneration++;
     destroyGrid();
     if (observer) observer.disconnect();
     observer = null;
@@ -184,7 +218,7 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
     var article = bookoasisMateText('article', 'doctor-statistics-chart-card', '');
     var content = bookoasisMateText('div', 'doctor-card statistics-card-content', ''); article.appendChild(content);
     article.dataset.cardId = id;
-    if (kind === 'treemap' || kind === 'storageTree' || kind === 'heatmap') article.classList.add('statistics-card-wide');
+    if (kind === 'treemap' || kind === 'storageTree' || kind === 'heatmap' || kind === 'calendar') article.classList.add('statistics-card-wide');
     var header = bookoasisMateText('div', 'statistics-card-header', '');
     header.appendChild(bookoasisMateText('h4', '', title));
     var handle = bookoasisMateText('button', 'statistics-card-handle', '⠿');
@@ -194,24 +228,69 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
     header.appendChild(handle); content.appendChild(header);
     cards.push({id:id, title:title, node:article}); article.hidden = layout.hidden.indexOf(id) !== -1;
     el('statistics_charts').appendChild(article);
-    if (!rows || !rows.length) {
+    if ((!rows || !rows.length) && kind !== 'calendar') {
       content.appendChild(bookoasisMateText('p', 'doctor-empty', '표시할 데이터가 없습니다. 이전 결과라면 통계를 갱신해 주세요.'));
     } else {
       var canvas = bookoasisMateText('div', 'doctor-statistics-echart', '');
       canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', title); content.appendChild(canvas);
+      var chart = null;
       var draw = function() {
-        var chart = echarts.init(canvas, null, {renderer:'canvas'});
-        chart.setOption(bookoasisMateStatisticsOption(kind, rows, title, nodes)); charts.push(chart);
+        if (!rows.length) return;
+        if (!canvas.offsetWidth) { canvas._redrawStatistics = draw; return; }
+        if (!chart) { chart = echarts.init(canvas, null, {renderer:'canvas'}); charts.push(chart); }
+        chart.setOption(bookoasisMateStatisticsOption(kind, rows, title, nodes), true);
+        delete canvas._drawStatistics;
+        delete canvas._redrawStatistics;
       };
       if (typeof IntersectionObserver !== 'undefined') {
         canvas._drawStatistics = draw;
         if (!observer) observer = new IntersectionObserver(function(entries) {
           entries.forEach(function(entry) {
-            if (entry.isIntersecting) { observer.unobserve(entry.target); entry.target._drawStatistics(); delete entry.target._drawStatistics; }
+            if (entry.isIntersecting) { observer.unobserve(entry.target); if (entry.target._drawStatistics) entry.target._drawStatistics(); }
           });
         }, {rootMargin:'200px'});
         observer.observe(canvas);
       } else draw();
+      if (kind === 'storageTree') {
+        var mode = document.createElement('select'); mode.className = 'statistics-card-select'; mode.setAttribute('aria-label', '용량 Treemap 보기');
+        [['format','포맷별'],['size','용량순']].forEach(function(pair) {
+          var option = bookoasisMateText('option', '', pair[1]); option.value = pair[0]; mode.appendChild(option);
+        });
+        header.insertBefore(mode, handle);
+        mode.addEventListener('change', function() { nodes = mode.value; draw(); });
+      }
+      if (kind === 'calendar') {
+        canvas.classList.add('statistics-calendar-chart');
+        var scroll = bookoasisMateText('div', 'statistics-calendar-scroll', ''); content.appendChild(scroll); scroll.appendChild(canvas);
+        var message = bookoasisMateText('p', 'doctor-muted', '사용자를 선택하면 올해 독서 기록을 표시합니다.'); content.insertBefore(message, scroll);
+        var users = document.createElement('select'); users.className = 'statistics-card-select'; users.setAttribute('aria-label', '독서 달력 사용자');
+        var placeholder = bookoasisMateText('option', '', '사용자 선택'); placeholder.value = ''; users.appendChild(placeholder);
+        users.disabled = true; header.insertBefore(users, handle);
+        var epoch = calendarGeneration, request = 0, db = el('statistics_db_type').value, lib = el('statistics_library').value;
+        var current = function() { return epoch === calendarGeneration && article.isConnected; };
+        bookoasisMateAjax('main', 'statistics_users', {db_type:db}, function(ret) {
+          if (!current()) return;
+          if (ret.ret !== 'success') { message.textContent = ret.msg || '사용자 목록 조회 실패'; return; }
+          (ret.data || []).forEach(function(user) {
+            var option = bookoasisMateText('option', '', user.username || ('사용자 #' + user.id)); option.value = String(user.id); users.appendChild(option);
+          });
+          users.disabled = false;
+          if (!ret.data.length) message.textContent = '선택할 사용자가 없습니다.';
+        }, null, {global:false, silent:true, error:function() { if (current()) message.textContent = '사용자 목록 조회 실패'; }});
+        users.addEventListener('change', function() {
+          var token = ++request; rows = []; if (chart) chart.clear();
+          message.textContent = users.value ? '독서 기록 조회 중…' : '사용자를 선택하면 올해 독서 기록을 표시합니다.';
+          if (!users.value) return;
+          bookoasisMateAjax('main', 'statistics_reading_calendar', {db_type:db, library_id:lib, user_id:users.value}, function(ret) {
+            if (!current() || token !== request) return;
+            if (ret.ret !== 'success') { message.textContent = ret.msg || '독서 기록 조회 실패'; return; }
+            rows = ret.data.days || []; nodes = ret.data.year;
+            message.textContent = nodes + '년 · ' + rows.filter(function(day) { return day[1] > 0; }).length + '일 읽음'; draw();
+          }, null, {global:false, silent:true, error:function() {
+            if (current() && token === request) message.textContent = '독서 기록 조회 실패';
+          }});
+        });
+      }
     }
   }
   function render(result) {
@@ -258,9 +337,10 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
     });
     card('decades', '출판·출시 시대', 'bar', Object.keys(decades).sort().map(function(label) { return {label:label, count:decades[label]}; }));
     card('format-timeline', '포맷 비중 변화', 'stack', extra.format_timeline);
-    var largest = (result.largest_items || []).filter(function(row) { return row.size_bytes > 0; }).map(function(row) { return {label:row.title, count:row.size_bytes}; });
+    var largest = (result.largest_items || []).filter(function(row) { return row.size_bytes > 0; }).map(function(row) { return {id:row.id, label:row.title, count:row.size_bytes, format:row.format}; });
     card('largest', '용량이 큰 항목 · 상위 50개', 'storage', largest.slice(0, 50));
     card('largest-tree', '용량이 큰 항목 · Treemap', 'storageTree', largest);
+    if (media === 'book') card('reading-calendar', '도서 읽은 날', 'calendar', []);
     var progress = result.progress || {};
     card('progress', '전체 사용자 진행 상태 · DB 반영 기준', 'bar', [{label:'시작 전', count:progress.not_started}, {label:'진행 중', count:progress.in_progress}, {label:'완료', count:progress.completed}]);
     applyLayout(); renderSettings();
