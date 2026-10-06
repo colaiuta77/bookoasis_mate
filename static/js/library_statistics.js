@@ -55,6 +55,13 @@ function bookoasisMateStatisticsOption(kind, rows, title) {
     option.series = [{type:horizontal ? 'bar' : 'line', data:data.map(function(row) { return row.value; }), smooth:!horizontal}];
     if (horizontal && data.length > 10) option.dataZoom = [{type:'slider', yAxisIndex:0, start:0, end:1000 / data.length}, {type:'inside', yAxisIndex:0}];
   }
+  if (option.dataZoom) {
+    option.dataZoom = [{type:'slider', yAxisIndex:0, start:0, end:option.dataZoom[0].end,
+      width:10, right:2, top:option.grid.top, bottom:option.grid.bottom, zoomLock:true,
+      showDataShadow:false, showDetail:false, brushSelect:false, handleSize:0, moveHandleSize:0},
+      {type:'inside', yAxisIndex:0, minSpan:option.dataZoom[0].end, maxSpan:option.dataZoom[0].end,
+        zoomOnMouseWheel:false, moveOnMouseWheel:true, moveOnMouseMove:true}];
+  }
   if (storage) {
     option.tooltip.formatter = function(item) { return item.name + '\n' + bookoasisMateBytes(Number(item.value || 0)); };
     if (option.xAxis) option.xAxis.axisLabel = {formatter:bookoasisMateBytes};
@@ -65,7 +72,7 @@ function bookoasisMateStatisticsOption(kind, rows, title) {
 (function() {
   'use strict';
   var charts = [], observer = null, timer = null, generation = 0, resultKey = '', busy = false;
-  var cards = [], layout = {order:[], hidden:[]}, layoutDb = '', dragged = null;
+  var cards = [], summaryCards = [], layout = {order:[], hidden:[]}, layoutDb = '', cardGrid = null, lastDrag = 0;
   function el(id) { return document.getElementById(id); }
   function layoutKey() { return 'bookoasis-mate-statistics-layout-v1-' + layoutDb; }
   function layoutEnabled(enabled) {
@@ -87,12 +94,40 @@ function bookoasisMateStatisticsOption(kind, rows, title) {
     return ids.map(function(id) { return cards.find(function(item) { return item.id === id; }); }).filter(Boolean);
   }
   function applyLayout() {
+    destroyGrid();
+    summaryCards.forEach(function(item) { item.node.hidden = layout.hidden.indexOf(item.id) !== -1; });
+    el('statistics_kpis').hidden = !summaryCards.some(function(item) { return !item.node.hidden; });
     orderedCards().forEach(function(item) {
       item.node.hidden = layout.hidden.indexOf(item.id) !== -1;
       el('statistics_charts').appendChild(item.node);
     });
     el('statistics_cards_empty').hidden = !cards.length || cards.some(function(item) { return !item.node.hidden; });
+    initGrid();
     requestAnimationFrame(function() { charts.forEach(function(chart) { if (chart.getDom().offsetWidth) chart.resize(); }); });
+  }
+  function destroyGrid() {
+    if (cardGrid) { cardGrid.destroy(); cardGrid = null; }
+    el('statistics_charts').classList.remove('statistics-muuri');
+  }
+  function initGrid() {
+    if (typeof Muuri === 'undefined') return;
+    var container = el('statistics_charts'), reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    container.classList.add('statistics-muuri');
+    cardGrid = new Muuri(container, {
+      items:'.doctor-statistics-chart-card:not([hidden])', dragEnabled:true, dragHandle:'.statistics-card-handle',
+      layout:{fillGaps:false, rounding:true}, layoutDuration:reduced ? 0 : 260, layoutEasing:'ease',
+      dragStartPredicate:{distance:4, delay:0}, dragSortInterval:45,
+      dragRelease:{duration:reduced ? 0 : 220, easing:'ease'}
+    });
+    cardGrid.on('dragStart', function() { lastDrag = Date.now(); });
+    cardGrid.on('dragEnd', function() { lastDrag = Date.now(); });
+    cardGrid.on('dragReleaseEnd', function() {
+      if (!cardGrid) return;
+      var visible = cardGrid.getItems().map(function(item) { return item.getElement().dataset.cardId; }), index = 0;
+      layout.order = orderedCards().map(function(item) { return item.node.hidden ? item.id : visible[index++]; });
+      cardGrid.synchronize(); saveLayout(); renderSettings();
+    });
+    cardGrid.on('layoutEnd', function() { charts.forEach(function(chart) { if (chart.getDom().offsetWidth) chart.resize(); }); });
   }
   function moveCard(id, target) {
     var order = orderedCards().map(function(item) { return item.id; }), from = order.indexOf(id);
@@ -105,7 +140,8 @@ function bookoasisMateStatisticsOption(kind, rows, title) {
     var focusedRow = document.activeElement && document.activeElement.closest('.statistics-setting-row');
     var focusedId = focusedRow && focusedRow.dataset.settingId;
     bookoasisMateClear(el('statistics_card_settings'));
-    orderedCards().forEach(function(item, index, ordered) {
+    summaryCards.concat(orderedCards()).forEach(function(item) {
+      var ordered = orderedCards(), index = ordered.indexOf(item);
       var row = bookoasisMateText('div', 'statistics-setting-row', '');
       row.dataset.settingId = item.id;
       var label = bookoasisMateText('label', 'doctor-plugin-switch', ''), check = document.createElement('input');
@@ -120,7 +156,7 @@ function bookoasisMateStatisticsOption(kind, rows, title) {
       label.appendChild(check);
       var track = bookoasisMateText('span', 'doctor-plugin-switch-track', ''); track.setAttribute('aria-hidden', 'true');
       label.appendChild(track); label.appendChild(state); label.appendChild(document.createTextNode(item.title)); row.appendChild(label);
-      [-1, 1].forEach(function(step) {
+      (index < 0 ? [] : [-1, 1]).forEach(function(step) {
         var button = bookoasisMateText('button', 'btn btn-sm btn-outline-secondary', step < 0 ? '↑' : '↓');
         button.type = 'button'; button.disabled = index + step < 0 || index + step >= ordered.length;
         button.setAttribute('aria-label', item.title + (step < 0 ? ' 위로 이동' : ' 아래로 이동'));
@@ -138,38 +174,30 @@ function bookoasisMateStatisticsOption(kind, rows, title) {
     }
   }
   function dispose() {
+    destroyGrid();
     if (observer) observer.disconnect();
     observer = null;
     charts.forEach(function(chart) { chart.dispose(); }); charts = [];
   }
   function card(id, title, kind, rows) {
-    var article = bookoasisMateText('article', 'doctor-card doctor-statistics-chart-card', '');
+    var article = bookoasisMateText('article', 'doctor-statistics-chart-card', '');
+    var content = bookoasisMateText('div', 'doctor-card statistics-card-content', ''); article.appendChild(content);
     article.dataset.cardId = id;
-    if (kind === 'treemap' || kind === 'storageTree') article.classList.add('statistics-card-wide');
+    if (kind === 'treemap' || kind === 'storageTree' || kind === 'heatmap') article.classList.add('statistics-card-wide');
     var header = bookoasisMateText('div', 'statistics-card-header', '');
     header.appendChild(bookoasisMateText('h4', '', title));
     var handle = bookoasisMateText('button', 'statistics-card-handle', '⠿');
-    handle.type = 'button'; handle.draggable = true;
+    handle.type = 'button';
     handle.setAttribute('aria-label', title + ' 이동 설정'); handle.title = '드래그로 이동 · 클릭하면 카드 설정';
-    handle.addEventListener('click', function() { renderSettings(); el('statistics_settings').showModal(); });
-    handle.addEventListener('dragstart', function(event) {
-      dragged = id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', id);
-      article.classList.add('statistics-card-dragging');
-    });
-    handle.addEventListener('dragend', function() { dragged = null; article.classList.remove('statistics-card-dragging'); });
-    article.addEventListener('dragover', function(event) { if (dragged && dragged !== id) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } });
-    article.addEventListener('drop', function(event) {
-      if (!dragged || dragged === id) return;
-      event.preventDefault(); moveCard(dragged, orderedCards().findIndex(function(item) { return item.id === id; }));
-    });
-    header.appendChild(handle); article.appendChild(header);
+    handle.addEventListener('click', function() { if (Date.now() - lastDrag < 400) return; renderSettings(); el('statistics_settings').showModal(); });
+    header.appendChild(handle); content.appendChild(header);
     cards.push({id:id, title:title, node:article}); article.hidden = layout.hidden.indexOf(id) !== -1;
     el('statistics_charts').appendChild(article);
     if (!rows || !rows.length) {
-      article.appendChild(bookoasisMateText('p', 'doctor-empty', '표시할 데이터가 없습니다. 이전 결과라면 통계를 갱신해 주세요.'));
+      content.appendChild(bookoasisMateText('p', 'doctor-empty', '표시할 데이터가 없습니다. 이전 결과라면 통계를 갱신해 주세요.'));
     } else {
       var canvas = bookoasisMateText('div', 'doctor-statistics-echart', '');
-      canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', title); article.appendChild(canvas);
+      canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', title); content.appendChild(canvas);
       var draw = function() {
         var chart = echarts.init(canvas, null, {renderer:'canvas'});
         chart.setOption(bookoasisMateStatisticsOption(kind, rows, title)); charts.push(chart);
@@ -186,20 +214,23 @@ function bookoasisMateStatisticsOption(kind, rows, title) {
     }
   }
   function render(result) {
+    if (cardGrid && cardGrid.getItems().some(function(item) { return item.isDragging() || item.isReleasing(); })) return;
     var key = [result.db_type, result.library_id, result.generated_at].join('|');
     if (key === resultKey) return;
-    resultKey = key; dispose(); cards = []; layoutDb = result.db_type; layout = readLayout(); el('statistics_result').hidden = false;
+    resultKey = key; dispose(); cards = []; summaryCards = []; layoutDb = result.db_type; layout = readLayout(); el('statistics_result').hidden = false;
     bookoasisMateClear(el('statistics_charts')); bookoasisMateClear(el('statistics_kpis'));
     el('statistics_result_title').textContent = (result.library_name || '전체 보관함') + ' 통계';
     el('statistics_result_meta').textContent = String(result.engine || '').toUpperCase() + ' · 집계 ' + (result.generated_at || '').replace('T', ' ');
     var summary = result.summary || {}, extra = result.charts || {}, media = result.media_kind || 'book';
-    [['자료', summary.total_items], ['시리즈', summary.total_series], ['저자', summary.total_authors],
-      ['출판사', summary.total_publishers], ['트랙', summary.total_tracks], ['에피소드', summary.total_episodes],
-      ['올해 추가', summary.added_this_year], ['보관함', (result.libraries || []).length],
-      ['출시 연도', (result.publication_years || []).length], ['저장 공간', bookoasisMateBytes(summary.storage_bytes || 0)],
-      ['재생 시간', summary.total_duration == null ? null : (summary.total_duration / 3600).toFixed(1) + '시간']].forEach(function(pair) {
+    [['자료', summary.total_items, 'items'], ['시리즈', summary.total_series, 'series'], ['저자', summary.total_authors, 'authors'],
+      ['출판사', summary.total_publishers, 'publishers'], ['트랙', summary.total_tracks, 'tracks'], ['에피소드', summary.total_episodes, 'episodes'],
+      ['올해 추가', summary.added_this_year, 'added'], ['보관함', (result.libraries || []).length, 'libraries'],
+      ['출시 연도', (result.publication_years || []).length, 'years'], ['저장 공간', bookoasisMateBytes(summary.storage_bytes || 0), 'storage'],
+      ['재생 시간', summary.total_duration == null ? null : (summary.total_duration / 3600).toFixed(1) + '시간', 'duration']].forEach(function(pair) {
       if (pair[1] == null) return;
       var box = bookoasisMateText('div', 'doctor-statistics-kpi', '');
+      box.dataset.summaryId = pair[2];
+      summaryCards.push({id:'summary-' + pair[2], title:'요약 · ' + pair[0], node:box});
       box.appendChild(bookoasisMateText('span', '', pair[0]));
       box.appendChild(bookoasisMateText('strong', '', typeof pair[1] === 'number' ? pair[1].toLocaleString('ko-KR') : pair[1]));
       el('statistics_kpis').appendChild(box);
@@ -251,7 +282,7 @@ function bookoasisMateStatisticsOption(kind, rows, title) {
       (data.libraries || []).forEach(function(row) { var opt = bookoasisMateText('option', '', row.name); opt.value = String(row.id); select.appendChild(opt); });
       select.value = lib; if (select.value !== lib) select.value = '';
       if (data.result && typeof echarts !== 'undefined') render(data.result);
-      else { dispose(); cards = []; renderSettings(); resultKey = ''; el('statistics_result').hidden = true; }
+      else { dispose(); cards = []; summaryCards = []; renderSettings(); resultKey = ''; el('statistics_result').hidden = true; }
       schedule();
     }, null, {global:false, silent:true, error:function(xhr, message) {
       if (token !== generation) return;
@@ -266,7 +297,7 @@ function bookoasisMateStatisticsOption(kind, rows, title) {
     el('statistics_layout_reset').addEventListener('click', function() {
       layout = {order:[], hidden:[]}; saveLayout(); applyLayout(); renderSettings();
     });
-    function changeScope() { layoutEnabled(false); dispose(); cards = []; renderSettings(); resultKey = ''; el('statistics_result').hidden = true; load(); }
+    function changeScope() { layoutEnabled(false); dispose(); cards = []; summaryCards = []; renderSettings(); resultKey = ''; el('statistics_result').hidden = true; load(); }
     el('statistics_db_type').addEventListener('change', function() { el('statistics_library').value = ''; changeScope(); });
     el('statistics_library').addEventListener('change', changeScope);
     el('statistics_start').addEventListener('click', function() {

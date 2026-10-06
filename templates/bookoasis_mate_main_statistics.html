@@ -3,16 +3,25 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <script src="{{ url_for('bookoasis_mate.static', filename='vendor/echarts/echarts.min.js') }}"></script>
+<script src="{{ url_for('bookoasis_mate.static', filename='vendor/muuri/muuri.min.js') }}"></script>
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 <style>
 .doctor-statistics-echart { height:340px; width:100%; min-width:0; }
 .doctor-statistics-chart-card { min-width:0; }
-#statistics_result[hidden], .doctor-statistics-chart-card[hidden], #statistics_cards_empty[hidden] { display:none; }
+#statistics_result[hidden], .doctor-statistics-chart-card[hidden], #statistics_cards_empty[hidden], #statistics_kpis[hidden], .doctor-statistics-kpi[hidden] { display:none; }
 .statistics-card-wide { grid-column:1 / -1; }
 .statistics-card-header { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px; }
 .statistics-card-header h4 { margin:0; }
 .statistics-card-handle { border:0; background:transparent; color:#718096; padding:3px 8px; font-size:20px; cursor:grab; }
-.statistics-card-dragging { opacity:.5; }
+.statistics-card-content { margin:0; box-sizing:border-box; }
+.statistics-muuri { display:block; position:relative; margin:-6px; }
+.statistics-muuri .doctor-statistics-chart-card { position:absolute; width:calc(50% - 12px); margin:6px; z-index:1; }
+.statistics-muuri .statistics-card-wide { width:calc(100% - 12px); }
+.statistics-muuri .muuri-item-dragging { z-index:5; }
+.statistics-muuri .muuri-item-dragging .statistics-card-content { box-shadow:0 16px 36px rgba(0,0,0,.2); }
+.statistics-muuri .muuri-item-releasing { z-index:4; }
+.statistics-card-handle { touch-action:none; }
+@media (max-width:1180px) { .statistics-muuri .doctor-statistics-chart-card { width:calc(100% - 12px); } }
 .statistics-settings-drawer { position:fixed; inset:0 0 0 auto; width:min(480px,96vw); height:100%; max-height:100%; max-width:96vw; margin:0; padding:0; border:0; background:#fff; color:#343a40; box-shadow:-10px 0 32px rgba(0,0,0,.22); }
 .statistics-settings-drawer::backdrop { background:rgba(0,0,0,.38); }
 .statistics-settings-body { min-height:100%; padding:18px; box-sizing:border-box; }
