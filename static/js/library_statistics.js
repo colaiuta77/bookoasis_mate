@@ -5,7 +5,7 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
   var storage = kind.indexOf('storage') === 0;
   if (storage) kind = {storage:'bar', storagePie:'pie', storageTree:'treemap'}[kind];
   var option = {animation:false, aria:{enabled:true},
-    color:['#7353ba', '#38a3a5', '#6096ba', '#e9c46a', '#e76f51', '#90be6d', '#f284b6'],
+    color:['#58ace0', '#61c4aa', '#f2ba63', '#ec887d', '#9c8cdb', '#85bc72', '#e58fb5'],
     tooltip:{trigger:'item', renderMode:'richText', confine:true}, textStyle:{color:'#718096'}, series:[]};
   var data = rows.map(function(row) { return {name:row.label || row.period || '', value:Number(row.count || 0)}; });
   if (storageTree) {
@@ -33,13 +33,14 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
     if (storageTree) {
       option.series[0].sort = 'desc';
       option.series[0].upperLabel = {show:nodes !== 'size', height:24};
+      option.series[0].levels = [{upperLabel:{show:false}}];
       option.series[0].label.formatter = function(item) { return item.name + '\n' + bookoasisMateBytes(item.value); };
     }
   } else if (kind === 'calendar') {
     option.tooltip.formatter = function(item) { return item.value[0] + '\n' + item.value[1] + '권'; };
     option.visualMap = {type:'piecewise', orient:'horizontal', left:'center', top:10,
-      pieces:[{value:0,label:'기록 없음',color:'#eef0f3'},{value:1,label:'1권',color:'#ddd3fa'},
-        {min:2,max:3,label:'2–3권',color:'#bda6f4'},{min:4,max:6,label:'4–6권',color:'#9470e3'},{min:7,label:'7권 이상',color:'#38bdf8'}]};
+      pieces:[{value:0,label:'기록 없음',color:'#eef0f3'},{value:1,label:'1권',color:'#d9edf9'},
+        {min:2,max:3,label:'2–3권',color:'#a9d6f1'},{min:4,max:6,label:'4–6권',color:'#78bee8'},{min:7,label:'7권 이상',color:'#58ace0'}]};
     option.calendar = {range:String(nodes), top:90, left:40, right:25, cellSize:['auto',18],
       yearLabel:{show:false}, monthLabel:{nameMap:'cn', formatter:'{MM}월'},
       dayLabel:{firstDay:1,nameMap:['일','월','화','수','목','금','토']}, itemStyle:{borderWidth:1,borderColor:'#fff'}};
@@ -58,7 +59,7 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
     option.grid = {left:110, right:30, top:20, bottom:85};
     option.xAxis = {type:'category', data:fields, axisLabel:{rotate:35}};
     option.yAxis = {type:'category', data:libraries, axisLabel:{width:95, overflow:'truncate'}};
-    option.visualMap = {min:0, max:100, bottom:0, left:'center', orient:'horizontal', inRange:{color:['#f6b5ac', '#f3d57b', '#38a3a5']}};
+    option.visualMap = {min:0, max:100, bottom:0, left:'center', orient:'horizontal', inRange:{color:['#eaf4fb', '#add8f2', '#58ace0']}};
     option.series = [{type:'heatmap', data:rows.map(function(row) { return [fields.indexOf(row.label), libraries.indexOf(row.library), row.value]; })}];
     if (libraries.length > 10) option.dataZoom = [{type:'slider', yAxisIndex:0, start:0, end:1000 / libraries.length}];
   } else if (kind === 'stack') {
@@ -339,7 +340,7 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
     card('format-timeline', '포맷 비중 변화', 'stack', extra.format_timeline);
     var largest = (result.largest_items || []).filter(function(row) { return row.size_bytes > 0; }).map(function(row) { return {id:row.id, label:row.title, count:row.size_bytes, format:row.format}; });
     card('largest', '용량이 큰 항목 · 상위 50개', 'storage', largest.slice(0, 50));
-    card('largest-tree', '용량이 큰 항목 · Treemap', 'storageTree', largest);
+    card('largest-tree', '용량이 큰 항목', 'storageTree', largest);
     if (media === 'book') card('reading-calendar', '도서 읽은 날', 'calendar', []);
     var progress = result.progress || {};
     card('progress', '전체 사용자 진행 상태 · DB 반영 기준', 'bar', [{label:'시작 전', count:progress.not_started}, {label:'진행 중', count:progress.in_progress}, {label:'완료', count:progress.completed}]);
