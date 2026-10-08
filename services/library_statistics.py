@@ -894,6 +894,7 @@ class LibraryStatisticsEngine:
             key=lambda item: (-item[1], genre_labels[item[0][0]].casefold(), genre_labels[item[0][1]].casefold()),
         )
         stream_statistics = {
+            "total_genres": len(genre_counter),
             "charts": {
                 "authors": [{"label": label, "count": count} for label, count in rankings["author"].most_common(30)],
                 "publishers": [{"label": label, "count": count} for label, count in rankings["publisher"].most_common(30)],
@@ -1180,6 +1181,7 @@ class LibraryStatisticsEngine:
             )
 
         metadata, missing, genres, tags, years, distinct_counts, unused_stream = metadata_result
+        summary["total_genres"] = unused_stream.get("total_genres")
         summary["total_authors"] = int(distinct_counts.get("author") or 0)
         summary["total_publishers"] = int(distinct_counts.get("publisher") or 0)
         summary["storage_bytes"] = int(simple_statistics["storage_bytes"])
@@ -1295,6 +1297,7 @@ class LibraryStatisticsEngine:
         )
         metadata, missing, unused_genres, unused_tags, years, unused_distinct, unused_stats = metadata_result
         genres = []
+        summary["total_genres"] = 0
         if "genres" in columns:
             counter = Counter()
             labels = {}
@@ -1311,6 +1314,7 @@ class LibraryStatisticsEngine:
             finally:
                 cursor.close()
             genres = _top_tokens(counter, labels)
+            summary["total_genres"] = len(counter)
         libraries = self._library_distribution(
             connection,
             "videos",

@@ -310,24 +310,35 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
     el('statistics_result_title').textContent = (result.library_name || '전체 보관함') + ' 통계';
     el('statistics_result_meta').textContent = String(result.engine || '').toUpperCase() + ' · 집계 ' + (result.generated_at || '').replace('T', ' ');
     var summary = result.summary || {}, extra = result.charts || {}, media = result.media_kind || 'book';
-    [['자료', summary.total_items, 'items'], ['시리즈', summary.total_series, 'series'], ['저자', summary.total_authors, 'authors'],
+    var itemName = media === 'book' ? (result.db_type === 'adult' ? '성인 도서' : '도서') : media === 'audiobook' ? '오디오북' : '비디오';
+    var yearName = media === 'book' ? '출판 연도' : '출시 연도';
+    var years = (result.publication_years || []).map(function(row) { return Number(row.label); }).filter(function(year) { return Number.isFinite(year) && year > 0; });
+    var yearRange = years.length ? Math.min.apply(null, years) + '–' + Math.max.apply(null, years) : '–';
+    var icons = {items:media === 'book' ? 'book' : media === 'audiobook' ? 'headphones' : 'film', series:'cubes', authors:'user', publishers:'building', tracks:'list-ol', episodes:'list-ol', added:'line-chart', libraries:'book', years:'calendar', storage:'hdd-o', duration:'clock-o', genres:'tags'};
+    [[itemName, summary.total_items, 'items'], ['시리즈', summary.total_series, 'series'], ['저자', summary.total_authors, 'authors'],
       ['출판사', summary.total_publishers, 'publishers'], ['트랙', summary.total_tracks, 'tracks'], ['에피소드', summary.total_episodes, 'episodes'],
       ['올해 추가', summary.added_this_year, 'added'], ['보관함', (result.libraries || []).length, 'libraries'],
-      ['출시 연도', (result.publication_years || []).length, 'years'], ['저장 공간', bookoasisMateBytes(summary.storage_bytes || 0), 'storage'],
-      ['재생 시간', summary.total_duration == null ? null : (summary.total_duration / 3600).toFixed(1) + '시간', 'duration']].forEach(function(pair) {
+      [yearName, yearRange, 'years'], ['저장 공간', bookoasisMateBytes(summary.storage_bytes || 0), 'storage'],
+      ['장르', media === 'audiobook' ? null : (summary.total_genres == null ? '–' : summary.total_genres), 'genres'],
+      ['총 재생시간', summary.total_duration == null ? null : (summary.total_duration / 3600).toFixed(1) + '시간', 'duration']].forEach(function(pair) {
       if (pair[1] == null) return;
       var box = bookoasisMateText('div', 'doctor-statistics-kpi', '');
       box.dataset.summaryId = pair[2];
       summaryCards.push({id:'summary-' + pair[2], title:'요약 · ' + pair[0], node:box});
-      box.appendChild(bookoasisMateText('span', '', pair[0]));
+      var label = bookoasisMateText('span', '', '');
+      var icon = bookoasisMateText('i', 'fa fa-' + icons[pair[2]], '');
+      icon.setAttribute('aria-hidden', 'true');
+      label.appendChild(icon);
+      label.appendChild(document.createTextNode(' ' + pair[0]));
+      box.appendChild(label);
       box.appendChild(bookoasisMateText('strong', '', typeof pair[1] === 'number' ? pair[1].toLocaleString('ko-KR') : pair[1]));
       el('statistics_kpis').appendChild(box);
     });
-    card('formats', '파일 형식 분포', 'pie', result.formats);
-    card('metadata-average', '메타데이터 평균 완성도', 'gauge', extra.metadata_average == null ? [] : [{count:extra.metadata_average}]);
-    card('metadata-scores', '메타데이터 점수 분포', 'bar', result.metadata_scores);
+    card('formats', '포맷 분포', 'pie', result.formats);
+    card('metadata-average', '메타데이터 완성도', 'gauge', extra.metadata_average == null ? [] : [{count:extra.metadata_average}]);
+    card('metadata-scores', '메타데이터 점수', 'bar', result.metadata_scores);
     card('metadata-missing', '메타데이터 누락 현황', 'bar', result.metadata_missing);
-    card('libraries', '보관함별 자료 수', 'bar', (result.libraries || []).map(function(row) { return {label:row.name, count:row.count}; }));
+    card('libraries', '보관함별 ' + itemName + ' 수', 'bar', (result.libraries || []).map(function(row) { return {label:row.name, count:row.count}; }));
     var libraryNames = {}; (result.libraries || []).forEach(function(row) { libraryNames[row.id] = row.name; });
     card('metadata-heatmap', '보관함별 메타데이터 완성도', 'heatmap', (extra.metadata_heatmap || []).map(function(row) {
       return {library:libraryNames[row.library_id] || ('보관함 #' + row.library_id), label:row.label, value:row.value};
@@ -338,16 +349,16 @@ function bookoasisMateStatisticsOption(kind, rows, title, nodes) {
     if (media !== 'video') { card('authors', '상위 저자', 'bar', extra.authors); card('publishers', '상위 출판사', 'bar', extra.publishers); }
     if (media === 'book') card('series', '상위 시리즈', 'bar', extra.series);
     card('lengths', media === 'book' ? '페이지 수 분포' : media === 'audiobook' ? '트랙 수 분포' : '에피소드 수 분포', 'bar', extra.lengths);
-    card('added', '자료 추가 추이', 'line', (result.added_over_time || []).map(function(row) { return {label:row.period, count:row.count}; }));
-    card('years', '출판·출시 연도 타임라인', 'line', result.publication_years);
+    card('added', itemName + ' 추가 추이', 'line', (result.added_over_time || []).map(function(row) { return {label:row.period, count:row.count}; }));
+    card('years', yearName + ' 타임라인', 'line', result.publication_years);
     var decades = {}; (result.publication_years || []).forEach(function(row) {
       var label = Math.floor(Number(row.label) / 10) * 10 + '년대'; decades[label] = (decades[label] || 0) + row.count;
     });
-    card('decades', '출판·출시 시대', 'bar', Object.keys(decades).sort().map(function(label) { return {label:label, count:decades[label]}; }));
+    card('decades', media === 'book' ? '출판 시대' : '출시 시대', 'bar', Object.keys(decades).sort().map(function(label) { return {label:label, count:decades[label]}; }));
     card('format-timeline', '포맷 비중 변화', 'stack', extra.format_timeline);
     var largest = (result.largest_items || []).filter(function(row) { return row.size_bytes > 0; }).map(function(row) { return {id:row.id, label:row.title, count:row.size_bytes, format:row.format}; });
-    card('largest', '용량이 큰 항목 · 상위 50개', 'storage', largest.slice(0, 50));
-    card('largest-tree', '용량이 큰 항목', 'storageTree', largest);
+    card('largest', '용량이 큰 ' + itemName + ' · 상위 50개', 'storage', largest.slice(0, 50));
+    card('largest-tree', '용량이 큰 ' + itemName, 'storageTree', largest);
     if (media === 'book') card('reading-calendar', '도서 읽은 날', 'calendar', []);
     var progress = result.progress || {};
     card('progress', '전체 사용자 진행 상태 · DB 반영 기준', 'bar', [{label:'시작 전', count:progress.not_started}, {label:'진행 중', count:progress.in_progress}, {label:'완료', count:progress.completed}]);
