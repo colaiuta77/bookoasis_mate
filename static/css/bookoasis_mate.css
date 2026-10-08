@@ -256,7 +256,8 @@
 .doctor-gdrive-error { margin-top:7px; font-size:.82rem; }
 .doctor-gdrive-time { color:#6c757d; font-size:.8rem; white-space:nowrap; }
 .doctor-gdrive-actions { flex-direction:row; flex-wrap:wrap; }
-.doctor-event-summary { flex-basis:100%; width:100%; order:-1; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; white-space:pre-line; overflow-wrap:anywhere; font-family:inherit; font-size:inherit; }
+.doctor-event-summary-wrap { position:relative; display:inline-flex; }
+.doctor-event-summary { position:fixed; z-index:1050; width:360px; max-width:calc(100vw - 48px); max-height:240px; overflow:auto; padding:12px; border:1px solid #adb5bd; border-radius:5px; background:var(--bs-body-bg, #fff); color:var(--bs-body-color, #343a40); box-shadow:0 4px 16px rgba(0,0,0,.18); white-space:pre-line; overflow-wrap:anywhere; font-family:inherit; font-size:.85rem; line-height:1.5; }
 .doctor-event-summary[hidden] { display:none; }
 :is(#gdrive_event_rows, #local_events) .doctor-gdrive-actions { gap:4px; margin-top:10px; }
 :is(#gdrive_event_rows, #local_events) .doctor-gdrive-actions .btn { padding:2px 7px; font-size:.75rem; line-height:1.4; }

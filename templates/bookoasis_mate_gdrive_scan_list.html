@@ -295,6 +295,7 @@ function renderGdrivePagination(data, containerId) {
 }
 
 function renderGdriveEvents(data) {
+  if (document.querySelector('#gdrive_event_rows .doctor-event-summary:not([hidden])')) return;
   data = data || {};
   renderGdriveLibraryOptions(data.libraries);
   var body = document.getElementById('gdrive_event_rows');

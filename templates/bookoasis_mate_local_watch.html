@@ -198,6 +198,7 @@ function localStatus() {
     });
     if (selectedLibrary && !$('#local_library option').toArray().some(function(option) { return option.value === selectedLibrary; })) $('#local_library').append($('<option></option>').val(selectedLibrary).text(selectedLibrary));
     $('#local_library').val(selectedLibrary);
+    if (document.querySelector('#local_events .doctor-event-summary:not([hidden])')) return;
     $('#local_events').empty();
     var labels = {queued:'버퍼 대기',retry:'재시도 대기',processing:'처리 중',completed:'처리 완료',failed:'실패'};
     (list.items || []).forEach(function(item) {
