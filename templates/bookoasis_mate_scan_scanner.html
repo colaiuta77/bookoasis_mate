@@ -71,16 +71,23 @@
     <select id="core_library_filter" class="form-control form-control-sm" aria-label="코어 문제·이력 보관함 필터"><option value="">전체 보관함</option></select>
     <span class="doctor-muted">위 DB 선택과 함께 적용 · 시스템 공통 경고는 항상 표시 · 10초 갱신</span>
   </div>
-  <p class="doctor-muted">읽기 전용입니다. 문제 확인·해결·삭제 승인은 BookOasis 알림에서 처리하세요. ‘알고 있음’은 해결된 상태가 아닙니다.</p>
+  <p class="doctor-muted">문제를 펼쳐 상세 내용을 확인하세요. ‘모두 재스캔’은 해당 보관함 전체가 대상이며, ‘알고 있음’은 해결 처리가 아닙니다. 삭제·휴지통 승인은 BookOasis에서 처리하세요.</p>
   <div id="core_problem_rows" aria-live="polite">상태를 확인하는 중입니다.</div>
-  <h5>실제 스캔 완료 이력</h5>
+  <h5 class="doctor-section">실제 스캔 완료 이력</h5>
   <p class="doctor-muted">코어 API의 최근 20건에서 필터링합니다. Lazy 스캔은 제외되며, 이벤트 요청 접수 기록과 별개입니다.</p>
-  <div class="doctor-table-wrap"><table class="table table-sm doctor-table">
+  <div class="doctor-table-wrap"><table class="table table-sm doctor-table doctor-core-history">
+    <colgroup><col style="width:16%"><col style="width:13%"><col style="width:9%"><col style="width:7%"><col style="width:24%"><col style="width:19%"><col style="width:12%"></colgroup>
     <thead><tr><th>보관함</th><th>유형</th><th>실행 계기</th><th>결과</th><th>요약</th><th>종료 시각</th><th>오류</th></tr></thead>
     <tbody id="core_history_rows"></tbody>
   </table></div>
   <p id="core_history_message" class="doctor-muted"></p>
 </section>
+<dialog id="core_scan_error_dialog" class="doctor-core-error-dialog" aria-labelledby="core_scan_error_title">
+  <h5 id="core_scan_error_title">스캔 오류 내용</h5>
+  <div id="core_scan_error_text"></div>
+  <p class="doctor-muted">코드 오류의 기술 상세는 Mate 로그에서 확인할 수 있습니다.</p>
+  <form method="dialog"><button class="btn btn-sm btn-outline-secondary">닫기</button></form>
+</dialog>
 
 <h4>보관함 상태</h4>
 <p class="doctor-muted">스캔 사용은 자동 예약의 ON/OFF입니다. 수동 스캔과 실행 중인 작업에는 영향을 주지 않습니다.</p>

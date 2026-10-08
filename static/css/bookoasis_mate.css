@@ -122,6 +122,21 @@
 .doctor-status-warning { color:#b06a00; background:rgba(255,193,7,.18); }
 .doctor-status-error { color:#dc3545; background:rgba(220,53,69,.14); }
 .doctor-section { margin-top:20px; }
+.doctor-core-history { table-layout:fixed; min-width:850px; }
+.doctor-core-history th { white-space:nowrap; }
+.doctor-core-history td { overflow-wrap:anywhere; vertical-align:middle; }
+.doctor-core-history td:nth-child(3), .doctor-core-history td:nth-child(4), .doctor-core-history td:nth-child(7) { white-space:nowrap; }
+#core_problem_rows > .doctor-card { margin-bottom:12px; }
+.doctor-core-details { margin-top:10px; }
+.doctor-core-details summary { cursor:pointer; padding:6px 0; overflow-wrap:anywhere; }
+.doctor-core-actions { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
+.doctor-core-series { display:flex; align-items:flex-start; gap:12px; border-top:1px solid #ddd; padding:6px 0; }
+.doctor-core-series > details { flex:1; min-width:0; }
+.doctor-core-series > button { flex-shrink:0; margin-top:4px; }
+.doctor-core-item { margin:6px 0 6px 18px; overflow-wrap:anywhere; }
+.doctor-core-error-dialog { width:min(760px, 90vw); max-height:80vh; overflow:auto; padding:24px; border:1px solid #ccc; border-radius:8px; }
+.doctor-core-error-dialog::backdrop { background:rgba(0,0,0,.4); }
+#core_scan_error_text { white-space:pre-wrap; overflow-wrap:anywhere; margin:16px 0; }
 .doctor-table-wrap { overflow-x:auto; }
 .doctor-table { width:100%; min-width:780px; }
 .doctor-db-section-table { min-width:420px; }

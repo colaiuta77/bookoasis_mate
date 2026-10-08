@@ -173,11 +173,11 @@
   </div>
 
   <div class="scan-scheduler-kpis">
-    <div class="scan-scheduler-kpi"><span>전체 보관함</span><strong id="scheduler_kpi_total">-</strong></div>
-    <div class="scan-scheduler-kpi"><span>활성 스케줄</span><strong id="scheduler_kpi_active">-</strong></div>
-    <div class="scan-scheduler-kpi"><span>비활성 스케줄</span><strong id="scheduler_kpi_disabled">-</strong></div>
-    <div class="scan-scheduler-kpi scan-scheduler-kpi-warning"><span>7일 충돌 횟수</span><strong id="scheduler_kpi_conflicts">-</strong></div>
-    <div class="scan-scheduler-kpi scan-scheduler-kpi-danger"><span>중요 충돌</span><strong id="scheduler_kpi_critical">-</strong></div>
+    <div class="scan-scheduler-kpi"><span><i class="fa fa-archive fa-fw" aria-hidden="true"></i> 전체 보관함</span><strong id="scheduler_kpi_total">-</strong></div>
+    <div class="scan-scheduler-kpi"><span><i class="fa fa-calendar-check-o fa-fw" aria-hidden="true"></i> 활성 스케줄</span><strong id="scheduler_kpi_active">-</strong></div>
+    <div class="scan-scheduler-kpi"><span><i class="fa fa-pause-circle fa-fw" aria-hidden="true"></i> 비활성 스케줄</span><strong id="scheduler_kpi_disabled">-</strong></div>
+    <div class="scan-scheduler-kpi scan-scheduler-kpi-warning"><span><i class="fa fa-exchange fa-fw" aria-hidden="true"></i> 7일 충돌 횟수</span><strong id="scheduler_kpi_conflicts">-</strong></div>
+    <div class="scan-scheduler-kpi scan-scheduler-kpi-danger"><span><i class="fa fa-exclamation-triangle fa-fw" aria-hidden="true"></i> 중요 충돌</span><strong id="scheduler_kpi_critical">-</strong></div>
   </div>
 
   <div id="scheduler_source_alert" class="scan-scheduler-alert"></div>
@@ -186,7 +186,7 @@
     <div class="scan-scheduler-card-header">
       <div>
         <h5>보관함 타임라인</h5>
-        <div class="doctor-muted">일자 타임라인의 막대와 요일×시간의 보관함 칩을 드래그하면 변경 미리보기를 열 수 있습니다. 드롭만으로는 저장되지 않습니다.</div>
+        <div class="doctor-muted">타임라인 보기에서는 막대를, 요일×시간 보기에서는 보관함 칩을 드래그해 스케줄 변경을 미리 볼 수 있습니다. 변경 사항은 저장 버튼을 눌러야 적용됩니다.</div>
       </div>
       <div class="scan-scheduler-legend">
         <span><i></i>정상</span>
@@ -204,7 +204,7 @@
       <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-db-filter-btn" data-db-type="video">비디오</button>
       <div class="scan-scheduler-view-toggle">
         <span class="doctor-muted">보기</span>
-        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-view-btn active" data-view="timeline">일자 타임라인</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-view-btn active" data-view="timeline">타임라인</button>
         <button type="button" class="btn btn-sm btn-outline-secondary scan-scheduler-view-btn" data-view="weekday">요일×시간</button>
       </div>
     </div>
