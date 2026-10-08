@@ -258,6 +258,9 @@ dialog.doctor-action-dialog::backdrop { background:rgba(0,0,0,.45); }
 .doctor-gdrive-list { min-width:760px; }
 .doctor-gdrive-row { display:grid; grid-template-columns:72px 135px minmax(320px,1fr) 190px 150px; gap:14px; align-items:center; min-height:126px; padding:16px 8px; border-bottom:1px solid #dee2e6; }
 #gdrive_event_rows, #local_events { min-width:0; }
+.tab-content.doctor-local-tabs { border:0; }
+.tab-content.doctor-local-event-layout { padding:0; }
+#local_event_toolbar > #local_toolbar { margin-bottom:0 !important; }
 #gdrive_event_pagination_top, #local_pagination_top { margin:12px 0; }
 #gdrive_event_pagination_top:empty, #local_pagination_top:empty { display:none; }
 :is(#gdrive_event_rows, #local_events) .doctor-gdrive-time { justify-self:end; width:100%; max-width:100%; }

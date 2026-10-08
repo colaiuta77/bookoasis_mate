@@ -19,7 +19,7 @@
   <strong id="local_counts" class="ml-auto"></strong>
 </div>
 <p id="local_error" class="text-danger mb-0" role="alert"></p>
-<div class="tab-content">
+<div class="tab-content doctor-local-tabs">
 <div class="tab-pane fade show active" id="local_settings" role="tabpanel" aria-labelledby="local_settings_tab">
 <div class="doctor-card mt-0">
   <h3>로컬 폴더 감지</h3>
@@ -312,6 +312,7 @@ function renderLocalPagination(id) {
 }
 $('a[data-toggle="tab"]').on('shown.bs.tab', function() {
   var changes = $('#local_changes').hasClass('active');
+  $('#local_changes').parent().toggleClass('doctor-local-event-layout', changes);
   var manual = $('#local_watch_manual').hasClass('active');
   $('#local_toolbar').appendTo(changes ? '#local_event_toolbar' : '#local_toolbar_home');
   $('#local_toolbar').toggle(!manual);
