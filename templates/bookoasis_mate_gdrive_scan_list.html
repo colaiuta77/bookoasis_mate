@@ -59,6 +59,7 @@
   <strong id="gdrive_event_summary"></strong>
 </div>
 
+<div class="doctor-event-list-header"><span>ID</span><span>Info</span><span>상세정보</span><span>타임스탬프</span></div>
 <div id="gdrive_event_rows" class="doctor-gdrive-list"></div>
 <div id="gdrive_event_empty" class="doctor-empty" style="display:none;">조건에 맞는 변경 이벤트가 없습니다.</div>
 <div id="gdrive_event_pagination" class="doctor-pagination"></div>
@@ -173,7 +174,7 @@ function gdriveEventInfoLine(label, value, className) {
   var line = document.createElement('div');
   if (className) line.className = className;
   line.appendChild(bookoasisMateText('strong', '', label));
-  line.appendChild(document.createTextNode(' ' + (value == null ? '-' : String(value))));
+  line.appendChild(bookoasisMateText('span', '', value == null ? '-' : String(value)));
   return line;
 }
 
@@ -305,7 +306,7 @@ function renderGdriveEvents(data) {
 
     var idColumn = document.createElement('div');
     idColumn.className = 'doctor-gdrive-id';
-    idColumn.appendChild(bookoasisMateText('strong', '', '#' + item.id));
+    idColumn.appendChild(bookoasisMateText('strong', '', String(item.id)));
     idColumn.appendChild(bookoasisMateText('span', 'doctor-muted', gdriveEventDbLabel(item.db_type)));
     row.appendChild(idColumn);
 
