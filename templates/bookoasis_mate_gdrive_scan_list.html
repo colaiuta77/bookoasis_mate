@@ -79,10 +79,12 @@
   <div class="doctor-action-dialog" role="dialog" aria-modal="true" aria-labelledby="gdrive_event_modal_title">
     <div class="doctor-action-dialog-header">
       <h4 id="gdrive_event_modal_title">변경 이벤트 상세</h4>
-      <button id="gdrive_event_modal_close" type="button" class="doctor-action-close" aria-label="닫기">&times;</button>
+      <div class="doctor-event-modal-controls">
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="bookoasisMateCopyText(document.getElementById('gdrive_event_modal_content').textContent)">내용 복사</button>
+        <button id="gdrive_event_modal_close" type="button" class="doctor-action-close" aria-label="닫기">&times;</button>
+      </div>
     </div>
     <pre id="gdrive_event_modal_content" class="doctor-gdrive-json"></pre>
-    <div class="text-right"><button type="button" class="btn btn-sm btn-outline-primary" onclick="bookoasisMateCopyText(document.getElementById('gdrive_event_modal_content').textContent)">내용 복사</button></div>
   </div>
 </div>
 
