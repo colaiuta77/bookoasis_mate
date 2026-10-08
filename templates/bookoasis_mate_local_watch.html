@@ -242,7 +242,6 @@ function localStatus() {
       addTime('처리 완료', item.completed_at);
       var fallbackReasons = Array.from(new Set(scans.map(function(scan) { return scan.fallback_reason; }).filter(Boolean)));
       if (fallbackReasons.length) times.append($('<span class="doctor-muted"></span>').text('전체 스캔 전환 · ' + fallbackReasons.join(' · ')));
-      if (item.status === 'completed' && scans.some(function(scan) { return scan.success && (scan.mode !== 'admin_scan_path' || (scan.response || {}).cleanup_scope === 'library'); })) times.append($('<span class="doctor-muted"></span>').text('요청 접수 · 실제 스캔 완료 미확인'));
       tr.append(times);
       var actions = $('<div class="doctor-gdrive-actions"></div>');
       actions.append($('<button class="btn btn-sm btn-outline-primary">JSON</button>').on('click', function() {
