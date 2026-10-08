@@ -304,9 +304,64 @@ function bookoasisMateBookDetailUrl(item) {
   }
 }
 
+var bookoasisMateEventSummaries = new Map();
+var bookoasisMateEventSummaryPending = new Map();
+var bookoasisMateEventSummaryObserver;
+
+function bookoasisMateAppendEventSummary(root, item) {
+  var path = item.mapped_path || (item.result || {}).mapped_path || item.path;
+  if (!path || ['general', 'adult'].indexOf(item.db_type) < 0) return;
+  var summary = bookoasisMateText('div', 'doctor-event-summary', '');
+  summary.hidden = true;
+  root.appendChild(summary);
+  var data = {db_type:item.db_type, library_id:item.library_id, path:path, item_type:item.item_type};
+  var key = JSON.stringify(data);
+  function load() {
+    var cached = bookoasisMateEventSummaries.get(key);
+    if (!cached || cached.expires <= Date.now()) {
+      cached = {expires:Date.now() + 60000, value:new Promise(function(resolve) {
+        bookoasisMateAjax('scan', 'event_book', data, function(ret) {
+          resolve(ret.data ? String(ret.data.summary || '').trim() : '');
+        }, null, {global:false, silent:true, error:function() { resolve(''); }});
+      })};
+      bookoasisMateEventSummaries.delete(key);
+      bookoasisMateEventSummaries.set(key, cached);
+      if (bookoasisMateEventSummaries.size > 200) {
+        bookoasisMateEventSummaries.delete(bookoasisMateEventSummaries.keys().next().value);
+      }
+    }
+    cached.value.then(function(text) {
+      if (!summary.isConnected) return;
+      summary.textContent = text;
+      summary.hidden = !text;
+    });
+  }
+  if (typeof IntersectionObserver === 'undefined') { load(); return; }
+  if (!bookoasisMateEventSummaryObserver) {
+    bookoasisMateEventSummaryObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (!entry.isIntersecting) return;
+        var show = bookoasisMateEventSummaryPending.get(entry.target);
+        bookoasisMateEventSummaryObserver.unobserve(entry.target);
+        bookoasisMateEventSummaryPending.delete(entry.target);
+        if (show) show();
+      });
+    });
+  }
+  bookoasisMateEventSummaryPending.forEach(function(show, node) {
+    if (!node.isConnected) {
+      bookoasisMateEventSummaryObserver.unobserve(node);
+      bookoasisMateEventSummaryPending.delete(node);
+    }
+  });
+  bookoasisMateEventSummaryPending.set(root, load);
+  bookoasisMateEventSummaryObserver.observe(root);
+}
+
 function bookoasisMateAppendEventLinks(root, item) {
   if (!item.library_id || !item.db_type) return;
   if (item.status !== 'completed') return;
+  bookoasisMateAppendEventSummary(root, item);
   var detail = bookoasisMateText('button', 'btn btn-sm btn-outline-primary', 'BookOasis에서 상세 보기');
   detail.type = 'button';
   detail.addEventListener('click', function() {
