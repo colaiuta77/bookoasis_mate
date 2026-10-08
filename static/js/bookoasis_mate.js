@@ -374,6 +374,33 @@ function bookoasisMateAppendEventSummary(root, item) {
   });
 }
 
+async function bookoasisMateCopyText(text) {
+  var copied = false;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try { await navigator.clipboard.writeText(text); copied = true; } catch (e) {}
+  }
+  if (!copied) {
+    var focused = document.activeElement;
+    var input = document.createElement('textarea');
+    input.value = text;
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    (document.querySelector('dialog[open]') || document.body).appendChild(input);
+    try { input.select(); copied = document.execCommand('copy'); } catch (e) {}
+    finally { input.remove(); if (focused) focused.focus(); }
+  }
+  notify(copied ? '복사했습니다.' : '복사하지 못했습니다. 내용을 선택해 직접 복사해 주세요.', copied ? 'success' : 'warning');
+  return copied;
+}
+
+function bookoasisMateAppendPathCopy(root, item) {
+  var button = bookoasisMateText('button', 'btn btn-sm btn-outline-primary', '경로 복사');
+  button.type = 'button';
+  button.disabled = !item.path;
+  button.addEventListener('click', function() { bookoasisMateCopyText(item.path); });
+  root.appendChild(button);
+}
+
 function bookoasisMateAppendEventLinks(root, item) {
   if (!item.library_id || !item.db_type) return;
   if (item.status !== 'completed') return;

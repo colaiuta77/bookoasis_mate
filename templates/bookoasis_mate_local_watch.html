@@ -19,7 +19,7 @@
   <strong id="local_counts" class="ml-auto"></strong>
 </div>
 <p id="local_error" class="text-danger mb-0" role="alert"></p>
-<div class="tab-content">
+<div class="tab-content doctor-local-tabs">
 <div class="tab-pane fade show active" id="local_settings" role="tabpanel" aria-labelledby="local_settings_tab">
 <div class="doctor-card mt-0">
   <h3>로컬 폴더 감지</h3>
@@ -97,7 +97,16 @@
 </div>
 </div>
 </div>
-<dialog id="local_json_dialog" class="doctor-card" style="width:90%;max-width:1000px;max-height:85vh" aria-labelledby="local_json_title"><form method="dialog" class="d-flex justify-content-between align-items-center"><h4 id="local_json_title">로컬 변경 이벤트 JSON</h4><button class="btn btn-sm btn-outline-primary">닫기</button></form><pre id="local_json_content" class="doctor-gdrive-json"></pre></dialog>
+<dialog id="local_json_dialog" class="doctor-action-dialog" aria-labelledby="local_json_title">
+  <form method="dialog" class="doctor-action-dialog-header">
+    <h4 id="local_json_title">로컬 변경 이벤트 JSON</h4>
+    <div class="doctor-event-modal-controls">
+      <button type="button" class="btn btn-sm btn-outline-primary" onclick="bookoasisMateCopyText(document.getElementById('local_json_content').textContent)">내용 복사</button>
+      <button class="doctor-action-close" aria-label="닫기">&times;</button>
+    </div>
+  </form>
+  <pre id="local_json_content" class="doctor-gdrive-json"></pre>
+</dialog>
 <script>
 var localPage = 1, localPages = 1, localRunning = false, localLoading = false, localInstalling = false;
 function localWatchdogStatus() {
@@ -233,7 +242,6 @@ function localStatus() {
       addTime('처리 완료', item.completed_at);
       var fallbackReasons = Array.from(new Set(scans.map(function(scan) { return scan.fallback_reason; }).filter(Boolean)));
       if (fallbackReasons.length) times.append($('<span class="doctor-muted"></span>').text('전체 스캔 전환 · ' + fallbackReasons.join(' · ')));
-      if (item.status === 'completed' && scans.some(function(scan) { return scan.success && (scan.mode !== 'admin_scan_path' || (scan.response || {}).cleanup_scope === 'library'); })) times.append($('<span class="doctor-muted"></span>').text('요청 접수 · 실제 스캔 완료 미확인'));
       tr.append(times);
       var actions = $('<div class="doctor-gdrive-actions"></div>');
       actions.append($('<button class="btn btn-sm btn-outline-primary">JSON</button>').on('click', function() {
@@ -259,6 +267,7 @@ function localStatus() {
         if (confirm('#' + item.id + ' 이벤트 기록만 삭제할까요? 실제 파일은 삭제하지 않습니다.')) localRequest('delete', {id:item.id}, localStatus);
       }));
       bookoasisMateAppendEventLinks(actions[0], item);
+      bookoasisMateAppendPathCopy(actions[0], item);
       paths.append(actions); $('#local_events').append(tr);
     });
     $('#local_empty').prop('hidden', !!(list.items || []).length);
@@ -302,6 +311,7 @@ function renderLocalPagination(id) {
 }
 $('a[data-toggle="tab"]').on('shown.bs.tab', function() {
   var changes = $('#local_changes').hasClass('active');
+  $('#local_changes').parent().toggleClass('doctor-local-event-layout', changes);
   var manual = $('#local_watch_manual').hasClass('active');
   $('#local_toolbar').appendTo(changes ? '#local_event_toolbar' : '#local_toolbar_home');
   $('#local_toolbar').toggle(!manual);
