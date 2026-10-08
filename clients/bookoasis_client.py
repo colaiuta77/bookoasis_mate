@@ -420,6 +420,25 @@ class BookOasisClient:
     def scan_history(self):
         return self._admin_request("api/media/scan-history", query={"_ts": str(time.time_ns())})
 
+    def problem_card(self, group_key, offset=0, series_key=None):
+        if not isinstance(group_key, str) or group_key.count("|") != 2 or len(group_key) > 255:
+            return self._admin_error("문제 카드 식별자가 올바르지 않습니다.")
+        try:
+            offset = int(offset)
+        except (ValueError, TypeError):
+            return self._admin_error("조회 위치가 올바르지 않습니다.")
+        if offset < 0:
+            return self._admin_error("조회 위치가 올바르지 않습니다.")
+        query = {"group_key": group_key, "offset": offset, "limit": 50, "_ts": str(time.time_ns())}
+        if series_key is not None:
+            query["series_key"] = str(series_key)
+        return self._admin_request("api/problems/card" + ("/items" if series_key is not None else ""), query=query)
+
+    def mute_problem_card(self, group_key):
+        if not isinstance(group_key, str) or group_key.count("|") != 2 or len(group_key) > 255:
+            return self._admin_error("문제 카드 식별자가 올바르지 않습니다.")
+        return self._admin_request("api/problems/card/mute", method="POST", payload={"group_key": group_key})
+
     def tts_status(self):
         return self._admin_request(
             "api/media/tts/pregen/admin-status",

@@ -11,7 +11,7 @@ class ModuleScan(PluginModuleBase):
         "tts_status", "scanner", "scan_scheduler_data", "scheduler_preview",
         "scheduler_update", "scheduler_enabled", "rescan", "cancel_library_scan",
         "scan_library_covers", "clear_scan_queue", "cancel_scan_queue_task",
-        "core_scan_status", "event_book",
+        "core_scan_status", "core_problem_detail", "core_problem_action", "event_book",
     }
 
     def __init__(self, plugin):
@@ -31,6 +31,17 @@ class ModuleScan(PluginModuleBase):
         try:
             if command == "core_scan_status":
                 return jsonify({"ret": "success", "data": self.service.core_scan_status(req.form.get("db_type", "general"))})
+            if command == "core_problem_detail":
+                data = self.service.admin_client().problem_card(
+                    req.form.get("group_key"), req.form.get("offset", 0), req.form.get("series_key"))
+                return jsonify({"ret": "success" if data.get("success") else "warning", "data": data})
+            if command == "core_problem_action":
+                data = self.service.core_problem_action(
+                    req.form.get("group_key"), req.form.get("action"),
+                    req.form.get("series_key"), req.form.get("offset", 0))
+                return jsonify({"ret": "success" if data.get("success") else "warning", "data": data,
+                                "msg": data.get("message") or data.get("error") or
+                                ("요청을 처리했습니다." if data.get("success") else "요청을 처리하지 못했습니다.")})
             if command == "event_book":
                 book = self.service.engine().event_book(
                     req.form.get("db_type", "general"), req.form.get("library_id"),

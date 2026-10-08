@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -346,6 +347,7 @@ class BookOasisMateService:
     def __init__(self, plugin):
         self.P = plugin
         self._lock = threading.RLock()
+        self._logged_scan_errors = {}
         self._report_process = None
         self._report_status_path = None
         self._report_adopted_finished_at = ""
@@ -1626,6 +1628,27 @@ class BookOasisMateService:
         )
         return data
 
+    def core_problem_action(self, group_key, action, series_key=None, offset=0):
+        if action not in {"rescan_all", "rescan_series", "mute"}:
+            return {"success": False, "message": "지원하지 않는 작업입니다."}
+        client = self.admin_client()
+        detail = client.problem_card(group_key, offset)
+        if not detail.get("success"):
+            return detail
+        card = detail.get("card") or {}
+        if card.get("group_key") != group_key:
+            return {"success": False, "message": "문제 카드가 변경되었습니다. 다시 조회하세요."}
+        if action == "mute":
+            return client.mute_problem_card(group_key)
+        if "rescan" not in (card.get("actions") or []):
+            return {"success": False, "message": "이 문제는 재스캔을 지원하지 않습니다."}
+        if action == "rescan_all":
+            return client.scan_library(card.get("library_id"), card.get("db_type"))
+        line = next((line for line in detail.get("lines", []) if line.get("series_key") == series_key), {})
+        if not line.get("scan_path"):
+            return {"success": False, "message": "시리즈 스캔 경로를 확인할 수 없습니다. 다시 조회하세요."}
+        return client.scan_library_path(card.get("library_id"), line["scan_path"], card.get("db_type"))
+
     def core_scan_status(self, db_type="general"):
         client = self.admin_client()
         result = {}
@@ -1648,6 +1671,22 @@ class BookOasisMateService:
                     if not isinstance(item, dict):
                         continue
                     item = dict(item)
+                    error = str(item.get("error_message") or "")
+                    summary, marker, trace = error.partition("Traceback (most recent call last):")
+                    if marker:
+                        fingerprint = hashlib.sha256(error.encode("utf-8")).hexdigest()
+                        key = (item.get("db_type"), item.get("id"), fingerprint)
+                        with self._lock:
+                            if key not in self._logged_scan_errors:
+                                frames = re.findall(r'File "([^"]+)", line (\d+)(?:, in ([\w.<>]+))?', trace)
+                                safe_trace = "\n".join("%s:%s %s" % (path.replace("\\", "/").rsplit("/", 1)[-1], line, function)
+                                                       for path, line, function in frames)
+                                errors = re.findall(r'\b([A-Za-z_][\w.]*(?:Error|Exception)):', trace)
+                                self.P.logger.warning("코어 스캔 오류 ID=%s\n%s\n%s", item.get("id"), safe_trace, ", ".join(errors))
+                                self._logged_scan_errors[key] = True
+                                if len(self._logged_scan_errors) > 200:
+                                    self._logged_scan_errors.pop(next(iter(self._logged_scan_errors)))
+                        item["error_message"] = summary.strip() or "스캔 처리 중 오류가 발생했습니다. 기술 상세는 Mate 로그를 확인하세요."
                     kwargs = item.get("kwargs") or {}
                     if isinstance(kwargs, str):
                         try:
