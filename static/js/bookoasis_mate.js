@@ -316,13 +316,19 @@ function bookoasisMateAppendEventSummary(root, item) {
   root.appendChild(summary);
   var data = {db_type:item.db_type, library_id:item.library_id, path:path, item_type:item.item_type};
   var key = JSON.stringify(data);
+  var previous = bookoasisMateEventSummaries.get(key);
+  if (previous && previous.text) {
+    summary.textContent = previous.text;
+    summary.hidden = false;
+  }
   function load() {
     var cached = bookoasisMateEventSummaries.get(key);
     if (!cached || cached.expires <= Date.now()) {
-      cached = {expires:Date.now() + 60000, value:new Promise(function(resolve) {
+      var text = cached ? cached.text : '';
+      cached = {expires:Date.now() + 60000, text:text, value:new Promise(function(resolve) {
         bookoasisMateAjax('scan', 'event_book', data, function(ret) {
           resolve(ret.data ? String(ret.data.summary || '').trim() : '');
-        }, null, {global:false, silent:true, error:function() { resolve(''); }});
+        }, null, {global:false, silent:true, error:function() { resolve(text); }});
       })};
       bookoasisMateEventSummaries.delete(key);
       bookoasisMateEventSummaries.set(key, cached);
@@ -331,6 +337,7 @@ function bookoasisMateAppendEventSummary(root, item) {
       }
     }
     cached.value.then(function(text) {
+      cached.text = text;
       if (!summary.isConnected) return;
       summary.textContent = text;
       summary.hidden = !text;
