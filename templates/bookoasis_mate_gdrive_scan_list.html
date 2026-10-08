@@ -82,6 +82,7 @@
       <button id="gdrive_event_modal_close" type="button" class="doctor-action-close" aria-label="닫기">&times;</button>
     </div>
     <pre id="gdrive_event_modal_content" class="doctor-gdrive-json"></pre>
+    <div class="text-right"><button type="button" class="btn btn-sm btn-outline-primary" onclick="bookoasisMateCopyText(document.getElementById('gdrive_event_modal_content').textContent)">내용 복사</button></div>
   </div>
 </div>
 
@@ -396,6 +397,7 @@ function renderGdriveEvents(data) {
       }));
     }
     bookoasisMateAppendEventLinks(actionColumn, item);
+    bookoasisMateAppendPathCopy(actionColumn, item);
     pathColumn.appendChild(actionColumn);
     body.appendChild(row);
   });
