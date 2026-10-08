@@ -386,6 +386,9 @@ class BookOasisMateService:
         self._library_statistics_snapshot_checked = False
         self._library_statistics_validation_thread = None
         self._library_statistics_validation_token = 0
+        self._statistics_refresh_thread = None
+        self._statistics_refresh_stop = threading.Event()
+        self._statistics_due = {}
         self._migration_stop = threading.Event()
         self._migration_process = None
         self._migration_status_path = None
@@ -836,6 +839,100 @@ class BookOasisMateService:
         )
         return data
 
+    def library_statistics_users(self, db_type="general"):
+        return LibraryStatisticsEngine(self.settings()).reading_users(db_type)
+
+    def library_statistics_reading_calendar(self, db_type, user_id, library_id=None):
+        engine = LibraryStatisticsEngine(self.settings())
+        if gevent is not None and gevent_monkey is not None and gevent_monkey.is_module_patched("threading"):
+            return gevent.get_hub().threadpool.apply(engine.reading_calendar, (db_type, user_id, library_id))
+        return engine.reading_calendar(db_type, user_id, library_id)
+
+    def _statistics_snapshot_path(self, db_type):
+        if db_type not in {"general", "adult", "audiobook", "video"}:
+            raise ValueError("지원하지 않는 DB 유형입니다.")
+        settings = self.settings()
+        if db_type == "adult" and not settings.get("adult_enabled"):
+            raise ValueError("성인 DB 검사가 비활성화되어 있습니다.")
+        paths = self._library_statistics_paths(settings)
+        if paths is None:
+            raise ValueError("통계 저장 경로를 확인할 수 없습니다.")
+        identity = [settings.get(key) for key in (
+            "db_engine", "bookoasis_root_path", "mariadb_host", "mariadb_port",
+            "mariadb_database_prefix", db_type + "_db_path",
+        )]
+        key = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()[:16]
+        return Path(paths["status"]).parent / ("snapshot-" + db_type + "-" + key + ".json")
+
+    def library_statistics_view(self, db_type="general", library_id=None):
+        path = self._statistics_snapshot_path(db_type)
+        library_id = str(LibraryStatisticsEngine._selected_library_id(library_id) or "")
+        try:
+            snapshot = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError):
+            snapshot = {}
+        paths = self._library_statistics_paths()
+        job = self._external_job_status(
+            paths["status"], "library_statistics", self._library_statistics_process,
+            "통계 갱신 프로세스가 종료되었습니다.",
+            watchdog_seconds=LIBRARY_STATISTICS_WATCHDOG_SECONDS,
+        ) or self._empty_library_statistics_status()
+        selected_job = job.get("db_type") == db_type
+        state = job.get("is_working") if selected_job else "wait"
+        result = (snapshot.get("scopes") or {}).get(library_id)
+        if not snapshot:
+            model = getattr(self.P, "library_statistics_model", None)
+            if model is not None and model.available():
+                saved = model.latest(db_type, library_id)
+                if saved:
+                    result = saved.get("result")
+                    snapshot = {"libraries": (result or {}).get("libraries", []),
+                                "engine": saved.get("engine", ""), "generated_at": saved.get("created_at", "")}
+        return {
+            "is_working": state, "db_type": db_type, "library_id": library_id,
+            "result": result, "libraries": snapshot.get("libraries", []),
+            "engine": snapshot.get("engine", ""), "generated_at": snapshot.get("generated_at", ""),
+            "message": job.get("message", "") if selected_job else "저장된 통계를 표시합니다." if result else "첫 백그라운드 집계를 기다리고 있습니다.",
+            "error": job.get("error", "") if selected_job else "",
+            "progress_percent": job.get("progress_percent", 0) if selected_job else 0,
+            "busy": job.get("is_working") == "run",
+        }
+
+    def start_statistics_background(self):
+        with self._lock:
+            if self._background_alive(self._statistics_refresh_thread):
+                return
+            self._statistics_refresh_stop.clear()
+            self._statistics_refresh_thread = self._spawn_background(
+                self._statistics_background_loop, name="bookoasis-mate-statistics-schedule",
+            )
+
+    def stop_statistics_background(self):
+        self._statistics_refresh_stop.set()
+
+    def _statistics_background_loop(self):
+        if self._statistics_refresh_stop.wait(30):
+            return
+        while not self._statistics_refresh_stop.is_set():
+            settings = self.settings()
+            for db_type in ("general", "adult", "audiobook", "video"):
+                if self._statistics_refresh_stop.is_set():
+                    return
+                if db_type == "adult" and not settings.get("adult_enabled"):
+                    continue
+                if time.monotonic() < self._statistics_due.get(db_type, 0):
+                    continue
+                try:
+                    response = self.start_library_statistics(db_type, all_libraries=True)
+                    if not response.get("started"):
+                        break
+                    self._statistics_due[db_type] = time.monotonic() + 6 * 60 * 60
+                except Exception as error:
+                    self._statistics_due[db_type] = time.monotonic() + 6 * 60 * 60
+                    self.P.logger.warning(f"통계 자동 갱신 시작 실패 ({db_type}): {error}")
+                break
+            self._statistics_refresh_stop.wait(30)
+
     def library_statistics_status(self):
         self._restore_library_statistics_snapshot()
         paths = self._library_statistics_paths()
@@ -981,9 +1078,9 @@ class BookOasisMateService:
             with self._lock:
                 self._library_statistics_validation_thread = None
 
-    def start_library_statistics(self, db_type="general", library_id=None):
+    def start_library_statistics(self, db_type="general", library_id=None, all_libraries=False):
         db_type = str(db_type or "general").strip().lower()
-        selected_library_id = str(library_id or "").strip()
+        selected_library_id = "" if all_libraries else str(library_id or "").strip()
         current = self.library_statistics_status()
         if current.get("is_working") == "run":
             return {
@@ -1022,6 +1119,9 @@ class BookOasisMateService:
             "lock_path": str(paths["lock"]),
             "delete_config_after_read": True,
         }
+        if all_libraries:
+            config["all_libraries"] = True
+            config["snapshot_path"] = str(self._statistics_snapshot_path(db_type))
         process = self._launch_singleton_maintenance_worker(
             paths,
             config,
@@ -1044,6 +1144,7 @@ class BookOasisMateService:
             }
         with self._lock:
             self._library_statistics_status = initial
+            self._statistics_due[db_type] = time.monotonic() + 6 * 60 * 60
             self._library_statistics_snapshot_checked = True
             self._library_statistics_validation_token += 1
             self._library_statistics_process = process

@@ -47,9 +47,12 @@ class ModelLibraryStatisticsSnapshot(ModelBase):
             return entity.to_dict()
 
     @classmethod
-    def latest(cls):
+    def latest(cls, db_type=None, library_id=None):
         with F.app.app_context():
-            entity = F.db.session.query(cls).order_by(cls.id.desc()).first()
+            query = F.db.session.query(cls)
+            if db_type is not None:
+                query = query.filter(cls.db_type == db_type).filter(cls.library_id == str(library_id or ""))
+            entity = query.order_by(cls.id.desc()).first()
             return entity.to_dict() if entity is not None else None
 
     @classmethod

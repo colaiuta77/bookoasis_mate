@@ -1223,7 +1223,8 @@ class BookOasisMateEngine:
                 return None
             series = "COALESCE(NULLIF(series_name, ''), title)" if "series_name" in columns else "title"
             alive = " AND COALESCE(is_deleted, 0) = 0" if "is_deleted" in columns else ""
-            base = f"SELECT id, library_id, title, {series} AS series_name FROM books WHERE library_id = ?{alive}"
+            summary = "SUBSTR(COALESCE(summary, ''), 1, 2000)" if "summary" in columns else "''"
+            base = f"SELECT id, library_id, title, {series} AS series_name, {summary} AS summary FROM books WHERE library_id = ?{alive}"
             if item_type != "directory":
                 row = connection.execute(base + " AND file_path = ? ORDER BY id LIMIT 1", (library_id, path)).fetchone()
                 if row:

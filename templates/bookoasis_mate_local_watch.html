@@ -57,6 +57,7 @@
   </div>
   <div id="local_pagination_top" class="doctor-pagination" aria-label="상단 페이지 이동"></div>
   <div id="local_event_toolbar"></div>
+  <div class="doctor-event-list-header"><span>ID</span><span>Info</span><span>상세정보</span><span>타임스탬프</span></div>
   <div id="local_events" class="doctor-gdrive-list" role="list" aria-label="변경 이벤트"></div>
   <div id="local_empty" class="doctor-empty" hidden>조건에 맞는 변경 이벤트가 없습니다.</div>
   <div id="local_pagination" class="doctor-pagination" aria-label="하단 페이지 이동"></div>
@@ -197,12 +198,13 @@ function localStatus() {
     });
     if (selectedLibrary && !$('#local_library option').toArray().some(function(option) { return option.value === selectedLibrary; })) $('#local_library').append($('<option></option>').val(selectedLibrary).text(selectedLibrary));
     $('#local_library').val(selectedLibrary);
+    if (document.querySelector('#local_events .doctor-event-summary:not([hidden])')) return;
     $('#local_events').empty();
     var labels = {queued:'버퍼 대기',retry:'재시도 대기',processing:'처리 중',completed:'처리 완료',failed:'실패'};
     (list.items || []).forEach(function(item) {
       var tr = $('<div class="doctor-gdrive-row" role="listitem"></div>');
       var dbLabel = {general:'일반 DB',adult:'성인 DB',audiobook:'오디오북 DB',video:'비디오 DB'};
-      tr.append($('<div class="doctor-gdrive-id"></div>').append($('<strong></strong>').text('#' + item.id), $('<small class="doctor-muted"></small>').text(dbLabel[item.db_type] || '미분류')));
+      tr.append($('<div class="doctor-gdrive-id"></div>').append($('<strong></strong>').text(String(item.id)), $('<small class="doctor-muted"></small>').text(dbLabel[item.db_type] || '미분류')));
       var info = $('<div class="doctor-gdrive-info"></div>');
       var action = String(item.action || '').toLowerCase();
       var actionClass = /^(create|edit|delete|move|rename|restore)$/.test(action) ? action : 'edit';
@@ -212,9 +214,9 @@ function localStatus() {
       info.append($('<small class="doctor-muted"></small>').text('시도 ' + (item.attempts || 0) + '회'));
       tr.append(info);
       var paths = $('<div class="doctor-gdrive-paths"></div>');
-      paths.append($('<div class="doctor-path"></div>').append($('<strong></strong>').text('경로 '), document.createTextNode(item.path || '')));
-      if (item.removed_path) paths.append($('<div class="doctor-path doctor-gdrive-previous"></div>').append($('<strong></strong>').text('이동 전 '), document.createTextNode(item.removed_path)));
-      paths.append($('<div class="doctor-gdrive-library"></div>').append($('<strong></strong>').text('보관함 '), document.createTextNode((item.library_name || '미분류') + (item.library_id ? ' (#' + item.library_id + ')' : ''))));
+      paths.append($('<div class="doctor-path"></div>').append($('<strong></strong>').text('경로'), $('<span></span>').text(item.path || '')));
+      if (item.removed_path) paths.append($('<div class="doctor-path doctor-gdrive-previous"></div>').append($('<strong></strong>').text('이동 전'), $('<span></span>').text(item.removed_path)));
+      paths.append($('<div class="doctor-gdrive-library"></div>').append($('<strong></strong>').text('보관함'), $('<span></span>').text((item.library_name || '미분류') + (item.library_id ? ' (#' + item.library_id + ')' : ''))));
       if (item.error) paths.append($('<div class="doctor-gdrive-error text-danger"></div>').text(item.error));
       tr.append(paths);
       var times = $('<div class="doctor-gdrive-time"></div>');

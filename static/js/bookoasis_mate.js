@@ -304,10 +304,80 @@ function bookoasisMateBookDetailUrl(item) {
   }
 }
 
+var bookoasisMateEventSummaries = new Map();
+var bookoasisMateEventSummaryId = 0;
+
+function bookoasisMateAppendEventSummary(root, item) {
+  var path = item.mapped_path || (item.result || {}).mapped_path || item.path;
+  if (!path || ['general', 'adult'].indexOf(item.db_type) < 0) return;
+  var wrapper = bookoasisMateText('span', 'doctor-event-summary-wrap', '');
+  var button = bookoasisMateText('button', 'btn btn-sm btn-outline-primary', '도서 소개');
+  button.type = 'button';
+  var summary = bookoasisMateText('div', 'doctor-event-summary', '');
+  summary.id = 'doctor-event-summary-' + (++bookoasisMateEventSummaryId);
+  button.setAttribute('aria-controls', summary.id);
+  button.setAttribute('aria-expanded', 'false');
+  summary.hidden = true;
+  wrapper.appendChild(button);
+  wrapper.appendChild(summary);
+  root.appendChild(wrapper);
+  var pinned = false;
+  var data = {db_type:item.db_type, library_id:item.library_id, path:path, item_type:item.item_type};
+  var key = JSON.stringify(data);
+  function load() {
+    var cached = bookoasisMateEventSummaries.get(key);
+    summary.textContent = (cached && cached.text) || '소개를 불러오는 중입니다.';
+    if (!cached || cached.expires <= Date.now()) {
+      var text = cached ? cached.text : '';
+      cached = {expires:Date.now() + 60000, text:text, value:new Promise(function(resolve) {
+        bookoasisMateAjax('scan', 'event_book', data, function(ret) {
+          resolve(ret.data ? String(ret.data.summary || '').trim() : '');
+        }, null, {global:false, silent:true, error:function() { resolve(text); }});
+      })};
+      bookoasisMateEventSummaries.delete(key);
+      bookoasisMateEventSummaries.set(key, cached);
+      if (bookoasisMateEventSummaries.size > 200) {
+        bookoasisMateEventSummaries.delete(bookoasisMateEventSummaries.keys().next().value);
+      }
+    }
+    cached.value.then(function(text) {
+      cached.text = text;
+      if (!summary.isConnected) return;
+      summary.textContent = text || '등록된 도서 소개가 없습니다.';
+    });
+  }
+  function show() {
+    summary.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    load();
+    var bounds = button.getBoundingClientRect();
+    summary.style.left = Math.max(12, Math.min(bounds.left, window.innerWidth - summary.offsetWidth - 12)) + 'px';
+    summary.style.top = bounds.top < 260 ? bounds.bottom + 'px' : 'auto';
+    summary.style.bottom = bounds.top < 260 ? 'auto' : window.innerHeight - bounds.top + 'px';
+  }
+  function hide() {
+    summary.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+  }
+  wrapper.addEventListener('mouseenter', show);
+  wrapper.addEventListener('mouseleave', function() { if (!pinned) hide(); });
+  button.addEventListener('focus', show);
+  wrapper.addEventListener('focusout', function(event) {
+    if (!wrapper.contains(event.relatedTarget)) { pinned = false; hide(); }
+  });
+  button.addEventListener('click', function() {
+    pinned = !pinned;
+    if (pinned) show(); else hide();
+  });
+  wrapper.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') { pinned = false; hide(); event.stopPropagation(); }
+  });
+}
+
 function bookoasisMateAppendEventLinks(root, item) {
   if (!item.library_id || !item.db_type) return;
   if (item.status !== 'completed') return;
-  var detail = bookoasisMateText('button', 'btn btn-sm btn-outline-primary', 'BookOasis에서 상세 보기');
+  var detail = bookoasisMateText('button', 'btn btn-sm btn-outline-primary', 'BookOasis GO');
   detail.type = 'button';
   detail.addEventListener('click', function() {
     var popup = window.open('about:blank', '_blank');
@@ -326,6 +396,7 @@ function bookoasisMateAppendEventLinks(root, item) {
     }, function() { detail.disabled = false; }, {error:function() { if (popup) popup.close(); }});
   });
   root.appendChild(detail);
+  bookoasisMateAppendEventSummary(root, item);
 }
 
 function bookoasisMateOpenSelectedBookDetail() {
