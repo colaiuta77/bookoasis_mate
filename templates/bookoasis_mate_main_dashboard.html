@@ -42,7 +42,11 @@ function doctorFormatCount(value, unit) {
 function doctorSummaryKpi(label, value, note, tone, icon) {
   var card = bookoasisMateText('article', 'doctor-summary-kpi doctor-summary-kpi-' + tone, '');
   var heading = bookoasisMateText('div', 'doctor-summary-kpi-heading', '');
-  heading.appendChild(bookoasisMateText('span', 'doctor-summary-kpi-icon', icon));
+  var badge = bookoasisMateText('span', 'doctor-summary-kpi-icon', '');
+  var glyph = bookoasisMateText('i', 'fa fa-' + icon, '');
+  glyph.setAttribute('aria-hidden', 'true');
+  badge.appendChild(glyph);
+  heading.appendChild(badge);
   heading.appendChild(bookoasisMateText('span', '', label));
   card.appendChild(heading);
   card.appendChild(bookoasisMateText('strong', '', value));
@@ -56,7 +60,11 @@ function doctorMetricGroup(title, stats, meta) {
   var group = bookoasisMateText('article', 'doctor-summary-diagnostic doctor-summary-diagnostic-' + tone, '');
   var heading = bookoasisMateText('div', 'doctor-summary-diagnostic-heading', '');
   var titleWrap = bookoasisMateText('div', 'doctor-summary-diagnostic-title', '');
-  titleWrap.appendChild(bookoasisMateText('span', 'doctor-summary-diagnostic-icon', meta.icon || '·'));
+  var badge = bookoasisMateText('span', 'doctor-summary-diagnostic-icon', '');
+  var glyph = bookoasisMateText('i', 'fa fa-' + (meta.icon || 'info-circle'), '');
+  glyph.setAttribute('aria-hidden', 'true');
+  badge.appendChild(glyph);
+  titleWrap.appendChild(badge);
   titleWrap.appendChild(bookoasisMateText('h5', '', title));
   heading.appendChild(titleWrap);
   if (meta.badge) heading.appendChild(bookoasisMateText('span', 'doctor-summary-diagnostic-badge', meta.badge));
@@ -84,16 +92,16 @@ function doctorSummaryOverview(totals, scanner, audiobook, video, staleDays) {
   var dashboard = bookoasisMateText('section', 'doctor-summary-dashboard', '');
 
   var kpis = bookoasisMateText('div', 'doctor-summary-kpis', '');
-  kpis.appendChild(doctorSummaryKpi('전체 도서', doctorFormatCount(totalBooks, '권'), '활성 도서 기준', 'primary', '책'));
-  kpis.appendChild(doctorSummaryKpi('정상 도서', doctorFormatCount(healthyBooks, '권'), healthPercent + '%', 'healthy', '정'));
-  kpis.appendChild(doctorSummaryKpi('점검 필요', doctorFormatCount(problemBooks, '권'), problemPercent, problemBooks ? 'warning' : 'healthy', '점'));
+  kpis.appendChild(doctorSummaryKpi('전체 도서', doctorFormatCount(totalBooks, '권'), '활성 도서 기준', 'primary', 'book'));
+  kpis.appendChild(doctorSummaryKpi('정상 도서', doctorFormatCount(healthyBooks, '권'), healthPercent + '%', 'healthy', 'check'));
+  kpis.appendChild(doctorSummaryKpi('점검 필요', doctorFormatCount(problemBooks, '권'), problemPercent, problemBooks ? 'warning' : 'healthy', 'exclamation-triangle'));
   if (totalAudiobooks) {
-    kpis.appendChild(doctorSummaryKpi('오디오북', doctorFormatCount(totalAudiobooks, '개'), '점검 필요 ' + doctorFormatCount(problemAudiobooks, '개'), problemAudiobooks ? 'warning' : 'healthy', '음'));
+    kpis.appendChild(doctorSummaryKpi('오디오북', doctorFormatCount(totalAudiobooks, '개'), '점검 필요 ' + doctorFormatCount(problemAudiobooks, '개'), problemAudiobooks ? 'warning' : 'healthy', 'headphones'));
   }
   if (totalVideos) {
-    kpis.appendChild(doctorSummaryKpi('비디오', doctorFormatCount(totalVideos, '개'), '점검 필요 ' + doctorFormatCount(problemVideos, '개'), problemVideos ? 'warning' : 'healthy', '영'));
+    kpis.appendChild(doctorSummaryKpi('비디오', doctorFormatCount(totalVideos, '개'), '점검 필요 ' + doctorFormatCount(problemVideos, '개'), problemVideos ? 'warning' : 'healthy', 'film'));
   }
-  kpis.appendChild(doctorSummaryKpi('최근 스캔 실패', doctorFormatCount(scanFailures, '건'), '대기 ' + doctorFormatCount(scanner.pending_tasks, '건') + ' · 실행 ' + doctorFormatCount(scanner.running_tasks, '건'), scanFailures ? 'danger' : 'healthy', '스'));
+  kpis.appendChild(doctorSummaryKpi('최근 스캔 실패', doctorFormatCount(scanFailures, '건'), '대기 ' + doctorFormatCount(scanner.pending_tasks, '건') + ' · 실행 ' + doctorFormatCount(scanner.running_tasks, '건'), scanFailures ? 'danger' : 'healthy', 'refresh'));
   dashboard.appendChild(kpis);
 
   var content = bookoasisMateText('div', 'doctor-summary-content', '');
@@ -146,27 +154,27 @@ function doctorSummaryOverview(totals, scanner, audiobook, video, staleDays) {
     {label:'점검 필요', value:doctorFormatCount(problemBooks, '권'), tone:problemBooks ? 'warning' : 'healthy'},
     {label:'중복 ISBN 후보', value:totals.duplicate_isbn_deferred ? '문제 도서에서 수동 검사' : doctorFormatCount(totals.duplicate_isbn, '권')},
     {label:'ISBN 누락', value:doctorFormatCount(totals.isbn, '권')}
-  ], {icon:'문', badge:doctorFormatCount(problemBooks, '권'), tone:problemBooks ? 'warning' : 'healthy'}));
+  ], {icon:'book', badge:doctorFormatCount(problemBooks, '권'), tone:problemBooks ? 'warning' : 'healthy'}));
   groups.appendChild(doctorMetricGroup('메타데이터 누락', [
     {label:'표지 없음', value:doctorFormatCount(totals.cover, '권')},
     {label:'원격 표지 추출 제한', value:doctorFormatCount(totals.remote_cover_limited, '권')},
     {label:'저자 없음', value:doctorFormatCount(totals.author, '권')},
     {label:'출판사 없음', value:doctorFormatCount(totals.publisher, '권')},
     {label:'소개 없음', value:doctorFormatCount(totals.summary, '권')}
-  ], {icon:'메', badge:'항목별', tone:'purple'}));
+  ], {icon:'tags', badge:'항목별', tone:'purple'}));
   groups.appendChild(doctorMetricGroup('파일 및 페이지', [
     {label:'페이지 수 미기록', value:doctorFormatCount(totals.pages, '권')},
     {label:'원격 페이지 분석 제한', value:doctorFormatCount(totals.remote_page_limited, '권')},
     {label:'파일 크기 미기록', value:doctorFormatCount(totals.file_size, '권')},
     {label:'페이지 수 기록', value:doctorFormatCount(Math.max(0, totalBooks - Number(totals.pages || 0) - Number(totals.remote_page_limited || 0)), '권')},
     {label:'파일 크기 기록', value:doctorFormatCount(Math.max(0, totalBooks - Number(totals.file_size || 0)), '권')}
-  ], {icon:'파', badge:'기록 상태', tone:'blue'}));
+  ], {icon:'file-text-o', badge:'기록 상태', tone:'blue'}));
   groups.appendChild(doctorMetricGroup('스캔 상태', [
     {label:'최근 작업 실패', value:doctorFormatCount(scanner.recent_failed_tasks, '건'), tone:Number(scanner.recent_failed_tasks || 0) ? 'warning' : 'healthy'},
     {label:'대기 작업', value:doctorFormatCount(scanner.pending_tasks, '건')},
     {label:'실행 작업', value:doctorFormatCount(scanner.running_tasks, '건')},
     {label:'장기 미스캔', value:doctorFormatCount(scanner.stale_libraries, '개')}
-  ], {icon:'스', badge:scanFailures ? doctorFormatCount(scanFailures, '건 실패') : '정상', tone:scanFailures ? 'danger' : 'healthy'}));
+  ], {icon:'refresh', badge:scanFailures ? doctorFormatCount(scanFailures, '건 실패') : '정상', tone:scanFailures ? 'danger' : 'healthy'}));
   if (totalAudiobooks) {
     groups.appendChild(doctorMetricGroup('오디오북', [
       {label:'전체 오디오북', value:doctorFormatCount(audiobook.total_audiobooks, '개')},
@@ -178,7 +186,7 @@ function doctorSummaryOverview(totals, scanner, audiobook, video, staleDays) {
       {label:'전체 트랙', value:doctorFormatCount(audiobook.total_tracks, '개')},
       {label:'트랙 수 미기록', value:doctorFormatCount(audiobook.tracks, '개')},
       {label:'트랙 크기 미기록 (참고)', value:doctorFormatCount(audiobook.track_file_size_missing, '개')}
-    ], {icon:'음', badge:problemAudiobooks ? doctorFormatCount(problemAudiobooks, '개 점검') : '정상', tone:problemAudiobooks ? 'warning' : 'healthy'}));
+    ], {icon:'headphones', badge:problemAudiobooks ? doctorFormatCount(problemAudiobooks, '개 점검') : '정상', tone:problemAudiobooks ? 'warning' : 'healthy'}));
   }
   if (totalVideos) {
     groups.appendChild(doctorMetricGroup('비디오', [
@@ -190,7 +198,7 @@ function doctorSummaryOverview(totals, scanner, audiobook, video, staleDays) {
       {label:'전체 에피소드', value:doctorFormatCount(video.total_episodes, '개')},
       {label:'에피소드 수 미기록', value:doctorFormatCount(video.episodes, '개')},
       {label:'재생시간 미기록', value:doctorFormatCount(video.duration, '개')}
-    ], {icon:'영', badge:problemVideos ? doctorFormatCount(problemVideos, '개 점검') : '정상', tone:problemVideos ? 'warning' : 'healthy'}));
+    ], {icon:'film', badge:problemVideos ? doctorFormatCount(problemVideos, '개 점검') : '정상', tone:problemVideos ? 'warning' : 'healthy'}));
   }
   content.appendChild(groups);
   dashboard.appendChild(content);
