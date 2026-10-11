@@ -4,6 +4,14 @@
 <link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=compose-host-2">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
+<ul class="nav nav-pills bg-light shadow text-dark mb-3" role="tablist">
+  <li class="nav-item"><a class="nav-link active" id="setting-basic-tab" data-toggle="tab" href="#setting-basic" role="tab">기본 연결</a></li>
+  <li class="nav-item"><a class="nav-link" id="setting-database-tab" data-toggle="tab" href="#setting-database" role="tab">DB 연결</a></li>
+  <li class="nav-item"><a class="nav-link" id="setting-diagnosis-tab" data-toggle="tab" href="#setting-diagnosis" role="tab">진단 정책</a></li>
+  <li class="nav-item"><a class="nav-link" id="setting-env-tab" data-toggle="tab" href="#setting-env" role="tab">환경 파일</a></li>
+  <li class="nav-item"><a class="nav-link" id="setting-docker-tab" data-toggle="tab" href="#setting-docker" role="tab">Docker 관리</a></li>
+</ul>
+
 <div class="doctor-setting-toolbar">
   <div class="doctor-setting-toolbar-actions">
     {{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['connection_test_btn', '연결 테스트']]) }}
@@ -17,14 +25,6 @@
     <a id="mate_release_update" class="doctor-release-update" href="{{ arg.get('mate_repository_url') }}" target="_blank" rel="noopener noreferrer" hidden>업데이트</a>
   </div>
 </div>
-
-<ul class="nav nav-pills bg-light shadow text-dark mb-3" role="tablist">
-  <li class="nav-item"><a class="nav-link active" id="setting-basic-tab" data-toggle="tab" href="#setting-basic" role="tab">기본 연결</a></li>
-  <li class="nav-item"><a class="nav-link" id="setting-database-tab" data-toggle="tab" href="#setting-database" role="tab">DB 연결</a></li>
-  <li class="nav-item"><a class="nav-link" id="setting-diagnosis-tab" data-toggle="tab" href="#setting-diagnosis" role="tab">진단 정책</a></li>
-  <li class="nav-item"><a class="nav-link" id="setting-env-tab" data-toggle="tab" href="#setting-env" role="tab">환경 파일</a></li>
-  <li class="nav-item"><a class="nav-link" id="setting-docker-tab" data-toggle="tab" href="#setting-docker" role="tab">Docker 관리</a></li>
-</ul>
 
 <form id="setting">
   <div class="tab-content doctor-setting-content">

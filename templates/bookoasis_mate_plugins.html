@@ -5,6 +5,14 @@
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 <input id="plugin_bookoasis_url" type="hidden" value="{{ arg.get('bookoasis_url', '') }}">
 
+<ul class="nav nav-pills bg-light shadow text-dark mb-3" role="tablist">
+  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_settings_tab" role="tab">설정</a></li>
+  <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#plugin_overview_tab" role="tab">플러그인</a></li>
+  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_github_tab" role="tab">저장소 설치</a></li>
+  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_zip_tab" role="tab">ZIP 설치</a></li>
+  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_history_tab" role="tab">작업 이력</a></li>
+</ul>
+
 <div class="doctor-plugin-manager-head">
   <div>
     <h3>BookOasis 플러그인 관리</h3>
@@ -30,14 +38,6 @@
   <div id="plugin_job_result"></div>
   <div id="plugin_job_logs" class="doctor-plugin-logs"></div>
 </section>
-
-<ul class="nav nav-pills bg-light shadow text-dark mb-3" role="tablist">
-  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_settings_tab" role="tab">설정</a></li>
-  <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#plugin_overview_tab" role="tab">플러그인</a></li>
-  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_github_tab" role="tab">저장소 설치</a></li>
-  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_zip_tab" role="tab">ZIP 설치</a></li>
-  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_history_tab" role="tab">작업 이력</a></li>
-</ul>
 
 <div class="tab-content doctor-plugin-content">
   <div id="plugin_settings_tab" class="tab-pane fade" role="tabpanel">

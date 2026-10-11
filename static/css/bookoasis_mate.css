@@ -320,6 +320,7 @@ dialog.doctor-action-dialog::backdrop { background:rgba(0,0,0,.45); }
 .doctor-setting-tabs { margin-top:14px; }
 .doctor-setting-tabs .nav-link { padding:.7rem 1.1rem; }
 .doctor-setting-content { padding-top:2px; }
+.doctor-setting-content > .tab-pane { border:0; padding:0; }
 .doctor-setting-database-pane { width:100%; max-width:1180px; margin-right:auto; }
 .doctor-section-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:14px; }
 .doctor-section-heading h4 { margin-bottom:4px; }
