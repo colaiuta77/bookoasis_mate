@@ -505,7 +505,7 @@ dialog.doctor-action-dialog::backdrop { background:rgba(0,0,0,.45); }
 .doctor-plugin-summary-filter strong { font-size:1.05rem; }
 .doctor-plugin-overview-section { margin-top:18px; }
 .doctor-plugin-overview-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid #dee2e6; }
-.doctor-plugin-overview-heading h4 { margin:0; font-size:1rem; }
+.doctor-plugin-overview-heading h4 { margin:0; font-size:1.2rem; font-weight:700; color:#0d6efd; }
 .doctor-plugin-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px; }
 .doctor-plugin-card { display:flex; flex-direction:column; min-height:230px; padding:18px; }
 .doctor-plugin-card-head { display:flex; align-items:center; gap:12px; }

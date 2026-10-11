@@ -101,7 +101,10 @@
 
   <div id="plugin_overview_tab" class="tab-pane fade show active" role="tabpanel">
     <div class="doctor-plugin-toolbar">
-      <p class="doctor-muted mb-0">설치된 플러그인과 설치 가능한 카탈로그를 한 화면에서 확인합니다.</p>
+      <div>
+        <div id="plugin_installed_status" class="doctor-query-status"></div>
+        <div id="plugin_catalog_status" class="doctor-query-status"></div>
+      </div>
       <div class="doctor-cleanup-actions">
         <button id="plugin_installed_update_refresh" type="button" class="btn btn-sm btn-outline-success">업데이트 확인</button>
         <button id="plugin_discovery_refresh" type="button" class="btn btn-sm btn-outline-primary">Topic 새로고침</button>
@@ -115,14 +118,12 @@
       <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="installed" aria-pressed="false"><span><i class="fa fa-check-square-o fa-fw" aria-hidden="true"></i> 설치됨</span><strong id="plugin_overview_installed_count">0</strong></button>
       <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="uninstalled" aria-pressed="false"><span><i class="fa fa-download fa-fw" aria-hidden="true"></i> 미설치</span><strong id="plugin_overview_uninstalled_count">0</strong></button>
     </div>
-    <div id="plugin_installed_status" class="doctor-query-status"></div>
-    <div id="plugin_catalog_status" class="doctor-query-status"></div>
     <section id="plugin_installed_section" class="doctor-plugin-overview-section">
-      <div class="doctor-plugin-overview-heading"><h4>설치된 플러그인</h4><span id="plugin_installed_visible_count" class="doctor-muted"></span></div>
+      <div class="doctor-plugin-overview-heading"><h4>설치된 플러그인</h4></div>
       <div id="plugin_installed" class="doctor-plugin-grid"></div>
     </section>
     <section id="plugin_catalog_section" class="doctor-plugin-overview-section">
-      <div class="doctor-plugin-overview-heading"><h4>미설치 플러그인</h4><span id="plugin_catalog_visible_count" class="doctor-muted"></span></div>
+      <div class="doctor-plugin-overview-heading"><h4>미설치 플러그인</h4></div>
       <div id="plugin_catalog" class="doctor-plugin-grid"></div>
     </section>
   </div>
@@ -403,11 +404,9 @@ function pluginManagerRenderOverview() {
   $('#plugin_catalog_section').toggle(showCatalog);
   if (showInstalled) {
     pluginManagerRenderInstalledCards(installedVisible);
-    $('#plugin_installed_visible_count').text(installedVisible.length.toLocaleString() + '개');
   }
   if (showCatalog) {
     pluginManagerRenderCatalogCards(uninstalled);
-    $('#plugin_catalog_visible_count').text(uninstalled.length.toLocaleString() + '개');
   }
 }
 
