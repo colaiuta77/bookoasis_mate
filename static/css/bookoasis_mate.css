@@ -320,6 +320,8 @@ dialog.doctor-action-dialog::backdrop { background:rgba(0,0,0,.45); }
 .doctor-setting-tabs { margin-top:14px; }
 .doctor-setting-tabs .nav-link { padding:.7rem 1.1rem; }
 .doctor-setting-content { padding-top:2px; }
+.doctor-setting-content > .tab-pane { border:0; padding:0; }
+.doctor-file-editor-content > .tab-pane { border:0; padding:0; }
 .doctor-setting-database-pane { width:100%; max-width:1180px; margin-right:auto; }
 .doctor-section-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:14px; }
 .doctor-section-heading h4 { margin-bottom:4px; }
@@ -488,6 +490,9 @@ dialog.doctor-action-dialog::backdrop { background:rgba(0,0,0,.45); }
 .doctor-plugin-effective-paths > div { display:flex; flex-direction:column; gap:5px; padding:10px 12px; border:1px solid #dee2e6; border-radius:7px; background:#f8f9fa; }
 .doctor-plugin-tabs { margin-top:12px; }
 .doctor-plugin-content { padding:16px 0; }
+.doctor-plugin-content > .tab-pane,
+.doctor-manual-tab-content > .tab-pane,
+.doctor-local-tabs > .tab-pane { border:0; padding:0; }
 .doctor-plugin-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
 .doctor-plugin-catalog-editor { margin-bottom:14px; padding:16px 18px; }
 .doctor-plugin-catalog-editor summary { cursor:pointer; font-weight:700; }
@@ -500,7 +505,7 @@ dialog.doctor-action-dialog::backdrop { background:rgba(0,0,0,.45); }
 .doctor-plugin-summary-filter strong { font-size:1.05rem; }
 .doctor-plugin-overview-section { margin-top:18px; }
 .doctor-plugin-overview-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid #dee2e6; }
-.doctor-plugin-overview-heading h4 { margin:0; font-size:1rem; }
+.doctor-plugin-overview-heading h4 { margin:0; font-size:1.2rem; font-weight:700; color:#0d6efd; }
 .doctor-plugin-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px; }
 .doctor-plugin-card { display:flex; flex-direction:column; min-height:230px; padding:18px; }
 .doctor-plugin-card-head { display:flex; align-items:center; gap:12px; }
@@ -655,7 +660,7 @@ dialog.doctor-action-dialog::backdrop { background:rgba(0,0,0,.45); }
 .doctor-docker-safety { margin: 12px 0; }
 .doctor-docker-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin: 12px 0;
 }

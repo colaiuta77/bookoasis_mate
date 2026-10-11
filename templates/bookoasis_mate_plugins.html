@@ -5,16 +5,13 @@
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 <input id="plugin_bookoasis_url" type="hidden" value="{{ arg.get('bookoasis_url', '') }}">
 
-<div class="doctor-plugin-manager-head">
-  <div>
-    <h3>BookOasis 플러그인 관리</h3>
-    <p class="doctor-muted mb-0">검증된 카탈로그 또는 사용자가 지정한 GitHub·Gitea·ZIP 패키지를 BookOasis <code>plugins/metadata</code> 경로에 설치합니다.</p>
-  </div>
-</div>
-
-<div class="alert alert-warning doctor-plugin-security">
-  <strong>보안 주의.</strong> BookOasis 플러그인은 서버에서 실행되는 Python 코드입니다. GitHub·ZIP 직접 설치는 소유자와 소스를 신뢰할 수 있을 때만 진행하세요. 설치 후 BookOasis 재시작을 권장합니다.
-</div>
+<ul class="nav nav-pills bg-light shadow text-dark mb-3" role="tablist">
+  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_settings_tab" role="tab">설정</a></li>
+  <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#plugin_overview_tab" role="tab">플러그인</a></li>
+  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_github_tab" role="tab">저장소 설치</a></li>
+  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_zip_tab" role="tab">ZIP 설치</a></li>
+  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_history_tab" role="tab">작업 이력</a></li>
+</ul>
 
 <section class="doctor-card doctor-plugin-job" style="display:none">
   <div class="doctor-section-heading">
@@ -31,16 +28,12 @@
   <div id="plugin_job_logs" class="doctor-plugin-logs"></div>
 </section>
 
-<ul class="nav nav-tabs doctor-setting-tabs doctor-plugin-tabs" role="tablist">
-  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_settings_tab" role="tab">설정</a></li>
-  <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#plugin_overview_tab" role="tab">플러그인</a></li>
-  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_github_tab" role="tab">저장소 설치</a></li>
-  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_zip_tab" role="tab">ZIP 설치</a></li>
-  <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#plugin_history_tab" role="tab">작업 이력</a></li>
-</ul>
-
 <div class="tab-content doctor-plugin-content">
   <div id="plugin_settings_tab" class="tab-pane fade" role="tabpanel">
+    <p class="doctor-muted">검증된 카탈로그 또는 사용자가 지정한 GitHub·Gitea·ZIP 패키지를 BookOasis <code>plugins/metadata</code> 경로에 설치합니다.</p>
+    <div class="alert alert-warning doctor-plugin-security">
+      <strong>보안 주의.</strong> BookOasis 플러그인은 서버에서 실행되는 Python 코드입니다. GitHub·ZIP 직접 설치는 소유자와 소스를 신뢰할 수 있을 때만 진행하세요. 설치 후 BookOasis 재시작을 권장합니다.
+    </div>
     <div class="doctor-card doctor-plugin-settings">
       <div class="doctor-section-heading">
         <div><h4>설치 경로와 안전 제한</h4><p class="doctor-muted mb-0">두 컨테이너가 공유하는 FF 기준 경로를 입력합니다.</p></div>
@@ -108,7 +101,10 @@
 
   <div id="plugin_overview_tab" class="tab-pane fade show active" role="tabpanel">
     <div class="doctor-plugin-toolbar">
-      <p class="doctor-muted mb-0">설치된 플러그인과 설치 가능한 카탈로그를 한 화면에서 확인합니다.</p>
+      <div>
+        <div id="plugin_installed_status" class="doctor-query-status"></div>
+        <div id="plugin_catalog_status" class="doctor-query-status"></div>
+      </div>
       <div class="doctor-cleanup-actions">
         <button id="plugin_installed_update_refresh" type="button" class="btn btn-sm btn-outline-success">업데이트 확인</button>
         <button id="plugin_discovery_refresh" type="button" class="btn btn-sm btn-outline-primary">Topic 새로고침</button>
@@ -116,20 +112,18 @@
       </div>
     </div>
     <div class="doctor-plugin-overview-summary" role="group" aria-label="플러그인 현황 필터">
-      <button type="button" class="doctor-plugin-summary-filter active" data-plugin-filter="all" aria-pressed="true"><span>전체</span><strong id="plugin_overview_all_count">0</strong></button>
-      <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="enabled" aria-pressed="false"><span>활성화</span><strong id="plugin_overview_enabled_count">0</strong></button>
-      <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="disabled" aria-pressed="false"><span>비활성화</span><strong id="plugin_overview_disabled_count">0</strong></button>
-      <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="installed" aria-pressed="false"><span>설치됨</span><strong id="plugin_overview_installed_count">0</strong></button>
-      <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="uninstalled" aria-pressed="false"><span>미설치</span><strong id="plugin_overview_uninstalled_count">0</strong></button>
+      <button type="button" class="doctor-plugin-summary-filter active" data-plugin-filter="all" aria-pressed="true"><span><i class="fa fa-th-large fa-fw" aria-hidden="true"></i> 전체</span><strong id="plugin_overview_all_count">0</strong></button>
+      <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="enabled" aria-pressed="false"><span><i class="fa fa-check-circle fa-fw" aria-hidden="true"></i> 활성화</span><strong id="plugin_overview_enabled_count">0</strong></button>
+      <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="disabled" aria-pressed="false"><span><i class="fa fa-pause-circle fa-fw" aria-hidden="true"></i> 비활성화</span><strong id="plugin_overview_disabled_count">0</strong></button>
+      <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="installed" aria-pressed="false"><span><i class="fa fa-check-square-o fa-fw" aria-hidden="true"></i> 설치됨</span><strong id="plugin_overview_installed_count">0</strong></button>
+      <button type="button" class="doctor-plugin-summary-filter" data-plugin-filter="uninstalled" aria-pressed="false"><span><i class="fa fa-download fa-fw" aria-hidden="true"></i> 미설치</span><strong id="plugin_overview_uninstalled_count">0</strong></button>
     </div>
-    <div id="plugin_installed_status" class="doctor-query-status"></div>
-    <div id="plugin_catalog_status" class="doctor-query-status"></div>
     <section id="plugin_installed_section" class="doctor-plugin-overview-section">
-      <div class="doctor-plugin-overview-heading"><h4>설치된 플러그인</h4><span id="plugin_installed_visible_count" class="doctor-muted"></span></div>
+      <div class="doctor-plugin-overview-heading"><h4>설치된 플러그인</h4></div>
       <div id="plugin_installed" class="doctor-plugin-grid"></div>
     </section>
     <section id="plugin_catalog_section" class="doctor-plugin-overview-section">
-      <div class="doctor-plugin-overview-heading"><h4>미설치 플러그인</h4><span id="plugin_catalog_visible_count" class="doctor-muted"></span></div>
+      <div class="doctor-plugin-overview-heading"><h4>미설치 플러그인</h4></div>
       <div id="plugin_catalog" class="doctor-plugin-grid"></div>
     </section>
   </div>
@@ -410,11 +404,9 @@ function pluginManagerRenderOverview() {
   $('#plugin_catalog_section').toggle(showCatalog);
   if (showInstalled) {
     pluginManagerRenderInstalledCards(installedVisible);
-    $('#plugin_installed_visible_count').text(installedVisible.length.toLocaleString() + '개');
   }
   if (showCatalog) {
     pluginManagerRenderCatalogCards(uninstalled);
-    $('#plugin_catalog_visible_count').text(uninstalled.length.toLocaleString() + '개');
   }
 }
 
