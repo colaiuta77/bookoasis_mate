@@ -490,7 +490,7 @@ dialog.doctor-action-dialog::backdrop { background:rgba(0,0,0,.45); }
 .doctor-plugin-content { padding:16px 0; }
 .doctor-plugin-content > .tab-pane,
 .doctor-manual-tab-content > .tab-pane,
-.doctor-local-tabs > #local_watch_manual { border:0; padding:0; }
+.doctor-local-tabs > .tab-pane { border:0; padding:0; }
 .doctor-plugin-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
 .doctor-plugin-catalog-editor { margin-bottom:14px; padding:16px 18px; }
 .doctor-plugin-catalog-editor summary { cursor:pointer; font-weight:700; }
