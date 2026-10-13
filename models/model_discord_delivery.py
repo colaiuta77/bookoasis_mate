@@ -130,6 +130,11 @@ class ModelDiscordDelivery(ModelBase):
             session.query(cls).filter(cls.id == delivery_id).update({cls.payload: json.dumps(payload, ensure_ascii=False)})
 
     @classmethod
+    def is_sending(cls, delivery_id):
+        with delivery_session() as session:
+            return session.query(cls).filter(cls.id == delivery_id, cls.status == 'sending').first() is not None
+
+    @classmethod
     def complete(cls, delivery_id, message_id, now):
         with delivery_session() as session:
             session.query(cls).filter(cls.batch_id == delivery_id, cls.status == 'sending').update(
@@ -190,3 +195,21 @@ class ModelDiscordDelivery(ModelBase):
                     'failed': query.filter(cls.status == 'failed').count(),
                     'blocked': bool(target and target.blocked),
                     'last_error': (target.error if target and target.error else recent.error if recent else '')}
+
+    @classmethod
+    def record_health(cls, root_key, display_name, healthy, error_kind, destination, now):
+        key = cls.fingerprint(json.dumps(root_key, ensure_ascii=False))
+        with delivery_session() as session:
+            row = session.query(ModelDiscordHealth).filter_by(id=key).first()
+            changed = (not healthy) if row is None else bool(row.healthy) != bool(healthy)
+            if row is None:
+                row = ModelDiscordHealth(id=key)
+                session.add(row)
+            row.healthy = int(healthy)
+            if changed and destination:
+                session.add(cls(destination=destination, kind='health', status='pending',
+                    created_at=now, updated_at=now, due_at=now, attempts=0,
+                    snapshot=json.dumps({'display_name': display_name[:100], 'recovered': bool(healthy),
+                                         'error_kind': error_kind[:100]}, ensure_ascii=False)))
+                return True
+            return False

@@ -157,20 +157,35 @@
     <div id="gdrive_scan_vfs_candidates"></div>
   </div>
   </div>
-</form>
-
 <div id="gdrive_scan_basic_discord" class="doctor-section doctor-card">
   <h4>Discord 변경 요약 알림</h4>
-  <p class="doctor-muted">Mate 작업자가 버퍼 단위 처리를 마친 뒤 변경 수량·처리 결과·대상 보관함·실제 스캔 방식을 한 번만 요약해 전송합니다. 전송 실패는 Google Drive 스캔 결과에 영향을 주지 않습니다.</p>
+  <p class="doctor-muted">처리 결과를 DB 대기열에 보존하고 별도 작업자가 묶어 전송합니다. 알림 재전송은 스캔을 다시 실행하지 않습니다.</p>
+  <div class="row">
+    <div class="col-lg-6">{{ macros.setting_input_int('gdrive_scan_discord_batch_seconds', '알림 묶음(초)', value=arg.get('gdrive_scan_discord_batch_seconds', 60), desc=['기본 60초. 0이면 즉시 발송합니다.']) }}</div>
+    <div class="col-lg-6">{{ macros.setting_input_int('gdrive_scan_discord_max_wait_seconds', '최대 알림 대기(초)', value=arg.get('gdrive_scan_discord_max_wait_seconds', 180), desc=['기본 180초. 묶음 시간보다 작으면 묶음 시간을 적용합니다.']) }}</div>
+  </div>
   <div class="doctor-toolbar">
     <input type="password" class="form-control" id="gdrive_scan_discord_webhook_url" style="flex:1 1 560px" autocomplete="new-password" placeholder="https://discord.com/api/webhooks/...">
     <button type="button" class="btn btn-outline-primary" id="gdrive_scan_discord_save">저장</button>
     <button type="button" class="btn btn-outline-danger" id="gdrive_scan_discord_clear">삭제</button>
   </div>
   <small id="gdrive_scan_discord_status" class="form-text text-muted">{{ '웹훅이 설정되어 있습니다. 새 값을 입력하지 않으면 기존 값은 표시되지 않습니다.' if arg.get('gdrive_scan_discord_webhook_configured') else '웹훅 URL이 비어 있으면 Discord 알림을 사용하지 않습니다.' }}</small>
+  <div id="gdrive_scan_discord_queue" class="doctor-muted" aria-live="polite"></div>
 </div>
+</form>
 
 <script>
+function renderDiscordQueue(data) {
+  $('#gdrive_scan_discord_queue').text('알림 대기 ' + data.pending + '건 · 발송 실패 ' + data.failed + '건' +
+    (data.blocked ? ' · 웹훅 설정 확인 필요' : '') + (data.last_error ? ' · ' + data.last_error : ''));
+}
+renderDiscordQueue({{ arg.get('gdrive_scan_discord_queue', {'pending':0, 'failed':0, 'last_error':''})|tojson }});
+setInterval(function() {
+  if (document.hidden) return;
+  bookoasisMateAjax('gdrive_scan', 'discord_status', {}, function(ret) {
+    if (ret.ret === 'success') renderDiscordQueue(ret.data);
+  }, null, {global:false, silent:true});
+}, 10000);
 var gdriveScanDriveSources = {{ arg.get('gdrive_scan_drive_sources', [])|tojson }};
 var gdriveScanBuiltinRoots = {{ arg.get('gdrive_scan_builtin_root_rows', [])|tojson }};
 var gdriveScanBuiltinStates = {{ arg.get('gdrive_scan_builtin_states', [])|tojson }};

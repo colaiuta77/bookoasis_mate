@@ -10,7 +10,8 @@ from flask import jsonify, render_template
 
 from ..clients.bookoasis_client import BookOasisClient
 from ..services.gdrive_activity import GoogleDriveActivityClient
-from ..services.discord_notifier import DiscordWebhookError, DiscordWebhookNotifier
+from ..services.discord_notifier import DiscordWebhookNotifier
+from ..services.discord_delivery import DiscordDeliveryWorker
 from ..services.gdrive_changes import (
     GoogleDriveApiError,
     GoogleDriveChangesClient,
@@ -71,6 +72,8 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_retention_days": "30",
             "gdrive_scan_auto_cleanup": "True",
             "gdrive_scan_discord_webhook_url": "",
+            "gdrive_scan_discord_batch_seconds": "60",
+            "gdrive_scan_discord_max_wait_seconds": "180",
         }
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
@@ -85,6 +88,11 @@ class ModuleGDriveScan(PluginModuleBase):
         self._builtin_retry = {}
         self._scan_client = None
         self._scan_client_config = None
+        delivery_model = getattr(P, 'discord_delivery_model', None)
+        self._discord_worker = DiscordDeliveryWorker(delivery_model, self._settings) if delivery_model is not None else None
+        if self._discord_worker:
+            self._discord_worker.recover_results = lambda: self.model.flush_discord_completions() if self.model else None
+            self._discord_worker.discard_results = lambda destination: self.model.cancel_discord_completions(destination) if self.model else None
         self._worker_state = {
             "running": False,
             "last_started_at": None,
@@ -229,6 +237,10 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_discord_webhook_url": str(
                 model.get("gdrive_scan_discord_webhook_url") or ""
             ).strip(),
+            "gdrive_scan_discord_batch_seconds": self._as_int(model.get('gdrive_scan_discord_batch_seconds'), 60, 0, 86400),
+            "gdrive_scan_discord_max_wait_seconds": max(
+                self._as_int(model.get('gdrive_scan_discord_batch_seconds'), 60, 0, 86400),
+                self._as_int(model.get('gdrive_scan_discord_max_wait_seconds'), 180, 0, 86400)),
         }
 
     def process_menu(self, page, req):
@@ -261,6 +273,7 @@ class ModuleGDriveScan(PluginModuleBase):
             ]
         webhook_url = str(arg.pop("gdrive_scan_discord_webhook_url", "") or "")
         arg["gdrive_scan_discord_webhook_configured"] = bool(webhook_url.strip())
+        arg['gdrive_scan_discord_queue'] = self._discord_status()
         try:
             rclone_path, rclone_config_path = resolve_ff_rclone_settings(
                 getattr(F, "PluginManager", None),
@@ -399,7 +412,7 @@ class ModuleGDriveScan(PluginModuleBase):
             if command == "discord_webhook_save":
                 webhook_url = str(req.form.get("webhook_url") or "").strip()
                 DiscordWebhookNotifier(webhook_url)
-                P.ModelSetting.set("gdrive_scan_discord_webhook_url", webhook_url)
+                self._save_discord_webhook(webhook_url)
                 return jsonify(
                     {
                         "ret": "success",
@@ -410,7 +423,7 @@ class ModuleGDriveScan(PluginModuleBase):
                     }
                 )
             if command == "discord_webhook_clear":
-                P.ModelSetting.set("gdrive_scan_discord_webhook_url", "")
+                self._save_discord_webhook('')
                 return jsonify(
                     {
                         "ret": "success",
@@ -418,6 +431,8 @@ class ModuleGDriveScan(PluginModuleBase):
                         "data": {"configured": False},
                     }
                 )
+            if command == 'discord_status':
+                return jsonify({'ret': 'success', 'data': self._discord_status()})
             if command == "vfs_discover":
                 rules = parse_vfs_rules(req.form.get("rule", ""))
                 if len(rules) != 1:
@@ -865,6 +880,9 @@ class ModuleGDriveScan(PluginModuleBase):
                 break
             client.should_stop = self._stop_event.is_set
             key = (getattr(client, "state_remote", client.remote), client.root_id)
+            if (self.state_model.get(*key) or {}).get('status') == 'blocked':
+                waiting = True
+                continue
             failures, retry_at = self._builtin_retry.get(key, (0, 0))
             if now < retry_at:
                 waiting = True
@@ -879,7 +897,11 @@ class ModuleGDriveScan(PluginModuleBase):
             try:
                 accepted += watcher.poll_once()
                 self._builtin_retry.pop(key, None)
+                self._record_discord_health(key, index, True)
             except Exception as error:
+                if not isinstance(error, InterruptedError) and not self._stop_event.is_set():
+                    category = 'Google API 오류' if isinstance(error, GoogleDriveApiError) else '변경 수집 오류'
+                    self._record_discord_health(key, index, False, category)
                 P.logger.error(
                     "[BookOasisMate] Google API 연결 진단 "
                     + json.dumps(client.network_diagnostics(error), ensure_ascii=False)
@@ -900,6 +922,18 @@ class ModuleGDriveScan(PluginModuleBase):
             with self._worker_lock:
                 self._collector_state["last_error"] = ""
         return accepted
+
+    def _record_discord_health(self, key, index, healthy, error_kind=''):
+        if not self._discord_worker or self._stop_event.is_set():
+            return
+        try:
+            with self._discord_worker.lock:
+                destination = self._discord_worker.model.fingerprint(self._settings()['gdrive_scan_discord_webhook_url'])
+                self._discord_worker.model.record_health(key, f'감시 대상 {index}', healthy,
+                    error_kind, destination, datetime.now())
+            self._discord_worker.wake()
+        except Exception as error:
+            P.logger.warning(f'[BookOasisMate] 감지 상태 알림 저장 실패 ({type(error).__name__})')
 
     def _scan_callback(self, db_type, library_id, library_name):
         settings = self._settings()
@@ -1007,38 +1041,32 @@ class ModuleGDriveScan(PluginModuleBase):
             }
         try:
             max_attempts = settings["gdrive_scan_max_attempts"]
-            statuses = {}
             for event in events:
                 result = results.get(
                     int(event["id"]),
                     {"success": False, "message": "이벤트 처리 결과가 없습니다."},
                 )
-                if result.get("success"):
-                    self.model.finish(event["id"], result)
-                    statuses[int(event["id"])] = "completed"
-                else:
-                    statuses[int(event["id"])] = self.model.fail_or_retry(
-                        event,
-                        result.get("message"),
-                        max_attempts=max_attempts,
-                        result=result,
-                    )
-            try:
-                notify_events = [event for event in events if not (results.get(int(event["id"])) or {}).get("waiting")]
-                if notify_events and not self._stop_event.is_set():
-                    DiscordWebhookNotifier(
-                        settings["gdrive_scan_discord_webhook_url"]
-                    ).send_batch(notify_events, results, statuses)
-            except DiscordWebhookError as error:
-                P.logger.warning(
-                    "[BookOasisMate] Discord 변경 요약 전송 실패: "
-                    f"{error}"
-                )
-            except Exception as error:
-                P.logger.warning(
-                    "[BookOasisMate] Discord 변경 요약 전송 실패: "
-                    f"{type(error).__name__}"
-                )
+                # 설정 교체와 결과 등록만 잠그며 네트워크 발송은 이 잠금을 쓰지 않습니다.
+                with self._discord_worker.lock if self._discord_worker else self._worker_lock:
+                    notification_args = {}
+                    if self._discord_worker and not self._stop_event.is_set() and not result.get('waiting') and not result.get('cancelled'):
+                        destination = self._discord_worker.model.fingerprint(self._settings()['gdrive_scan_discord_webhook_url'])
+                        if destination:
+                            notification_args['notification'] = {'destination': destination}
+                    try:
+                        if result.get("success"):
+                            self.model.finish(event["id"], result, **notification_args)
+                        else:
+                            self.model.fail_or_retry(
+                                event, result.get("message"), max_attempts=max_attempts,
+                                result=result, **notification_args)
+                    except Exception:
+                        if not notification_args:
+                            raise
+                        self.model.defer_discord_completion(event, result, notification_args['notification'], max_attempts)
+                        P.logger.warning('[BookOasisMate] 스캔을 반복하지 않고 결과·알림 기록만 재시도합니다.')
+            if self._discord_worker:
+                self._discord_worker.wake()
             P.logger.info(
                 f"[BookOasisMate] Google Drive 변경 이벤트 {len(events)}건 처리를 마쳤습니다."
             )
@@ -1170,11 +1198,37 @@ class ModuleGDriveScan(PluginModuleBase):
         if self.item_model is not None:
             self.item_model.ensure_schema()
         self.start_worker()
+        if self._discord_worker:
+            self._discord_worker.start()
 
     def plugin_unload(self):
         self.stop_worker()
+        if self._discord_worker:
+            self._discord_worker.stop()
+
+    def _save_discord_webhook(self, url):
+        def save():
+            P.ModelSetting.set('gdrive_scan_discord_webhook_url', url)
+        if self._discord_worker:
+            self._discord_worker.change_destination(save)
+        else:
+            save()
+
+    def _discord_status(self):
+        if not self._discord_worker:
+            return {'pending': 0, 'failed': 0, 'blocked': False, 'last_error': '알림 대기열 모델을 사용할 수 없습니다.'}
+        try:
+            destination = self._discord_worker.model.fingerprint(self._settings()['gdrive_scan_discord_webhook_url'])
+            status = self._discord_worker.model.queue_status(destination)
+            if self._discord_worker.last_error:
+                status['last_error'] = self._discord_worker.last_error
+            return status
+        except Exception as error:
+            return {'pending': 0, 'failed': 0, 'blocked': False, 'last_error': f'대기열 조회 실패 ({type(error).__name__})'}
 
     def setting_save_after(self, change_list):
+        if self._discord_worker:
+            self._discord_worker.wake()
         keys = {
             "gdrive_scan_enabled",
             "gdrive_scan_input_mode",

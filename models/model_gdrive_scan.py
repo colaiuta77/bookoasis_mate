@@ -1,9 +1,20 @@
 # gd-poller 변경 이벤트와 BookOasis 스캔 처리 결과를 FlaskFarm DB에 영속 저장합니다.
 import json
 import posixpath
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 from ..setup import *
+
+
+@contextmanager
+def scan_result_transaction():
+    with F.app.app_context():
+        try:
+            yield
+        except Exception:
+            F.db.session.rollback()
+            raise
 
 
 class ScanEventBase(ModelBase):
@@ -96,6 +107,7 @@ class ScanEventBase(ModelBase):
             count = (
                 F.db.session.query(cls)
                 .filter(cls.status == "processing")
+                .filter(cls.result_json.is_(None) | ~cls.result_json.contains('"discord_completion":'))
                 .update(
                     {
                         cls.status: "retry",
@@ -175,15 +187,11 @@ class ScanEventBase(ModelBase):
         now = datetime.now()
         libraries = result.get("libraries") or []
         first_library = libraries[0] if libraries else {}
-        with F.app.app_context():
+        with scan_result_transaction():
             if notification:
-                try:
-                    entity = F.db.session.query(cls).filter(cls.id == int(event_id)).first()
-                    P.discord_delivery_model.enqueue_result(F.db.session, entity.to_dict(), result,
-                        'completed', notification['destination'], now)
-                except Exception:
-                    F.db.session.rollback()
-                    raise
+                entity = F.db.session.query(cls).filter(cls.id == int(event_id)).first()
+                P.discord_delivery_model.enqueue_result(F.db.session, entity.to_dict(), result,
+                    'completed', notification['destination'], now)
             (
                 F.db.session.query(cls)
                 .filter(cls.id == int(event_id))
@@ -202,11 +210,7 @@ class ScanEventBase(ModelBase):
                     synchronize_session=False,
                 )
             )
-            try:
-                F.db.session.commit()
-            except Exception:
-                F.db.session.rollback()
-                raise
+            F.db.session.commit()
 
     @classmethod
     def fail_or_retry(cls, event, message, max_attempts=3, result=None, notification=None):
@@ -241,14 +245,10 @@ class ScanEventBase(ModelBase):
         if result.get("waiting"):
             values[cls.attempts] = max(0, attempts - 1)
             values[cls.ready_at] = now + timedelta(seconds=max(5, min(int(result.get("retry_after") or 20), 300)))
-        with F.app.app_context():
+        with scan_result_transaction():
             if notification and terminal:
-                try:
-                    P.discord_delivery_model.enqueue_result(F.db.session, event, result,
-                        'failed', notification['destination'], now)
-                except Exception:
-                    F.db.session.rollback()
-                    raise
+                P.discord_delivery_model.enqueue_result(F.db.session, event, result,
+                    'failed', notification['destination'], now)
             if result:
                 values[cls.result_json] = cls._result_json_with_drive(event["id"], result)
             (
@@ -256,11 +256,7 @@ class ScanEventBase(ModelBase):
                 .filter(cls.id == int(event["id"]))
                 .update(values, synchronize_session=False)
             )
-            try:
-                F.db.session.commit()
-            except Exception:
-                F.db.session.rollback()
-                raise
+            F.db.session.commit()
         return "failed" if terminal else "retry"
 
     @classmethod
@@ -626,6 +622,46 @@ class ScanEventBase(ModelBase):
 
 class ModelGDriveScanEvent(ScanEventBase):
     __tablename__ = "gdrive_scan_event"
+
+    @classmethod
+    def defer_discord_completion(cls, event, result, notification, max_attempts):
+        # outbox 장애만으로 이미 실행한 스캔을 반복하지 않도록 결과 저장 의도를 같은 행에 보존합니다.
+        previous = dict(event.get('result') or {})
+        previous['discord_completion'] = {'result': result, 'notification': notification, 'max_attempts': max_attempts}
+        with scan_result_transaction():
+            F.db.session.query(cls).filter(cls.id == event['id']).update({
+                cls.status: 'processing', cls.result_json: json.dumps(previous, ensure_ascii=False),
+                cls.error: '스캔 결과 확인됨 · 알림 기록 재시도 대기', cls.updated_at: datetime.now()})
+            F.db.session.commit()
+
+    @classmethod
+    def flush_discord_completions(cls):
+        with F.app.app_context():
+            rows = F.db.session.query(cls).filter(cls.status == 'processing',
+                cls.result_json.contains('"discord_completion":')).order_by(cls.id).limit(100).all()
+            snapshots = [row.to_dict() for row in rows]
+        for event in snapshots:
+            pending = event['result']['discord_completion']
+            result = pending['result']
+            if result.get('success'):
+                cls.finish(event['id'], result, notification=pending['notification'])
+            else:
+                cls.fail_or_retry(event, result.get('message'), pending['max_attempts'],
+                                  result=result, notification=pending['notification'])
+        return len(snapshots)
+
+    @classmethod
+    def cancel_discord_completions(cls, destination):
+        with scan_result_transaction():
+            rows = F.db.session.query(cls).filter(cls.status == 'processing',
+                cls.result_json.contains('"discord_completion":')).all()
+            for row in rows:
+                result = json.loads(row.result_json)
+                pending = result['discord_completion']
+                if pending['notification'].get('destination') == destination:
+                    pending['notification'] = {}
+                    row.result_json = json.dumps(result, ensure_ascii=False)
+            F.db.session.commit()
 
 
 class ModelLocalFolderEvent(ScanEventBase):
