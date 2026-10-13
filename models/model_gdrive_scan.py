@@ -171,11 +171,19 @@ class ScanEventBase(ModelBase):
         return claimed
 
     @classmethod
-    def finish(cls, event_id, result):
+    def finish(cls, event_id, result, notification=None):
         now = datetime.now()
         libraries = result.get("libraries") or []
         first_library = libraries[0] if libraries else {}
         with F.app.app_context():
+            if notification:
+                try:
+                    entity = F.db.session.query(cls).filter(cls.id == int(event_id)).first()
+                    P.discord_delivery_model.enqueue_result(F.db.session, entity.to_dict(), result,
+                        'completed', notification['destination'], now)
+                except Exception:
+                    F.db.session.rollback()
+                    raise
             (
                 F.db.session.query(cls)
                 .filter(cls.id == int(event_id))
@@ -194,10 +202,14 @@ class ScanEventBase(ModelBase):
                     synchronize_session=False,
                 )
             )
-            F.db.session.commit()
+            try:
+                F.db.session.commit()
+            except Exception:
+                F.db.session.rollback()
+                raise
 
     @classmethod
-    def fail_or_retry(cls, event, message, max_attempts=3, result=None):
+    def fail_or_retry(cls, event, message, max_attempts=3, result=None, notification=None):
         attempts = int(event.get("attempts") or 0)
         max_attempts = max(1, min(int(max_attempts or 3), 20))
         result = result or {}
@@ -230,6 +242,13 @@ class ScanEventBase(ModelBase):
             values[cls.attempts] = max(0, attempts - 1)
             values[cls.ready_at] = now + timedelta(seconds=max(5, min(int(result.get("retry_after") or 20), 300)))
         with F.app.app_context():
+            if notification and terminal:
+                try:
+                    P.discord_delivery_model.enqueue_result(F.db.session, event, result,
+                        'failed', notification['destination'], now)
+                except Exception:
+                    F.db.session.rollback()
+                    raise
             if result:
                 values[cls.result_json] = cls._result_json_with_drive(event["id"], result)
             (
@@ -237,7 +256,11 @@ class ScanEventBase(ModelBase):
                 .filter(cls.id == int(event["id"]))
                 .update(values, synchronize_session=False)
             )
-            F.db.session.commit()
+            try:
+                F.db.session.commit()
+            except Exception:
+                F.db.session.rollback()
+                raise
         return "failed" if terminal else "retry"
 
     @classmethod

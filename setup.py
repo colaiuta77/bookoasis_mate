@@ -106,6 +106,14 @@ except Exception as error:
     P.logger.error(f"BookOasis Mate 변경 이벤트 모델을 초기화하지 못했습니다: {error}")
     P.logger.error(traceback.format_exc())
 
+P.discord_delivery_model = None
+try:
+    from .models.model_discord_delivery import ModelDiscordDelivery, ModelDiscordDestination, ModelDiscordHealth
+    P.discord_delivery_model = ModelDiscordDelivery
+except Exception as error:
+    P.logger.error(f"BookOasis Mate Discord 대기열 모델 초기화 실패: {type(error).__name__}")
+    P.logger.error(traceback.format_exc())
+
 P.library_statistics_model = None
 try:
     from .models.model_library_statistics import ModelLibraryStatisticsSnapshot
