@@ -1,5 +1,6 @@
 # gd-poller 변경 이벤트와 BookOasis 스캔 처리 결과를 FlaskFarm DB에 영속 저장합니다.
 import json
+import posixpath
 from datetime import datetime, timedelta
 
 from ..setup import *
@@ -109,11 +110,23 @@ class ScanEventBase(ModelBase):
             return int(count or 0)
 
     @classmethod
-    def claim_ready(cls, limit=500):
+    def claim_ready(cls, limit=500, quiet_seconds=0, max_wait_seconds=600):
         limit = max(1, min(int(limit or 500), 2000))
+        quiet_seconds = max(0, min(int(quiet_seconds or 0), 3600))
+        max_wait_seconds = max(quiet_seconds, min(int(max_wait_seconds or 600), 86400))
         now = datetime.now()
         claimed = []
         with F.app.app_context():
+            folder_updates = {}
+            if quiet_seconds:
+                recent = (F.db.session.query(cls.path, cls.removed_path, cls.created_at)
+                          .filter(cls.status.in_(("queued", "retry")))
+                          .filter(cls.created_at > now - timedelta(seconds=quiet_seconds)).all())
+                for path, previous, created in recent:
+                    for value in (path, previous):
+                        if value:
+                            folder = posixpath.dirname(value) or "/"
+                            folder_updates[folder] = max(folder_updates.get(folder, created), created)
             candidates = (
                 F.db.session.query(cls)
                 .filter(cls.status.in_(("queued", "retry")))
@@ -123,9 +136,17 @@ class ScanEventBase(ModelBase):
                 .all()
             )
             for entity in candidates:
+                if quiet_seconds and entity.status == "queued":
+                    latest = max([entity.created_at] + [folder_updates.get(posixpath.dirname(path) or "/", entity.created_at)
+                                 for path in (entity.path, entity.removed_path) if path])
+                    deadline = min(latest + timedelta(seconds=quiet_seconds),
+                                   entity.created_at + timedelta(seconds=max_wait_seconds))
+                    if deadline > now:
+                        entity.ready_at = deadline
+                        continue
                 snapshot = entity.to_dict()
                 attempt_result = {key: value for key, value in snapshot["result"].items()
-                                  if key in ("drive", "activity")}
+                                  if key in ("drive", "activity", "file_wait_started_at")}
                 attempt_result["processing_started_at"] = now.isoformat(timespec="milliseconds")
                 updated = (
                     F.db.session.query(cls)
@@ -180,8 +201,10 @@ class ScanEventBase(ModelBase):
         attempts = int(event.get("attempts") or 0)
         max_attempts = max(1, min(int(max_attempts or 3), 20))
         result = result or {}
+        if (event.get("result") or {}).get("file_wait_started_at"):
+            result = dict(result, file_wait_started_at=event["result"]["file_wait_started_at"])
         terminal = attempts >= max_attempts or result.get("outcome_unknown") or result.get("retryable") is False
-        if result.get("cancelled"):
+        if result.get("cancelled") or result.get("waiting"):
             terminal = False
         now = datetime.now()
         delay = min(300, max(5, 5 * (2 ** max(0, attempts - 1))))
@@ -203,6 +226,9 @@ class ScanEventBase(ModelBase):
         if result.get("cancelled"):
             values[cls.attempts] = max(0, attempts - 1)
             values[cls.ready_at] = now
+        if result.get("waiting"):
+            values[cls.attempts] = max(0, attempts - 1)
+            values[cls.ready_at] = now + timedelta(seconds=max(5, min(int(result.get("retry_after") or 20), 300)))
         with F.app.app_context():
             if result:
                 values[cls.result_json] = cls._result_json_with_drive(event["id"], result)
@@ -218,6 +244,12 @@ class ScanEventBase(ModelBase):
     def retry(cls, event_id):
         now = datetime.now()
         with F.app.app_context():
+            entity = F.db.session.query(cls).filter(cls.id == int(event_id)).filter(cls.status == "failed").first()
+            if entity is None:
+                return False
+            previous = entity.to_dict()["result"]
+            previous.pop("file_wait_started_at", None)
+            previous.pop("waiting", None)
             count = (
                 F.db.session.query(cls)
                 .filter(cls.id == int(event_id))
@@ -230,6 +262,7 @@ class ScanEventBase(ModelBase):
                         cls.completed_at: None,
                         cls.updated_at: now,
                         cls.error: "",
+                        cls.result_json: json.dumps(previous, ensure_ascii=False),
                     },
                     synchronize_session=False,
                 )
@@ -297,6 +330,11 @@ class ScanEventBase(ModelBase):
             try:
                 count = 0
                 for offset in range(0, len(event_ids), 500):
+                    for entity in F.db.session.query(cls).filter(cls.id.in_(event_ids[offset : offset + 500])).filter(cls.status == "failed"):
+                        previous = entity.to_dict()["result"]
+                        previous.pop("file_wait_started_at", None)
+                        previous.pop("waiting", None)
+                        entity.result_json = json.dumps(previous, ensure_ascii=False)
                     count += (
                         F.db.session.query(cls)
                         .filter(cls.id.in_(event_ids[offset : offset + 500]))

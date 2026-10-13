@@ -1,6 +1,9 @@
 # gd-poller 변경 이벤트를 BookOasis 보관함 스캔과 rclone VFS 갱신으로 변환합니다.
 import json
+import os
 import posixpath
+import stat
+import time
 from datetime import datetime
 from contextlib import closing
 from urllib.error import HTTPError, URLError
@@ -104,6 +107,8 @@ def parse_path_mappings(value):
         if "=>" not in line:
             raise ValueError(f"경로 매핑 형식이 올바르지 않습니다: {line}")
         source, target = [part.strip() for part in line.split("=>", 1)]
+        if not source or not target:
+            raise ValueError("경로 매핑의 양쪽 절대 경로를 모두 입력해 주세요. 루트는 /로 명시합니다.")
         source = normalize_event_path(source)
         target = normalize_event_path(target)
         mappings.append((source.rstrip("/") or "/", target.rstrip("/") or "/"))
@@ -116,7 +121,7 @@ def map_path(path, mappings):
         return ""
     for source, target in mappings:
         if normalized == source or normalized.startswith(f"{source.rstrip('/')}/"):
-            suffix = normalized[len(source) :]
+            suffix = normalized[len(source.rstrip('/')) :]
             return normalize_event_path(f"{target.rstrip('/')}{suffix}")
     return normalized
 
@@ -184,6 +189,8 @@ def parse_vfs_rules(value):
         parts = [part.strip() for part in line.split("|")]
         if len(parts) < 3:
             raise ValueError("VFS 규칙 형식이 올바르지 않습니다.")
+        if not parts[0]:
+            raise ValueError("VFS 규칙의 BookOasis 경로를 입력해 주세요. 루트는 /로 명시합니다.")
         local = normalize_event_path(parts[0]).rstrip("/") or "/"
         remote = normalize_event_path(parts[1]).rstrip("/") if parts[1] else ""
         endpoint, separator, vfs = parts[2].partition("#")
@@ -206,7 +213,7 @@ def parse_vfs_rules(value):
             host = f"{host}:{parsed.port}"
         endpoint = f"{parsed.scheme}://{host}{parsed.path.rstrip('/')}"
         vfs = vfs.strip()
-        if separator and vfs and not vfs.endswith(":"):
+        if separator and vfs and ":" not in vfs:
             vfs = f"{vfs}:"
         rules.append(
             {
@@ -233,7 +240,7 @@ def find_vfs_rule(path, rules):
 def to_remote_path(path, rule):
     normalized = normalize_event_path(path)
     local = rule["local"]
-    suffix = normalized[len(local) :]
+    suffix = normalized[len(local.rstrip('/')) :]
     remote = rule["remote"]
     if remote:
         return normalize_event_path(f"{remote.rstrip('/')}{suffix}")
@@ -478,6 +485,7 @@ class RcloneRcClient:
     def __init__(self, timeout=30, opener=None):
         self.timeout = max(1, min(int(timeout or 30), 300))
         self._opener = opener or urlopen
+        self.should_stop = lambda: False
 
     @staticmethod
     def _safe_error(error):
@@ -515,6 +523,8 @@ class RcloneRcClient:
             raise RuntimeError(self._safe_error(error)) from error
 
     def refresh(self, rule, local_path):
+        if self.should_stop():
+            raise InterruptedError("작업 중지")
         remote_path = to_remote_path(local_path, rule)
         response = self._request(
             rule,
@@ -543,6 +553,82 @@ class RcloneRcClient:
         key = "file" if item_type == "file" else "dir"
         return self._request(rule, "vfs/forget", {key: remote_path})
 
+    def execute_batch(self, rule, operation, items):
+        results = {}
+        for offset in range(0, len(items), 64):
+            if self.should_stop():
+                results.update({item: {"success": False, "message": "작업 중지"} for item in items[offset:]})
+                break
+            chunk = items[offset:offset + 64]
+            if len(chunk) == 1:
+                path, kind = chunk[0]
+                try:
+                    response = self.forget(rule, path, kind) if operation == "forget" else self.refresh(rule, path)
+                    results[chunk[0]] = {"success": True, "response": response}
+                except Exception as error:
+                    results[chunk[0]] = {"success": False, "message": str(error)}
+                continue
+            payload = {"recursive": "false"} if operation == "refresh" else {}
+            for index, (path, kind) in enumerate(chunk):
+                key = "file" if operation == "forget" and kind == "file" else "dir"
+                payload[f"{key}{index}"] = to_remote_path(path, rule).strip("/")
+            try:
+                response = self._request(rule, f"vfs/{operation}", payload)
+            except Exception as error:
+                cause = error.__cause__
+                timed_out = isinstance(cause, TimeoutError) or (isinstance(cause, URLError) and isinstance(cause.reason, TimeoutError))
+                if operation == "refresh" and timed_out:
+                    # 서버가 경로별로 순차 처리하므로 느린 묶음만 기존 단일 요청으로 나눕니다.
+                    for item in chunk:
+                        results.update(self.execute_batch(rule, operation, [item]))
+                    continue
+                results.update({item: {"success": False, "message": str(error)} for item in chunk})
+                continue
+            for item in chunk:
+                path, kind = item
+                if operation == "forget":
+                    success = isinstance(response.get("forgotten"), list)
+                    results[item] = {"success": success, "response": response,
+                                     "message": "" if success else "rclone VFS 삭제 경로 결과가 없습니다."}
+                    continue
+                remote = to_remote_path(path, rule).strip("/")
+                path_results = response.get("result")
+                value = path_results.get(remote) if isinstance(path_results, dict) else None
+                if value == "OK":
+                    results[item] = {"success": True, "response": {"result": {remote: value}}}
+                elif any(word in str(value).lower() for word in ("directory not found", "file does not exist", "no such file or directory")):
+                    # 기존 refresh의 규칙 루트 내 상위 폴더 재검사를 유지합니다.
+                    try:
+                        results[item] = {"success": True, "response": self.refresh(rule, path)}
+                    except Exception as error:
+                        results[item] = {"success": False, "message": str(error)}
+                else:
+                    results[item] = {"success": False, "message": f"rclone VFS 갱신 실패: {value or '경로별 결과 없음'}"}
+        return results
+
+    def discover(self, rule):
+        mounted = self._request(dict(rule, vfs=""), "vfs/list", {}).get("vfses")
+        if not isinstance(mounted, list) or not mounted:
+            raise ValueError("RC에 활성 VFS가 없습니다. mount 프로세스의 RC 주소를 확인해 주세요.")
+        parts = rule["local"].strip("/").split("/")
+        paths = list(dict.fromkeys([rule["remote"].strip("/")] + ["/".join(parts[i:]) for i in range(max(0, len(parts)-7), len(parts))] + [""]))
+        candidates, checked, failures = [], 0, 0
+        started = time.monotonic()
+        for vfs in mounted[:8]:
+            if not isinstance(vfs, str) or not vfs or any(char in vfs for char in "|#\r\n"):
+                continue
+            for remote in paths:
+                if checked >= 64 or time.monotonic() - started >= 20:
+                    return {"candidates": candidates, "checked": checked, "failures": failures, "limited": True}
+                checked += 1
+                try:
+                    response = self._request(dict(rule, vfs=vfs), "operations/stat", {"remote": remote})
+                    if (response.get("item") or {}).get("IsDir") is True:
+                        candidates.append({"vfs": vfs, "remote": remote})
+                except (RuntimeError, ValueError):
+                    failures += 1
+        return {"candidates": candidates, "checked": checked, "failures": failures, "limited": len(mounted) > 8}
+
 
 class GDriveScanProcessor:
     def __init__(
@@ -563,9 +649,12 @@ class GDriveScanProcessor:
         )
         self.logger = logger
         self.should_stop = should_stop or (lambda: False)
+        self.rc_client.should_stop = lambda: self.should_stop()
         builtin = self.settings.get("gdrive_scan_input_mode") == "builtin"
         # 자체 감지는 이미 BookOasis 경로를 전달하지만 VFS 사전 갱신은 동일하게 필요합니다.
         self.refresh_vfs = refresh_vfs and str(self.settings.get("gdrive_scan_vfs_enabled", True)).lower() == "true"
+        self.file_wait_seconds = int(self.settings.get("gdrive_scan_file_wait_seconds") or 0) if refresh_vfs else 0
+        self.file_check_mappings = parse_path_mappings(self.settings.get("gdrive_scan_file_check_mappings", "")) if self.file_wait_seconds else []
         self.path_mappings = parse_path_mappings(
             "" if builtin else self.settings.get("gdrive_scan_path_mappings", "")
         )
@@ -665,6 +754,42 @@ class GDriveScanProcessor:
         item["scan_targets"] = event_scan_targets(item, self.libraries)
         return item
 
+    def _file_wait_result(self, event):
+        if not self.file_wait_seconds:
+            return None
+        current, previous = event["mapped_path"], event["mapped_removed_path"]
+        checks = [(previous or current, False)] if event["action"] == "delete" else [(current, True)]
+        if event["action"] in {"move", "rename"} and previous and previous != current:
+            checks.append((previous, False))
+        message = ""
+        try:
+            for path, expected in checks:
+                mapping = next((pair for pair in self.file_check_mappings if path == pair[0] or path.startswith(pair[0].rstrip("/") + "/")), None)
+                if mapping is None:
+                    return {"success": False, "retryable": False, "message": "파일 확인용 BookOasis → FlaskFarm 경로 매핑이 없습니다."}
+                if not stat.S_ISDIR(os.stat(mapping[1]).st_mode):
+                    raise OSError("파일 확인 루트가 폴더가 아닙니다.")
+                try:
+                    info = os.stat(map_path(path, [mapping]))
+                    exists = True
+                except FileNotFoundError:
+                    exists = False
+                if exists != expected or (exists and expected and stat.S_ISDIR(info.st_mode) != (event["item_type"] == "directory")):
+                    message = "파일/폴더가 나타나기를 기다립니다." if expected else "이전 파일/폴더가 사라지기를 기다립니다."
+                    break
+        except OSError:
+            message = "파일 확인 경로에 접근할 수 없습니다. FlaskFarm 마운트와 권한을 확인해 주세요."
+        if not message:
+            return None
+        now = datetime.now()
+        started = (event.get("result") or {}).get("file_wait_started_at") or now.isoformat(timespec="milliseconds")
+        elapsed = (now - datetime.fromisoformat(started)).total_seconds()
+        waiting = elapsed < self.file_wait_seconds
+        return {"success": False, "waiting": waiting, "retryable": waiting,
+                "file_wait_started_at": started,
+                "retry_after": self.settings.get("gdrive_scan_file_check_seconds", 20),
+                "message": message if waiting else "파일 확인 제한 시간 초과. " + message}
+
     def process_batch(self, events):
         prepared = []
         results = {}
@@ -686,36 +811,40 @@ class GDriveScanProcessor:
 
         operation_results = {}
         operation_cache = {}
-        operations.sort(key=lambda item: item[1] != "forget")
+        groups = {}
         for event_id, operation, path, item_type in operations:
+            key = (operation, path, item_type)
+            rule = find_vfs_rule(path, self.vfs_rules)
+            if rule is None:
+                operation_cache[key] = {"success": False, "message": f"변경 경로에 일치하는 VFS 규칙이 없습니다: {path}"}
+            else:
+                group_key = (operation,) + tuple(rule[field] for field in ("local", "remote", "endpoint", "vfs", "username", "password"))
+                group = groups.setdefault(group_key, {"rule": rule, "items": {}})
+                group["items"][(path, item_type)] = None
+        for group_key, group in sorted(groups.items(), key=lambda pair: pair[0][0] != "forget"):
             if self.should_stop():
                 break
+            operation = group_key[0]
+            batch_results = self.rc_client.execute_batch(group["rule"], operation, list(group["items"]))
+            operation_cache.update({(operation,) + item: result for item, result in batch_results.items()})
+        for event_id, operation, path, item_type in operations:
             key = (operation, path, item_type)
-            if key not in operation_cache:
-                rule = find_vfs_rule(path, self.vfs_rules)
-                if rule is None:
-                    operation_cache[key] = {
-                        "success": False,
-                        "message": f"변경 경로에 일치하는 VFS 규칙이 없습니다: {path}",
-                    }
-                else:
-                    try:
-                        if operation == "forget":
-                            response = self.rc_client.forget(rule, path, item_type)
-                        else:
-                            response = self.rc_client.refresh(rule, path)
-                        operation_cache[key] = {
-                            "success": True,
-                            "response": response,
-                        }
-                    except Exception as error:
-                        operation_cache[key] = {
-                            "success": False,
-                            "message": str(error),
-                        }
             operation_results.setdefault(event_id, []).append({
-                **operation_cache[key], "operation": operation, "path": path,
+                **operation_cache.get(key, {"success": False, "message": "작업 중지"}), "operation": operation, "path": path,
             })
+
+        ready = []
+        for event in prepared:
+            event_id = int(event["id"])
+            vfs_results = operation_results.get(event_id, [])
+            wait_result = None
+            if not self.should_stop() and all(item.get("success") for item in vfs_results):
+                wait_result = self._file_wait_result(event)
+            if wait_result:
+                results[event_id] = dict(wait_result, libraries=event["libraries"], mapped_path=event["mapped_path"], vfs=vfs_results, scans=[])
+            else:
+                ready.append(event)
+        prepared = ready
 
         fallback_libraries = {
             (target["library"]["db_type"], target["library"]["id"])

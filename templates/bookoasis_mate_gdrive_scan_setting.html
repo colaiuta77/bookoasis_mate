@@ -101,7 +101,11 @@
   </div>
   </div>
   <div id="gdrive_scan_basic_settings">
-  {{ macros.setting_input_int('gdrive_scan_buffer_seconds', '이벤트 버퍼 시간(초)', value=arg['gdrive_scan_buffer_seconds'], desc=['기본 60초이며 같은 시간 구간의 동일 보관함 스캔 요청을 한 번으로 합칩니다.', '0이면 즉시 처리합니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_buffer_seconds', '폴더별 버퍼 시간(초)', value=arg['gdrive_scan_buffer_seconds'], desc=['같은 부모 폴더에 새 이벤트가 들어오면 대기를 연장합니다. 기본 60초, 0이면 즉시 처리합니다.', '같은 보관함의 겹치는 스캔 경로는 한 번으로 합칩니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_max_wait_seconds', '최대 버퍼 대기(초)', value=arg.get('gdrive_scan_max_wait_seconds', '600'), desc=['변경이 계속되는 폴더도 이벤트 수신 후 이 시간이 지나면 처리합니다. 기본 600초, 버퍼 시간보다 작으면 버퍼 시간을 적용합니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_file_wait_seconds', '파일 확인 대기(초)', value=arg.get('gdrive_scan_file_wait_seconds', '0'), desc=['0은 사용 안 함입니다. 사용 시 아래 FlaskFarm 경로 매핑이 필요합니다. 최초 파일 확인부터의 최대 대기시간입니다.', '추가·수정은 존재, 삭제는 부재, 이동·이름 변경은 새 경로 존재와 이전 경로 부재를 확인합니다. 파일 내용이나 업로드 완료까지 검증하지는 않습니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_file_check_seconds', '파일 확인 주기(초)', value=arg.get('gdrive_scan_file_check_seconds', '20'), desc=['5~300초. 대기 중에는 스캔을 요청하지 않으며 실패 재시도 횟수를 소모하지 않습니다.']) }}
+  {{ macros.setting_input_textarea('gdrive_scan_file_check_mappings', '파일 확인 경로 매핑', value=arg.get('gdrive_scan_file_check_mappings', ''), col='12', row='2', desc=['한 줄에 /BookOasis/경로 => /FlaskFarm에서/보이는/경로를 입력합니다. 경로가 같아도 명시적으로 입력합니다.', '예: /mnt/gds/GDRIVE => /host/mnt/gds/GDRIVE. 오른쪽 루트 폴더가 없거나 접근할 수 없으면 삭제 성공으로 판단하지 않고 기다립니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_worker_interval', '작업자 확인 주기(초)', value=arg['gdrive_scan_worker_interval'], desc=['대기 이벤트를 확인하는 주기입니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_max_attempts', '최대 처리 횟수', value=arg['gdrive_scan_max_attempts'], desc=['실패 시 지수형 대기 후 재시도하며 마지막 실패는 변경 이벤트 메뉴에서 다시 실행할 수 있습니다.']) }}
   {{ macros.setting_input_text('gdrive_scan_extensions', '대상 파일 확장자', value=arg['gdrive_scan_extensions'], desc=['쉼표로 구분합니다.', '도서·오디오북·비디오북·자막과 메타데이터 보조 파일 확장자를 기본값으로 제공합니다.']) }}
@@ -142,6 +146,16 @@
     value=arg.get('gdrive_scan_vfs_rules', ''), col='12', row='2',
     desc=['한 줄에 로컬경로|리모트경로|RC주소#VFS이름|사용자|비밀번호를 입력합니다. 인증이 없으면 마지막 두 필드를 생략합니다.',
           '자체 감지에도 필요합니다. 로컬경로는 BookOasis 경로이며 RC 주소는 FlaskFarm에서 접속 가능해야 합니다. rclone.conf의 리모트 이름만으로 RC 주소를 자동 결정할 수 없습니다.']) }}
+  <div class="doctor-section doctor-card">
+    <h4>VFS 경로 자동 감지</h4>
+    <p class="doctor-muted">위 규칙에 BookOasis 경로와 RC 주소·인증을 먼저 입력하세요. 활성 VFS와 경로 끝부분을 읽기 전용으로 검사합니다. 같은 이름의 폴더가 있을 수 있으므로 실제 VFS·경로를 확인한 뒤 선택하고 설정을 저장하세요.</p>
+    <div class="doctor-toolbar">
+      <select id="gdrive_scan_vfs_rule_select" class="form-control" aria-label="탐색할 VFS 규칙" style="flex:1 1 360px"></select>
+      <button type="button" class="btn btn-outline-primary" id="gdrive_scan_vfs_discover">후보 검사·미리보기</button>
+      <span id="gdrive_scan_vfs_discovery_status" class="doctor-query-status" role="status"></span>
+    </div>
+    <div id="gdrive_scan_vfs_candidates"></div>
+  </div>
   </div>
 </form>
 
@@ -558,5 +572,75 @@ $('#gdrive_scan_preview_btn').click(function() {
     }
   }, {global:false});
 });
+</script>
+<script>
+function gdriveScanInitVfsDiscovery() {
+  var rules = document.getElementById('gdrive_scan_vfs_rules');
+  var select = document.getElementById('gdrive_scan_vfs_rule_select');
+  var button = document.getElementById('gdrive_scan_vfs_discover');
+  var target = document.getElementById('gdrive_scan_vfs_candidates');
+  var status = document.getElementById('gdrive_scan_vfs_discovery_status');
+  function reset() {
+    target.textContent = '';
+    status.textContent = '';
+    var selected = select.value;
+    select.textContent = '';
+    rules.value.split(/\r?\n/).forEach(function(line, index) {
+      if (!line.trim() || line.trim().charAt(0) === '#') return;
+      var option = document.createElement('option');
+      option.value = String(index);
+      option.textContent = (index + 1) + ' · ' + line.split('|')[0];
+      select.appendChild(option);
+    });
+    if (Array.from(select.options).some(function(option) { return option.value === selected; })) select.value = selected;
+  }
+  rules.addEventListener('input', reset);
+  select.addEventListener('change', function() { target.textContent = ''; status.textContent = ''; });
+  button.addEventListener('click', function() {
+    var source = rules.value;
+    var index = select.value;
+    if (index === '') { notify('검사할 VFS 규칙을 입력해 주세요.', 'warning'); return; }
+    var lines = source.split(/\r?\n/);
+    target.textContent = '';
+    status.textContent = '읽기 전용 검사 중';
+    button.disabled = true;
+    bookoasisMateAjax('gdrive_scan', 'vfs_discover', {rule:lines[Number(index)]}, function(ret) {
+      if (rules.value !== source || select.value !== index) return;
+      var data = ret.data || {};
+      if (ret.ret !== 'success') { status.textContent = ret.msg || '검사 실패'; return; }
+      status.textContent = '검사 ' + (data.checked || 0) + '곳 · 후보 ' + (data.candidates || []).length + '개' +
+        (data.failures ? ' · 조회 실패 ' + data.failures + '곳' : '') + (data.limited ? ' · 검사 한도 도달' : '');
+      (data.candidates || []).forEach(function(candidate) {
+        var row = document.createElement('div');
+        row.className = 'doctor-toolbar';
+        var label = document.createElement('span');
+        label.textContent = candidate.vfs + ' · ' + (candidate.remote || '(VFS 루트)');
+        row.appendChild(label);
+        var apply = document.createElement('button');
+        apply.type = 'button';
+        apply.className = 'btn btn-sm btn-outline-primary';
+        apply.textContent = '이 후보 적용';
+        apply.addEventListener('click', function() {
+          if (rules.value !== source || select.value !== index) { reset(); return; }
+          if (!confirm('실제 마운트와 같은 경로인지 확인했습니까? 입력란에 적용하며, 설정 저장 전에는 운영에 반영되지 않습니다.')) return;
+          var parts = lines[Number(index)].split('|');
+          parts[1] = candidate.remote ? '/' + candidate.remote : '';
+          parts[2] = parts[2].split('#')[0] + '#' + candidate.vfs;
+          lines[Number(index)] = parts.join('|');
+          rules.value = lines.join('\n');
+          reset();
+          status.textContent = '후보를 입력란에 적용했습니다. 설정 저장으로 확정하세요.';
+        });
+        row.appendChild(apply);
+        target.appendChild(row);
+      });
+    }, function() {
+      button.disabled = false;
+      if (status.textContent === '읽기 전용 검사 중') status.textContent = '검사 실패';
+    }, {global:false});
+  });
+  reset();
+}
+gdriveScanInitVfsDiscovery();
 </script>
 {% endblock %}

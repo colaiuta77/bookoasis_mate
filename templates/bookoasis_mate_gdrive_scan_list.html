@@ -307,6 +307,7 @@ function renderGdriveEvents(data) {
   items.forEach(function(item) {
     var row = document.createElement('article');
     row.className = 'doctor-gdrive-row';
+    var waiting = item.status === 'retry' && (item.result || {}).waiting;
 
     var idColumn = document.createElement('div');
     idColumn.className = 'doctor-gdrive-id';
@@ -326,7 +327,7 @@ function renderGdriveEvents(data) {
     infoColumn.appendChild(bookoasisMateText(
       'span',
       'doctor-gdrive-status doctor-gdrive-status-' + (item.status || 'unknown'),
-      gdriveEventStatusLabel(item.status)
+      waiting ? '파일 확인 대기' : gdriveEventStatusLabel(item.status)
     ));
     infoColumn.appendChild(bookoasisMateText('span', 'doctor-muted', '시도 ' + (item.attempts || 0) + '회'));
     row.appendChild(infoColumn);
@@ -346,7 +347,7 @@ function renderGdriveEvents(data) {
       'doctor-gdrive-library'
     ));
     if (item.error) {
-      pathColumn.appendChild(bookoasisMateText('div', 'doctor-error doctor-gdrive-error', item.error));
+      pathColumn.appendChild(bookoasisMateText('div', (waiting ? 'doctor-muted' : 'doctor-error') + ' doctor-gdrive-error', item.error));
     }
     row.appendChild(pathColumn);
 

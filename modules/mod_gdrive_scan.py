@@ -26,8 +26,10 @@ from ..services.gdrive_changes import (
 from ..services.gdrive_scan import (
     BookOasisDatabaseError,
     GDriveScanProcessor,
+    RcloneRcClient,
     infer_path_prefix_replacement,
     parse_extensions,
+    parse_vfs_rules,
     replace_path_prefix,
     suggest_path_mapping,
     validate_event,
@@ -52,6 +54,10 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_rclone_path": "",
             "gdrive_scan_rclone_config_path": "",
             "gdrive_scan_buffer_seconds": "60",
+            "gdrive_scan_max_wait_seconds": "600",
+            "gdrive_scan_file_wait_seconds": "0",
+            "gdrive_scan_file_check_seconds": "20",
+            "gdrive_scan_file_check_mappings": "",
             "gdrive_scan_worker_interval": "2",
             "gdrive_scan_max_attempts": "3",
             "gdrive_scan_extensions": ".zip,.cbz,.epub,.pdf,.txt,.yaml,.xml,.json,.mp3,.m4b,.m4a,.flac,.aac,.wav,.ogg,.opus,.wma,.mp4,.mkv,.avi,.webm,.mov,.m4v,.ts,.smi,.srt,.vtt",
@@ -193,6 +199,10 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_worker_interval": self._as_int(
                 model.get("gdrive_scan_worker_interval"), 2, 1, 60
             ),
+            "gdrive_scan_max_wait_seconds": self._as_int(model.get("gdrive_scan_max_wait_seconds"), 600, 1, 86400),
+            "gdrive_scan_file_wait_seconds": self._as_int(model.get("gdrive_scan_file_wait_seconds"), 0, 0, 86400),
+            "gdrive_scan_file_check_seconds": self._as_int(model.get("gdrive_scan_file_check_seconds"), 20, 5, 300),
+            "gdrive_scan_file_check_mappings": model.get("gdrive_scan_file_check_mappings") or "",
             "gdrive_scan_max_attempts": self._as_int(
                 model.get("gdrive_scan_max_attempts"), 3, 1, 20
             ),
@@ -408,6 +418,18 @@ class ModuleGDriveScan(PluginModuleBase):
                         "data": {"configured": False},
                     }
                 )
+            if command == "vfs_discover":
+                rules = parse_vfs_rules(req.form.get("rule", ""))
+                if len(rules) != 1:
+                    raise ValueError("미리 볼 VFS 규칙을 하나 선택해 주세요.")
+                settings = self._settings()
+                processor = GDriveScanProcessor(settings, scan_callback=lambda *args: {}, refresh_vfs=False)
+                root = rules[0]["local"]
+                if not any(library["root"] == root or library["root"].startswith(root.rstrip("/") + "/")
+                           or root.startswith(library["root"].rstrip("/") + "/") for library in processor.libraries):
+                    raise ValueError("VFS 규칙의 로컬 경로가 BookOasis 보관함에 포함되지 않습니다.")
+                data = RcloneRcClient(timeout=min(5, settings["gdrive_scan_rc_timeout"])).discover(rules[0])
+                return jsonify({"ret": "success", "msg": "후보 검사를 마쳤습니다. 실제 경로를 확인한 뒤 선택해 주세요.", "data": data})
             if command == "path_preview":
                 settings = self._settings()
                 settings["gdrive_scan_path_mappings"] = req.form.get(
@@ -831,6 +853,10 @@ class ModuleGDriveScan(PluginModuleBase):
         errors = []
         waiting = False
         clients = self._builtin_clients(settings)
+        request_cache, credential_cache = {}, {}
+        for client in clients:
+            client.request_cache = request_cache
+            client.credential_cache = credential_cache
         with self._worker_lock:
             self._collector_state["root_count"] = len(clients)
         now = time.monotonic()
@@ -946,7 +972,8 @@ class ModuleGDriveScan(PluginModuleBase):
         settings = self._settings()
         if self._stop_event.is_set() or not settings["gdrive_scan_enabled"] or self.model is None:
             return 0
-        events = self.model.claim_ready(limit=500)
+        events = self.model.claim_ready(limit=500, quiet_seconds=settings.get("gdrive_scan_buffer_seconds", 60),
+                                        max_wait_seconds=settings.get("gdrive_scan_max_wait_seconds", 600))
         if not events:
             return 0
         with self._worker_lock:
@@ -997,10 +1024,11 @@ class ModuleGDriveScan(PluginModuleBase):
                         result=result,
                     )
             try:
-                if not self._stop_event.is_set():
+                notify_events = [event for event in events if not (results.get(int(event["id"])) or {}).get("waiting")]
+                if notify_events and not self._stop_event.is_set():
                     DiscordWebhookNotifier(
                         settings["gdrive_scan_discord_webhook_url"]
-                    ).send_batch(events, results, statuses)
+                    ).send_batch(notify_events, results, statuses)
             except DiscordWebhookError as error:
                 P.logger.warning(
                     "[BookOasisMate] Discord 변경 요약 전송 실패: "
@@ -1160,6 +1188,10 @@ class ModuleGDriveScan(PluginModuleBase):
             "gdrive_scan_rclone_path",
             "gdrive_scan_rclone_config_path",
             "gdrive_scan_buffer_seconds",
+            "gdrive_scan_max_wait_seconds",
+            "gdrive_scan_file_wait_seconds",
+            "gdrive_scan_file_check_seconds",
+            "gdrive_scan_file_check_mappings",
             "gdrive_scan_worker_interval",
             "gdrive_scan_max_attempts",
             "gdrive_scan_extensions",
