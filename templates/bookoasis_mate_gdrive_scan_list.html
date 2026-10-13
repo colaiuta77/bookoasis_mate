@@ -369,7 +369,14 @@ function renderGdriveEvents(data) {
     addTime('처리 완료', item.completed_at);
     var fallbackReasons = Array.from(new Set(scans.map(function(scan) { return scan.fallback_reason; }).filter(Boolean)));
     if (fallbackReasons.length) timeColumn.appendChild(bookoasisMateText('span', 'doctor-muted', '전체 스캔 전환 · ' + fallbackReasons.join(' · ')));
-    if (item.status === 'completed' && scans.some(function(scan) {
+    var verification = result.db_verification;
+    if (verification) {
+      var verificationLabels = {pending: '요청 접수 · DB 반영 확인 대기', confirmed: 'DB 경로 반영 확인', timeout: 'DB 반영 확인 시간 초과', unsupported: 'DB 반영 자동 확인 미지원'};
+      var verificationLine = bookoasisMateText('span', 'doctor-muted', verificationLabels[verification.state] || 'DB 반영 확인 불가');
+      verificationLine.title = verification.message || '';
+      timeColumn.appendChild(verificationLine);
+      if (verification.state === 'confirmed') addTime('반영 확인', verification.checked_at);
+    } else if (item.status === 'completed' && scans.some(function(scan) {
       return scan.success && (scan.mode !== 'admin_scan_path' || (scan.response || {}).cleanup_scope === 'library');
     })) {
       timeColumn.appendChild(bookoasisMateText('span', 'doctor-muted', '요청 접수 · 실제 스캔 완료 미확인'));

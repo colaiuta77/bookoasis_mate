@@ -200,6 +200,7 @@ class ScanEventBase(ModelBase):
                         cls.status: "completed",
                         cls.updated_at: now,
                         cls.completed_at: now,
+                        cls.ready_at: now + timedelta(seconds=20) if (result.get("db_verification") or {}).get("state") == "pending" else now,
                         cls.db_type: first_library.get("db_type"),
                         cls.library_id: first_library.get("id"),
                         cls.library_name: first_library.get("name"),
@@ -210,6 +211,35 @@ class ScanEventBase(ModelBase):
                     synchronize_session=False,
                 )
             )
+            F.db.session.commit()
+
+    @classmethod
+    def verification_candidates(cls, limit=20, now=None):
+        now = now or datetime.now()
+        with F.app.app_context():
+            # 완료 이벤트의 ready_at은 DB 확인 시각이며 스캔 claim_ready 대상이 아닙니다.
+            rows = F.db.session.query(cls).filter(
+                cls.status == "completed", cls.ready_at > cls.completed_at, cls.ready_at <= now,
+            ).order_by(cls.ready_at.asc(), cls.id.asc()).limit(limit).all()
+            return [row.to_dict() for row in rows]
+
+    @classmethod
+    def record_verification(cls, event_id, verification, now=None):
+        now = now or datetime.now()
+        with scan_result_transaction():
+            entity = F.db.session.query(cls).filter(cls.id == int(event_id), cls.status == "completed").first()
+            if entity is None:
+                return
+            result = entity.to_dict()["result"]
+            if (result.get("db_verification") or {}).get("state") != "pending":
+                return
+            previous = entity.result_json
+            result["db_verification"] = verification
+            F.db.session.query(cls).filter(cls.id == int(event_id), cls.status == "completed", cls.result_json == previous).update({
+                cls.result_json: json.dumps(result, ensure_ascii=False),
+                cls.ready_at: now + timedelta(seconds=20) if verification["state"] == "pending" else entity.completed_at,
+                cls.updated_at: now,
+            }, synchronize_session=False)
             F.db.session.commit()
 
     @classmethod

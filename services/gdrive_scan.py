@@ -737,6 +737,7 @@ class GDriveScanProcessor:
             if value
         ]
         matched = [find_library(value, self.libraries) for value in candidates]
+        item["verification_libraries"] = [library for library in matched if library]
         item["libraries"] = []
         seen = set()
         for library in matched:
@@ -1027,6 +1028,8 @@ class GDriveScanProcessor:
                 "retryable": all(item.get("response", {}).get("retryable", True) for item in failed_scans) and not (cancelled_scans and len(cancelled_scans) < len(event_scan_results)),
                 "message": "; ".join(messages) if messages else "변경 이벤트를 처리했습니다.",
                 "mapped_path": event.get("mapped_path"),
+                "mapped_removed_path": event.get("mapped_removed_path"),
+                "verification_libraries": event.get("verification_libraries"),
                 "libraries": event["libraries"],
                 "vfs": event_operation_results,
                 "scans": event_scan_results,

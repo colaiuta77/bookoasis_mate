@@ -12,6 +12,7 @@ from ..clients.bookoasis_client import BookOasisClient
 from ..services.gdrive_activity import GoogleDriveActivityClient
 from ..services.discord_notifier import DiscordWebhookNotifier
 from ..services.discord_delivery import DiscordDeliveryWorker
+from ..services.scan_verification import check_verification, start_verification
 from ..services.gdrive_changes import (
     GoogleDriveApiError,
     GoogleDriveChangesClient,
@@ -1002,14 +1003,29 @@ class ModuleGDriveScan(PluginModuleBase):
         )
         return response
 
+    def _verify_results(self, settings):
+        try:
+            candidates = self.model.verification_candidates(limit=20)
+            for event in candidates:
+                if self._stop_event.is_set():
+                    break
+                verification = check_verification(event["result"]["db_verification"], settings)
+                self.model.record_verification(event["id"], verification)
+            return len(candidates) == 20
+        except Exception:
+            P.logger.error("[BookOasisMate] DB 반영 확인 오류. 스캔 요청 처리는 계속합니다.")
+            P.logger.error(traceback.format_exc())
+        return False
+
     def _process_once(self):
         settings = self._settings()
         if self._stop_event.is_set() or not settings["gdrive_scan_enabled"] or self.model is None:
             return 0
+        verification_backlog = self._verify_results(settings)
         events = self.model.claim_ready(limit=500, quiet_seconds=settings.get("gdrive_scan_buffer_seconds", 60),
                                         max_wait_seconds=settings.get("gdrive_scan_max_wait_seconds", 600))
         if not events:
-            return 0
+            return int(verification_backlog)
         with self._worker_lock:
             self._worker_state["running"] = True
             self._worker_state["last_started_at"] = datetime.now().isoformat(
@@ -1055,6 +1071,7 @@ class ModuleGDriveScan(PluginModuleBase):
                             notification_args['notification'] = {'destination': destination}
                     try:
                         if result.get("success"):
+                            result["db_verification"] = start_verification(event, result)
                             self.model.finish(event["id"], result, **notification_args)
                         else:
                             self.model.fail_or_retry(
