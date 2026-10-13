@@ -1,7 +1,7 @@
 {# gd-poller 변경 감지와 rclone VFS·BookOasis 스캔 연동값을 설정합니다. #}
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=drive-settings-2">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=drive-settings-3">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 {{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['gdrive_scan_wake_btn', '작업자 깨우기'], ['gdrive_scan_stop_btn', '작업 중지']]) }}
@@ -65,18 +65,11 @@
       <strong>rclone.conf 권한 범위.</strong>
       Changes는 <code>drive.readonly</code>, Activity는 <code>drive.readonly,drive.activity.readonly</code>가 필요합니다. 권한을 추가하면 rclone 재인증과 Google Cloud의 Drive Activity API 활성화가 필요합니다. Activity는 바로가기의 실제 대상 폴더 ID를 입력하세요.
     </div>
-    <div class="gdrive-scan-poll-setting">
-      <label for="gdrive_scan_builtin_poll_seconds"><strong>변경 확인 주기(초)</strong></label>
-      <input type="number" class="form-control" id="gdrive_scan_builtin_poll_seconds" name="gdrive_scan_builtin_poll_seconds" min="15" max="3600" value="{{ arg.get('gdrive_scan_builtin_poll_seconds', '60') }}">
-      <small class="form-text text-muted">15~3600초 사이에서 Google Drive 변경 내역을 확인합니다.</small>
-    </div>
-    <div class="gdrive-scan-poll-settings">
-    <div class="gdrive-scan-poll-setting">
-      <label for="gdrive_scan_activity_delay_seconds"><strong>Activity 조회 지연(초)</strong></label>
-      <input type="number" class="form-control" id="gdrive_scan_activity_delay_seconds" name="gdrive_scan_activity_delay_seconds" min="0" max="3600" value="{{ arg.get('gdrive_scan_activity_delay_seconds', '60') }}">
-      <small class="form-text text-muted">기본 60초. 현재 시각에서 이 시간만큼 이전까지 Activity를 조회합니다. 늦게 공개되는 활동을 기다리는 설정이며, Changes 방식과 이벤트 처리 대기 시간에는 적용하지 않습니다.</small>
-    </div>
-    </div>
+    {{ macros.setting_input_int('gdrive_scan_builtin_poll_seconds', '변경 확인 주기(초)', value=arg.get('gdrive_scan_builtin_poll_seconds', '60'), min='15', max='3600', desc=['기본 60초. 15~3600초 사이에서 Google Drive 변경 내역을 확인합니다.']) }}
+    <details id="gdrive_scan_activity_advanced" class="gdrive-scan-advanced" style="display:none">
+      <summary>Activity 고급 설정</summary>
+      {{ macros.setting_input_int('gdrive_scan_activity_delay_seconds', 'Activity 조회 지연(초)', value=arg.get('gdrive_scan_activity_delay_seconds', '60'), min='0', max='3600', desc=['기본 60초. 현재 시각에서 이 시간만큼 이전까지 Activity를 조회합니다. 늦게 공개되는 활동을 기다리며 Changes 방식과 스캔 묶음 대기에는 적용하지 않습니다.']) }}
+    </details>
     <input type="hidden" id="gdrive_scan_builtin_roots" name="gdrive_scan_builtin_roots" value="[]">
     <div class="gdrive-scan-root-heading">
       <div>
@@ -101,20 +94,28 @@
   </div>
   </div>
   <div id="gdrive_scan_basic_settings">
-  {{ macros.setting_input_int('gdrive_scan_buffer_seconds', '폴더별 버퍼 시간(초)', value=arg['gdrive_scan_buffer_seconds'], desc=['같은 부모 폴더에 새 이벤트가 들어오면 대기를 연장합니다. 기본 60초, 0이면 즉시 처리합니다.', '같은 보관함의 겹치는 스캔 경로는 한 번으로 합칩니다.']) }}
-  {{ macros.setting_input_int('gdrive_scan_max_wait_seconds', '최대 버퍼 대기(초)', value=arg.get('gdrive_scan_max_wait_seconds', '600'), desc=['변경이 계속되는 폴더도 이벤트 수신 후 이 시간이 지나면 처리합니다. 기본 600초, 버퍼 시간보다 작으면 버퍼 시간을 적용합니다.']) }}
-  {{ macros.setting_input_int('gdrive_scan_file_wait_seconds', '파일 확인 대기(초)', value=arg.get('gdrive_scan_file_wait_seconds', '0'), desc=['0은 사용 안 함입니다. 사용 시 아래 FlaskFarm 경로 매핑이 필요합니다. 최초 파일 확인부터의 최대 대기시간입니다.', '추가·수정은 존재, 삭제는 부재, 이동·이름 변경은 새 경로 존재와 이전 경로 부재를 확인합니다. 파일 내용이나 업로드 완료까지 검증하지는 않습니다.']) }}
-  {{ macros.setting_input_int('gdrive_scan_file_check_seconds', '파일 확인 주기(초)', value=arg.get('gdrive_scan_file_check_seconds', '20'), desc=['5~300초. 대기 중에는 스캔을 요청하지 않으며 실패 재시도 횟수를 소모하지 않습니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_buffer_seconds', '스캔 묶음 대기(초)', value=arg['gdrive_scan_buffer_seconds'], desc=['같은 부모 폴더에 새 이벤트가 들어오면 대기를 연장합니다. 기본 60초, 0이면 즉시 처리합니다.', '같은 보관함의 겹치는 스캔 경로는 한 번으로 합칩니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_file_wait_seconds', '파일 반영 최대 대기(초)', value=arg.get('gdrive_scan_file_wait_seconds', '0'), desc=['0은 사용 안 함입니다. 사용 시 아래 FlaskFarm 경로 매핑이 필요합니다. 최초 파일 확인부터의 최대 대기시간입니다.', '추가·수정은 존재, 삭제는 부재, 이동·이름 변경은 새 경로 존재와 이전 경로 부재를 확인합니다. 파일 내용이나 업로드 완료까지 검증하지는 않습니다.']) }}
+  <div id="gdrive_scan_file_check_options" style="display:none">
   {{ macros.setting_input_textarea('gdrive_scan_file_check_mappings', '파일 확인 경로 매핑', value=arg.get('gdrive_scan_file_check_mappings', ''), col='12', row='2', desc=['한 줄에 /BookOasis/경로 => /FlaskFarm에서/보이는/경로를 입력합니다. 경로가 같아도 명시적으로 입력합니다.', '예: /mnt/gds/GDRIVE => /host/mnt/gds/GDRIVE. 오른쪽 루트 폴더가 없거나 접근할 수 없으면 삭제 성공으로 판단하지 않고 기다립니다.']) }}
-  {{ macros.setting_input_int('gdrive_scan_worker_interval', '작업자 확인 주기(초)', value=arg['gdrive_scan_worker_interval'], desc=['대기 이벤트를 확인하는 주기입니다.']) }}
-  {{ macros.setting_input_int('gdrive_scan_max_attempts', '최대 처리 횟수', value=arg['gdrive_scan_max_attempts'], desc=['실패 시 지수형 대기 후 재시도하며 마지막 실패는 변경 이벤트 메뉴에서 다시 실행할 수 있습니다.']) }}
+  </div>
+  <input type="hidden" id="gdrive_scan_worker_interval" name="gdrive_scan_worker_interval" value="{{ arg.get('gdrive_scan_worker_interval', '2') }}">
   {{ macros.setting_input_text('gdrive_scan_extensions', '대상 파일 확장자', value=arg['gdrive_scan_extensions'], desc=['쉼표로 구분합니다.', '도서·오디오북·비디오북·자막과 메타데이터 보조 파일 확장자를 기본값으로 제공합니다.']) }}
+  <details id="gdrive_scan_advanced_settings" class="gdrive-scan-advanced">
+  <summary>고급 설정 · 대기 한도, 재시도, 연결 제한, 이력 보관</summary>
+  <p class="doctor-muted">문제가 있을 때만 조정하세요. 접거나 숨겨도 기존 설정값은 유지됩니다.</p>
+  {{ macros.setting_input_int('gdrive_scan_max_wait_seconds', '최대 버퍼 대기(초)', value=arg.get('gdrive_scan_max_wait_seconds', '600'), desc=['변경이 계속되는 폴더도 이벤트 수신 후 이 시간이 지나면 처리합니다. 기본 600초, 스캔 묶음 대기보다 작으면 묶음 대기를 적용합니다.']) }}
+  <div id="gdrive_scan_file_check_advanced" style="display:none">
+  {{ macros.setting_input_int('gdrive_scan_file_check_seconds', '파일 확인 주기(초)', value=arg.get('gdrive_scan_file_check_seconds', '20'), desc=['기본 20초, 5~300초. 대기 중에는 스캔을 요청하지 않으며 실패 재시도 횟수를 소모하지 않습니다.']) }}
+  </div>
+  {{ macros.setting_input_int('gdrive_scan_max_attempts', '최대 처리 횟수', value=arg['gdrive_scan_max_attempts'], desc=['실패 시 지수형 대기 후 재시도하며 마지막 실패는 변경 이벤트 메뉴에서 다시 실행할 수 있습니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_rc_timeout', 'rclone 명령 제한 시간(초)', value=arg['gdrive_scan_rc_timeout'], desc=['리모트 목록·연결 정보 확인과 갱신 토큰 저장에 적용합니다. 1~300초, 기본값 30']) }}
   {{ macros.setting_input_int('gdrive_scan_changes_timeout', 'Google Drive Changes API 제한 시간(초)', value=arg.get('gdrive_scan_changes_timeout', '60'), desc=['변경 내역 HTTP 조회와 OAuth 토큰 갱신에 적용합니다. 1~300초, 기본값 60', '401은 refresh_token으로 액세스 토큰을 갱신·저장한 뒤 1회, 읽기 제한 시간은 1초 뒤 1회 재시도합니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_path_timeout', '개별 경로 스캔 제한 시간(초)', value=arg.get('gdrive_scan_path_timeout', '120'), desc=['동기식 경로 스캔에만 적용합니다. 10~600초, 기본값 120']) }}
   {{ macros.setting_input_int('gdrive_scan_history_limit', '목록 페이지 크기 상한', value=arg['gdrive_scan_history_limit'], desc=['화면에서 한 페이지에 요청할 수 있는 최대 이벤트 수입니다. 10~1000건']) }}
   {{ macros.setting_input_int('gdrive_scan_retention_days', 'DB 삭제 기간(일)', value=arg.get('gdrive_scan_retention_days', '30'), desc=['완료와 최종 실패 이벤트만 지정 기간이 지나면 삭제합니다.', '대기·재시도·처리 중 이벤트는 삭제하지 않습니다.']) }}
   {{ macros.setting_checkbox('gdrive_scan_auto_cleanup', 'DB 자동 삭제', value=arg.get('gdrive_scan_auto_cleanup', 'True'), desc=['On이면 작업자가 보존기간이 지난 종료 이벤트를 주기적으로 삭제합니다.']) }}
+  </details>
   </div>
 
   <div id="gdrive_scan_external_settings">
@@ -159,11 +160,15 @@
   </div>
 <div id="gdrive_scan_basic_discord" class="doctor-section doctor-card">
   <h4>Discord 변경 요약 알림</h4>
-  <p class="doctor-muted">처리 결과를 DB 대기열에 보존하고 별도 작업자가 묶어 전송합니다. 알림 재전송은 스캔을 다시 실행하지 않습니다.</p>
+  <p class="doctor-muted">처리 결과를 DB 대기열에 보존하고 별도 작업자가 묶어 전송합니다. 기본 60초 묶음·최대 180초 대기이며 고급 설정에서 조정할 수 있습니다. 알림 재전송은 스캔을 다시 실행하지 않습니다.</p>
+  <details class="gdrive-scan-advanced">
+  <summary>Discord 고급 설정 · 알림 묶음과 대기 한도</summary>
+  <p class="doctor-muted">기본 60초 묶음·최대 180초 대기입니다. 변경한 값은 상단 설정 저장으로 저장합니다.</p>
   <div class="row">
     <div class="col-lg-6">{{ macros.setting_input_int('gdrive_scan_discord_batch_seconds', '알림 묶음(초)', value=arg.get('gdrive_scan_discord_batch_seconds', 60), desc=['기본 60초. 0이면 즉시 발송합니다.']) }}</div>
     <div class="col-lg-6">{{ macros.setting_input_int('gdrive_scan_discord_max_wait_seconds', '최대 알림 대기(초)', value=arg.get('gdrive_scan_discord_max_wait_seconds', 180), desc=['기본 180초. 묶음 시간보다 작으면 묶음 시간을 적용합니다.']) }}</div>
   </div>
+  </details>
   <div class="doctor-toolbar">
     <input type="password" class="form-control" id="gdrive_scan_discord_webhook_url" style="flex:1 1 560px" autocomplete="new-password" placeholder="https://discord.com/api/webhooks/...">
     <button type="button" class="btn btn-outline-primary" id="gdrive_scan_discord_save">저장</button>
@@ -320,11 +325,12 @@ function gdriveScanAddRoot(row) {
   remove.type = 'button';
   remove.className = 'btn btn-outline-danger';
   remove.textContent = '삭제';
-  remove.addEventListener('click', function() { card.remove(); });
+  remove.addEventListener('click', function() { card.remove(); toggleGdriveOptionalSettings(); });
   removeWrap.appendChild(remove);
   grid.appendChild(removeWrap);
   card.appendChild(grid);
   document.getElementById('gdrive_scan_builtin_root_rows').appendChild(card);
+  toggleGdriveOptionalSettings();
 }
 
 function gdriveScanSerializeRoots() {
@@ -359,6 +365,18 @@ gdriveScanRenderStates(gdriveScanBuiltinStates);
 document.getElementById('gdrive_scan_builtin_add').addEventListener('click', function() { gdriveScanAddRoot({}); });
 
 var gdriveScanActiveSettingTab = 'basic';
+
+function toggleGdriveOptionalSettings() {
+  var fileWait = Number($('#gdrive_scan_file_wait_seconds').val()) > 0;
+  $('#gdrive_scan_file_check_options, #gdrive_scan_file_check_advanced').toggle(fileWait);
+  var activity = Array.from(document.querySelectorAll('.gdrive-scan-builtin-root [data-field="detection_mode"]')).some(function(input) {
+    return input.value === 'activity';
+  });
+  $('#gdrive_scan_activity_advanced').toggle(activity);
+}
+$('#gdrive_scan_file_wait_seconds').on('input change', toggleGdriveOptionalSettings);
+$('#gdrive_scan_builtin_root_rows').on('change', '[data-field="detection_mode"]', toggleGdriveOptionalSettings);
+toggleGdriveOptionalSettings();
 
 function gdriveScanShowSettingTab(tab) {
   gdriveScanActiveSettingTab = tab;
