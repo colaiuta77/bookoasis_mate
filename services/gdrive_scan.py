@@ -640,6 +640,7 @@ class GDriveScanProcessor:
         logger=None,
         should_stop=None,
         refresh_vfs=True,
+        reconciliation_callback=None,
     ):
         self.settings = dict(settings or {})
         self.scan_callback = scan_callback
@@ -649,6 +650,7 @@ class GDriveScanProcessor:
         )
         self.logger = logger
         self.should_stop = should_stop or (lambda: False)
+        self.reconciliation_callback = reconciliation_callback
         self.rc_client.should_stop = lambda: self.should_stop()
         builtin = self.settings.get("gdrive_scan_input_mode") == "builtin"
         # 자체 감지는 이미 BookOasis 경로를 전달하지만 VFS 사전 갱신은 동일하게 필요합니다.
@@ -775,6 +777,17 @@ class GDriveScanProcessor:
                     exists = True
                 except FileNotFoundError:
                     exists = False
+                if (exists and not expected and self.reconciliation_callback
+                        and stat.S_ISDIR(info.st_mode) == (event["item_type"] == "directory")):
+                    try:
+                        proof = self.reconciliation_callback(event, path)
+                        if proof:
+                            event["reconciliation"] = proof
+                            continue
+                    except Exception as error:
+                        event["reconciliation_error"] = {"type": type(error).__name__,
+                            "http_status": getattr(error, "status_code", None),
+                            "message": "현재 Drive 상태 조회 실패로 기존 파일 확인 대기를 유지합니다."}
                 if exists != expected or (exists and expected and stat.S_ISDIR(info.st_mode) != (event["item_type"] == "directory")):
                     message = "파일/폴더가 나타나기를 기다립니다." if expected else "이전 파일/폴더가 사라지기를 기다립니다."
                     break
@@ -842,7 +855,8 @@ class GDriveScanProcessor:
             if not self.should_stop() and all(item.get("success") for item in vfs_results):
                 wait_result = self._file_wait_result(event)
             if wait_result:
-                results[event_id] = dict(wait_result, libraries=event["libraries"], mapped_path=event["mapped_path"], vfs=vfs_results, scans=[])
+                results[event_id] = dict(wait_result, libraries=event["libraries"], mapped_path=event["mapped_path"], vfs=vfs_results, scans=[],
+                                        **{key: event[key] for key in ("reconciliation", "reconciliation_error") if key in event})
             else:
                 ready.append(event)
         prepared = ready
@@ -1005,6 +1019,7 @@ class GDriveScanProcessor:
                     "retryable": not submitted,
                     "message": "작업 중지로 미처리 항목을 재시도 대기로 반환했습니다." if not submitted else "작업 중지 전에 일부 스캔을 요청했습니다. 중복 요청 방지를 위해 결과를 확인한 뒤 수동 재시도해 주세요.",
                     "libraries": event["libraries"], "mapped_path": event.get("mapped_path"),
+                    **{key: event[key] for key in ("reconciliation", "reconciliation_error") if key in event},
                     "scans": event_scan_results,
                     "vfs": operation_results.get(event_id, []),
                 }
@@ -1027,6 +1042,7 @@ class GDriveScanProcessor:
                 "outcome_unknown": any(item.get("response", {}).get("outcome_unknown") for item in failed_scans),
                 "retryable": all(item.get("response", {}).get("retryable", True) for item in failed_scans) and not (cancelled_scans and len(cancelled_scans) < len(event_scan_results)),
                 "message": "; ".join(messages) if messages else "변경 이벤트를 처리했습니다.",
+                **{key: event[key] for key in ("reconciliation", "reconciliation_error") if key in event},
                 "mapped_path": event.get("mapped_path"),
                 "mapped_removed_path": event.get("mapped_removed_path"),
                 "verification_libraries": event.get("verification_libraries"),

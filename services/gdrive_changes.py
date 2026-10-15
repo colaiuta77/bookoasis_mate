@@ -517,6 +517,42 @@ class GoogleDriveChangesClient:
             {"fields": "id,name,mimeType,parents,trashed,modifiedTime,size,md5Checksum", "supportsAllDrives": "true"},
         )
 
+    def reconcile_path(self, path, original_id, item_type):
+        root = self.local_root.rstrip("/") or "/"
+        if not original_id or not (path == root or path.startswith(root.rstrip("/") + "/")):
+            return None
+        original = self.file(original_id)
+        if not original or original.get("id") != original_id or "trashed" not in original:
+            return None
+        relative = path[len(root.rstrip("/")):].lstrip("/")
+        remote_path = posixpath.join(self.remote_path, relative)
+        parent, name = posixpath.split(remote_path)
+        # --stat는 조회 루트의 ID를 생략할 수 있어 부모의 실제 항목을 비교합니다.
+        key = ("reconciliation_listing", self.config_path, self.remote, parent)
+        cache = self.request_cache if self.request_cache is not None else {}
+        if key not in cache:
+            cache[key] = self._run_json("lsjson", f"{self.remote}:{parent}")
+        entries = cache[key]
+        if not isinstance(entries, list):
+            return None
+        matches = [entry for entry in entries if entry.get("Name") == name]
+        if len(matches) != 1:
+            return None
+        current_id = str(matches[0].get("ID") or "")
+        if not current_id or matches[0].get("IsDir") != (item_type == "directory"):
+            return None
+        current = original if current_id == original_id else self.file(current_id)
+        if (not current or current.get("id") != current_id or current.get("trashed") is not False
+                or current.get("name") != name):
+            return None
+        return {
+            "state": "restored" if current_id == original_id else "replaced",
+            "path": path, "original_id": original_id, "current_id": current_id,
+            "original_trashed": original["trashed"],
+            "checked_at": datetime.now().isoformat(timespec="seconds"),
+            "message": "현재 Drive ID 상태를 확인해 삭제 부재 대기 대신 현재 폴더 스캔으로 전환했습니다.",
+        }
+
     def validate_root(self):
         root = self.file(self.root_id)
         if str(root.get("mimeType") or "") != GOOGLE_DRIVE_FOLDER_MIME:

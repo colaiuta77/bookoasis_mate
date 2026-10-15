@@ -834,6 +834,28 @@ class ModuleGDriveScan(PluginModuleBase):
     def _builtin_client(self, settings):
         return self._builtin_clients(settings)[0]
 
+    def _reconciliation_callback(self, settings):
+        if settings.get("gdrive_scan_input_mode") != "builtin":
+            return None
+        clients = None
+
+        def reconcile(event, path):
+            nonlocal clients
+            file_id = str(((event.get("result") or {}).get("drive") or {}).get("file_id") or "")
+            if not file_id:
+                return None
+            if clients is None:
+                clients = self._builtin_clients(settings)
+                requests, credentials = {}, {}
+                for client in clients:
+                    client.request_cache, client.credential_cache = requests, credentials
+                    client.should_stop = self._stop_event.is_set
+            client = next((item for item in clients
+                           if path == item.local_root or path.startswith(item.local_root.rstrip("/") + "/")), None)
+            return client.reconcile_path(path, file_id, event["item_type"]) if client else None
+
+        return reconcile
+
     def _poll_builtin_if_due(self, settings):
         with self._worker_lock:
             self._collector_state["enabled"] = bool(settings["gdrive_scan_enabled"] and settings["gdrive_scan_input_mode"] == "builtin")
@@ -1043,6 +1065,7 @@ class ModuleGDriveScan(PluginModuleBase):
                 path_scan_callback=self._path_scan_callback,
                 logger=P.logger,
                 should_stop=self._stop_event.is_set,
+                reconciliation_callback=self._reconciliation_callback(settings),
             )
             results = processor.process_batch(events)
         except Exception as error:

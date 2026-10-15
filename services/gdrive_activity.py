@@ -180,12 +180,21 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
             raise ValueError(reason)
         current = {"file_id": file_id, "path": new_path, "is_directory": item_type == "directory",
                    "parent_id": str(((data or {}).get("parents") or [""])[0])} if new_path else None
+        original_action, resolution = kind, ""
         if not new_path:
             kind = "delete"
+        elif kind == "delete":
+            kind = "move" if old_path and old_path != new_path else "restore"
+            resolution = "삭제 활동 이후 같은 Drive ID가 감시 경로에 존재하여 현재 상태 스캔으로 전환했습니다."
+        elif kind in {"move", "rename"} and old_path == new_path:
+            kind = "edit"
+            resolution = "현재 경로와 이전 경로가 같아 삭제 확인 대기 없이 현재 상태 스캔으로 전환했습니다."
         event = {"action": kind, "item_type": item_type, "path": new_path or old_path,
                  "removed_path": old_path if kind in {"move", "rename", "delete"} else "",
                  "drive": {"file_id": file_id, "name": str((data or {}).get("name") or target.get("title") or ""),
                            "action_detail": next(iter(detail.get("create") or {}), "") if "create" in detail else str((detail.get("delete") or detail.get("restore") or {}).get("type") or ""),
                            "occurred_at": change["receipt"]["parent_id"],
                            "mime_type": str((data or {}).get("mimeType") or target.get("mimeType") or "")}}
+        if resolution:
+            event["drive"].update(original_action=original_action, resolution=resolution)
         return current, event

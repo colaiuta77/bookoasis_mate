@@ -13,6 +13,8 @@ CHECK_TIMEOUT = 600
 def start_verification(event, result, now=None):
     now = now or datetime.now()
     unsupported = {"state": "unsupported", "message": "수정·폴더·보조 파일·오디오/비디오는 경로만으로 반영을 판정할 수 없습니다."}
+    if result.get("reconciliation"):
+        return dict(unsupported, message="현재 폴더 재동기화를 요청했습니다. 동일 경로의 ID·내용 교체 반영은 DB 경로만으로 판정하지 않습니다.")
     action = event.get("action")
     if event.get("item_type") != "file" or action not in {"create", "restore", "delete", "move", "rename"}:
         return unsupported

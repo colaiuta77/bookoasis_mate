@@ -334,11 +334,12 @@ function renderGdriveEvents(data) {
 
     var pathColumn = document.createElement('div');
     pathColumn.className = 'doctor-gdrive-paths';
-    pathColumn.appendChild(gdriveEventInfoLine('경로', item.path || '경로 확인 보류', 'doctor-path'));
+    var displayPath = item.action === 'delete' ? item.removed_path || item.path : item.path;
+    pathColumn.appendChild(gdriveEventInfoLine(item.action === 'delete' ? '삭제 경로' : '경로', displayPath || '경로 확인 보류', 'doctor-path'));
     if (!item.path && item.result && item.result.activity) {
       pathColumn.appendChild(gdriveEventInfoLine('파일', item.result.activity.title || item.result.activity.file_id, 'doctor-path'));
     }
-    if (item.removed_path) {
+    if ((item.action === 'move' || item.action === 'rename') && item.removed_path) {
       pathColumn.appendChild(gdriveEventInfoLine('이동 전', item.removed_path, 'doctor-path doctor-gdrive-previous'));
     }
     pathColumn.appendChild(gdriveEventInfoLine(
