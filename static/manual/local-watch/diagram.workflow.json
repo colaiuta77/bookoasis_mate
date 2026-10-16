@@ -1,0 +1,210 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "로컬 폴더 감지 · 기준 복원부터 스캔 요청까지",
+    "locale": "ko",
+    "quality_profile": "showcase",
+    "output": "static/manual/local-watch/diagram.html",
+    "repository": {
+      "url": "https://github.com/colaiuta77/bookoasis_mate.git",
+      "revision": "5690ec259b7243094ee7843c5e77f1b3e2c21797",
+      "link_mode": "local-only"
+    }
+  },
+  "lanes": [
+    {"id": "startup", "label": "시작·저장 기준"},
+    {"id": "detect", "label": "감지·안전 검사"},
+    {"id": "persist", "label": "이벤트·기준 저장"},
+    {"id": "scan", "label": "독립 스캔 작업자"}
+  ],
+  "mainPath": ["start", "validate", "baseline-mode", "watch-mode", "collect", "guard", "event-store", "worker"],
+  "nodes": [
+    {
+      "id": "start", "lane": "startup", "col": 0, "type": "frontend",
+      "label": "시작·재시작", "sublabel": "활성화 상태면 자동 재개",
+      "sources": [
+        {"path": "modules/mod_local_watch.py", "line": 76, "end_line": 87},
+        {"path": "models/model_gdrive_scan.py", "line": 104, "end_line": 122}
+      ]
+    },
+    {
+      "id": "validate", "lane": "startup", "col": 1, "type": "security",
+      "label": "설정·경로 검증", "sublabel": "중복 감시·범위 밖 거부",
+      "sources": [
+        {"path": "modules/mod_local_watch.py", "line": 56, "end_line": 74},
+        {"path": "services/local_folder_watch.py", "line": 19, "end_line": 44},
+        {"path": "modules/mod_local_watch.py", "line": 93, "end_line": 124}
+      ]
+    },
+    {
+      "id": "baseline-mode", "lane": "startup", "col": 2, "type": "database",
+      "label": "시작 기준 선택", "sublabel": "이어서 / 새 기준", "tag": "최초는 기준만",
+      "sources": [
+        {"path": "modules/mod_local_watch.py", "line": 285, "end_line": 289},
+        {"path": "services/local_folder_watch.py", "line": 60, "end_line": 87}
+      ]
+    },
+    {
+      "id": "watch-mode", "lane": "startup", "col": 3, "type": "backend",
+      "label": "감지 방식 준비", "sublabel": "실시간 / 폴링", "tag": "독립 Python 프로세스",
+      "sources": [
+        {"path": "modules/mod_local_watch.py", "line": 114, "end_line": 124},
+        {"path": "services/local_folder_watch.py", "line": 245, "end_line": 303}
+      ]
+    },
+    {
+      "id": "hold", "lane": "startup", "col": 5, "type": "security",
+      "label": "보류·기준 유지", "sublabel": "마운트·권한·설정 확인",
+      "sources": [
+        {"path": "services/local_folder_watch.py", "line": 77, "end_line": 82},
+        {"path": "services/local_folder_watch.py", "line": 335, "end_line": 344},
+        {"path": "modules/mod_local_watch.py", "line": 241, "end_line": 248}
+      ]
+    },
+    {
+      "id": "collect", "lane": "detect", "col": 3, "type": "backend",
+      "label": "파일·폴더 수집", "sublabel": "전체 / 변경 범위 비교",
+      "sources": [
+        {"path": "services/local_folder_watch.py", "line": 105, "end_line": 184},
+        {"path": "services/local_folder_watch.py", "line": 315, "end_line": 334}
+      ]
+    },
+    {
+      "id": "guard", "lane": "detect", "col": 4, "type": "security",
+      "label": "안전 검사·차이 대조", "sublabel": "생성·수정·삭제 판정", "tag": "이동 = 삭제 + 생성",
+      "sources": [
+        {"path": "services/local_folder_watch.py", "line": 116, "end_line": 123},
+        {"path": "services/local_folder_watch.py", "line": 185, "end_line": 205},
+        {"path": "services/local_folder_watch.py", "line": 225, "end_line": 228}
+      ]
+    },
+    {
+      "id": "watching", "lane": "persist", "col": 2, "type": "backend",
+      "label": "감시 중", "sublabel": "다음 주기·변경 신호 대기",
+      "sources": [{"path": "services/local_folder_watch.py", "line": 308, "end_line": 344}]
+    },
+    {
+      "id": "baseline-save", "lane": "persist", "col": 3, "type": "database",
+      "label": "기준 DB 갱신", "sublabel": "큐 확인 뒤 비교 기준 진행",
+      "sources": [
+        {"path": "services/local_folder_watch.py", "line": 89, "end_line": 103},
+        {"path": "services/local_folder_watch.py", "line": 206, "end_line": 222}
+      ]
+    },
+    {
+      "id": "ack", "lane": "persist", "col": 4, "type": "messagebus",
+      "label": "저장 확인 ok", "sublabel": "확인 없으면 기준 유지",
+      "sources": [
+        {"path": "modules/mod_local_watch.py", "line": 152, "end_line": 167},
+        {"path": "services/local_folder_watch.py", "line": 247, "end_line": 251}
+      ]
+    },
+    {
+      "id": "event-store", "lane": "persist", "col": 5, "type": "database",
+      "label": "로컬 이벤트 DB", "sublabel": "검증 후 commit", "tag": "대기열·재시도 보존",
+      "sources": [
+        {"path": "modules/mod_local_watch.py", "line": 152, "end_line": 167},
+        {"path": "models/model_gdrive_scan.py", "line": 94, "end_line": 101},
+        {"path": "models/model_gdrive_scan.py", "line": 697, "end_line": 698}
+      ]
+    },
+    {
+      "id": "confirm", "lane": "scan", "col": 0, "type": "external",
+      "label": "최종 상태 확인", "sublabel": "BookOasis에서 별도 확인",
+      "sources": [
+        {"path": "modules/mod_local_watch.py", "line": 259, "end_line": 267},
+        {"path": "clients/bookoasis_client.py", "line": 518, "end_line": 548}
+      ]
+    },
+    {
+      "id": "result", "lane": "scan", "col": 1, "type": "database",
+      "label": "처리 결과 저장", "sublabel": "성공 / 재시도 / 최종 실패",
+      "sources": [
+        {"path": "modules/mod_local_watch.py", "line": 259, "end_line": 267},
+        {"path": "models/model_gdrive_scan.py", "line": 186, "end_line": 214},
+        {"path": "models/model_gdrive_scan.py", "line": 246, "end_line": 290}
+      ]
+    },
+    {
+      "id": "api", "lane": "scan", "col": 2, "type": "cloud",
+      "label": "BookOasis API", "sublabel": "관리자 우선·웹훅 대체", "tag": "force=False",
+      "sources": [
+        {"path": "modules/mod_local_watch.py", "line": 188, "end_line": 219},
+        {"path": "clients/bookoasis_client.py", "line": 316, "end_line": 367},
+        {"path": "clients/bookoasis_client.py", "line": 554, "end_line": 600}
+      ]
+    },
+    {
+      "id": "processor", "lane": "scan", "col": 3, "type": "backend",
+      "label": "공통 스캔 처리", "sublabel": "보관함 매칭·중복 경로 통합", "tag": "로컬은 VFS 갱신 안 함",
+      "sources": [
+        {"path": "modules/mod_local_watch.py", "line": 252, "end_line": 259},
+        {"path": "services/gdrive_scan.py", "line": 730, "end_line": 758},
+        {"path": "services/gdrive_scan.py", "line": 864, "end_line": 923}
+      ]
+    },
+    {
+      "id": "worker", "lane": "scan", "col": 5, "type": "backend",
+      "label": "대기열 처리", "sublabel": "감시 정상인 루트만 실행", "tag": "최대 100건씩",
+      "sources": [
+        {"path": "modules/mod_local_watch.py", "line": 221, "end_line": 258},
+        {"path": "models/model_gdrive_scan.py", "line": 125, "end_line": 183}
+      ]
+    }
+  ],
+  "edges": [
+    {"from": "start", "to": "validate", "variant": "emphasis"},
+    {"from": "validate", "to": "baseline-mode", "variant": "emphasis"},
+    {"from": "baseline-mode", "to": "watch-mode", "label": "복원 / 새 기준", "variant": "emphasis"},
+    {"from": "watch-mode", "to": "collect", "variant": "emphasis"},
+    {"from": "collect", "to": "guard", "variant": "emphasis"},
+    {"from": "guard", "to": "baseline-save", "label": "최초·새 기준 / 변경 없음", "role": "branch", "toSide": "top"},
+    {"from": "guard", "to": "hold", "label": "안전 확인 실패", "variant": "security", "role": "error"},
+    {"from": "guard", "to": "event-store", "label": "기존 기준과 차이 있음", "variant": "emphasis"},
+    {"from": "event-store", "to": "ack", "label": "저장 성공", "variant": "emphasis"},
+    {"from": "ack", "to": "baseline-save", "variant": "emphasis", "toSide": "right"},
+    {"from": "baseline-save", "to": "watching", "variant": "emphasis"},
+    {"from": "watching", "to": "collect", "label": "다음 비교", "role": "return"},
+    {"from": "event-store", "to": "worker", "label": "대기 시각 경과", "variant": "dashed", "role": "async"},
+    {"from": "worker", "to": "processor", "variant": "emphasis"},
+    {"from": "processor", "to": "api", "label": "경로 / 보관함", "variant": "emphasis"},
+    {"from": "api", "to": "result", "label": "응답 기록", "variant": "emphasis"},
+    {"from": "result", "to": "confirm", "label": "최종 완료와 구분"}
+  ],
+  "cards": [
+    {
+      "dot": "cyan", "title": "이어서 시작과 새 기준",
+      "items": [
+        "이어서 시작은 저장된 기준을 불러와 첫 전체 비교에서 중지 중 변경도 수집합니다. 감지가 활성화된 채 FlaskFarm이 재시작하면 이 방식으로 재개하고 processing 이벤트는 retry로 복구합니다.",
+        "최초 실행 또는 새 기준으로 시작은 전체 수집에 성공해야 기준을 저장합니다. 기존 파일의 생성 이벤트는 만들지 않으며, 새 기준 선택도 이미 저장된 이벤트 큐를 지우지 않습니다.",
+        "기준은 Mate SQLite DB 옆 bookoasis_mate_local_baseline.db에 저장합니다. 경로 매핑·제외 패턴·확장자가 다르거나 루트 식별 정보가 바뀌면 이어서 시작을 보류합니다."
+      ]
+    },
+    {
+      "dot": "amber", "title": "실시간·폴링과 보호 조건",
+      "items": [
+        "자동 모드는 지원 로컬 파일시스템에서 watchdog 실시간 감지를 사용하고 그 외에는 폴링합니다. 실시간은 최초 전체 비교 뒤 변경 범위만 비교하며 1시간마다 또는 대기 경로 1만 개 초과 시 전체 비교합니다. 폴링은 매 주기 전체 비교합니다.",
+        "제외 패턴·확장자로 수집 대상을 제한하며 .bookoasisignore는 포함하고 심볼릭 링크는 따라가지 않습니다. 조회 오류·루트 변경·빈 트리 의심·대량 삭제·감시 한도 초과 때는 이전 기준을 유지합니다.",
+        "삭제가 100개 이상이거나, 20개 이상이면서 기준의 20% 이상이면 보류합니다. 한 번의 변경이 1만 건을 넘는 경우도 보류합니다. 정상 변경임을 확인한 뒤 필요하면 수동 스캔과 새 기준 시작을 사용합니다."
+      ]
+    },
+    {
+      "dot": "emerald", "title": "이벤트 저장과 기준 갱신은 별개",
+      "items": [
+        "감지 프로세스는 BookOasis 경로로 변환한 이벤트를 부모 프로세스에 보냅니다. 부모가 범위를 검증하고 로컬 이벤트 DB에 commit한 후 ok를 돌려줘야 감지 프로세스가 기준 DB를 갱신합니다.",
+        "스캔 작업자는 별도로 큐를 읽습니다. 기준 갱신은 스캔 완료를 기다리지 않으며, 큐 저장 후 기준 갱신 전에 종료되면 같은 변경이 재전달될 수 있습니다.",
+        "중지는 감지 프로세스를 종료하고 현재 BookOasis API 응답 이후 다음 요청부터 멈춥니다. 저장된 대기·재시도 이벤트는 유지하며 완료·최종 실패 기록의 보관 정리와 기준 DB는 서로 독립적입니다."
+      ]
+    },
+    {
+      "dot": "violet", "title": "스캔 범위와 결과 해석",
+      "items": [
+        "GDriveScanProcessor를 재사용하되 refresh_vfs=False로 실행합니다. 로컬 감지는 rclone VFS를 갱신하지 않으며, FUSE 캐시에 보이지 않는 변경을 발견하거나 캐시를 강제로 최신화하지 않습니다.",
+        "가장 긴 보관함 루트에 매칭하고 겹친 디렉터리 요청을 합칩니다. 부분 경로가 있으면 부분 스캔, 보관함 루트 변경은 보관함 스캔을 요청합니다. 삭제 경로가 없다는 응답일 때만 안전 조건에 따라 상위 범위로 넓힙니다.",
+        "관리자 API를 우선 사용하며 미설정·미지원 시 가능한 웹훅으로 대체합니다. 다중 루트 절대 경로 부분 스캔을 지원하지 않으면 전체 스캔으로 자동 전환하지 않습니다. 성공 응답은 completed, 오류는 조건에 따라 retry 또는 failed로 기록합니다.",
+        "completed는 Mate의 API 처리 결과입니다. 웹훅 접수와 관리자 부분 스캔 응답은 반환 방식이 다르며, 로컬 작업자는 최종 DB 반영이나 전체 스캔 완료를 따로 추적하지 않습니다. 최종 상태는 BookOasis에서 확인하세요. 이 도식은 실시간 운영 상태가 아닌 소스 기반 안내입니다."
+      ]
+    }
+  ]
+}

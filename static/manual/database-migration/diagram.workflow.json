@@ -1,0 +1,171 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "통DB 이관 · 엔진별 실행과 복구",
+    "locale": "ko",
+    "quality_profile": "showcase",
+    "output": "static/manual/database-migration/diagram.html",
+    "repository": {
+      "url": "https://github.com/colaiuta77/bookoasis_mate.git",
+      "revision": "5690ec259b7243094ee7843c5e77f1b3e2c21797",
+      "link_mode": "local-only"
+    }
+  },
+  "lanes": [
+    { "id": "selection", "label": "설정" },
+    { "id": "kavita", "label": "Kavita 이관" },
+    { "id": "sqlite", "label": "SQLite 복원" },
+    { "id": "mariadb", "label": "MariaDB 복원" },
+    { "id": "export", "label": "패키지 내보내기" }
+  ],
+  "phases": [
+    { "id": "prepare", "label": "원본 선택 · 검사", "fromCol": 0, "toCol": 1 },
+    { "id": "trial", "label": "시험 · 사용자 확인", "fromCol": 2, "toCol": 3, "variant": "security" },
+    { "id": "apply", "label": "독립 작업자 · 결과", "fromCol": 4, "toCol": 5, "variant": "emphasis" }
+  ],
+  "mainPath": ["choose", "sqlite-inspect", "sqlite-dry", "sqlite-gate", "sqlite-apply", "sqlite-result"],
+  "nodes": [
+    {
+      "id": "choose", "lane": "selection", "col": 0, "type": "frontend",
+      "label": "원본·작업 선택", "sublabel": "경로·대상 엔진·작업 폴더",
+      "sources": [{ "path": "services/mate_service.py", "line": 4308, "end_line": 4393 }, { "path": "modules/mod_database_migration.py", "line": 43, "end_line": 92 }]
+    },
+    {
+      "id": "kavita-inspect", "lane": "kavita", "col": 1, "type": "backend",
+      "label": "DB 검사·매핑 확인", "sublabel": "kavita.db · 경로·기존 사용자",
+      "sources": [{ "path": "services/mate_service.py", "line": 4428, "end_line": 4459 }, { "path": "services/kavita_migration.py", "line": 843, "end_line": 927 }]
+    },
+    {
+      "id": "kavita-dry", "lane": "kavita", "col": 2, "type": "backend",
+      "label": "Dry Run", "sublabel": "신규·갱신·중복·진행률 집계", "tag": "표지 변환·쓰기 없음",
+      "sources": [{ "path": "services/kavita_migration.py", "line": 1049, "end_line": 1130 }, { "path": "workers/database_migration_worker.py", "line": 189, "end_line": 218 }]
+    },
+    {
+      "id": "kavita-gate", "lane": "kavita", "col": 3, "type": "security",
+      "label": "수동 확인 후 시작", "sublabel": "백업·쓰기 중지 → 별도 작업자", "tag": "사용자 확인 절차",
+      "sources": [{ "path": "templates/bookoasis_mate_database_migration_manual.html", "line": 27, "end_line": 33 }, { "path": "services/mate_service.py", "line": 4616, "end_line": 4677 }, { "path": "workers/database_migration_worker.py", "line": 189, "end_line": 218 }]
+    },
+    {
+      "id": "kavita-apply", "lane": "kavita", "col": 4, "type": "database",
+      "label": "신규 생성·기존 갱신", "sublabel": "일반·성인 / SQLite·MariaDB", "tag": "표지 준비 → DB → 표지 → commit",
+      "sources": [{ "path": "services/mate_service.py", "line": 4395, "end_line": 4412 }, { "path": "services/kavita_migration.py", "line": 1132, "end_line": 1205 }, { "path": "services/kavita_migration.py", "line": 1300, "end_line": 1502 }]
+    },
+    {
+      "id": "kavita-result", "lane": "kavita", "col": 5, "type": "backend",
+      "label": "결과 / 실패 복구", "sublabel": "예외 시 DB rollback·표지 복원",
+      "sources": [{ "path": "services/kavita_migration.py", "line": 1502, "end_line": 1529 }, { "path": "workers/database_migration_worker.py", "line": 114, "end_line": 155 }]
+    },
+    {
+      "id": "sqlite-inspect", "lane": "sqlite", "col": 1, "type": "backend",
+      "label": "DB·표지 패키지 검사", "sublabel": "일반·성인 필수 / 같은 엔진",
+      "sources": [{ "path": "services/bookoasis_package_import.py", "line": 595, "end_line": 655 }, { "path": "services/bookoasis_package_import.py", "line": 943, "end_line": 1013 }, { "path": "services/bookoasis_package_import.py", "line": 1078, "end_line": 1113 }]
+    },
+    {
+      "id": "sqlite-dry", "lane": "sqlite", "col": 2, "type": "backend",
+      "label": "임시 DB·표지 Dry Run", "sublabel": "압축·경로 변환·무결성 검사", "tag": "대상 교체 없음",
+      "sources": [{ "path": "services/bookoasis_package_import.py", "line": 1535, "end_line": 1587 }, { "path": "services/bookoasis_package_import.py", "line": 658, "end_line": 697 }]
+    },
+    {
+      "id": "sqlite-gate", "lane": "sqlite", "col": 3, "type": "security",
+      "label": "중지 확인 후 시작", "sublabel": "healthy 차단 → 별도 작업자", "tag": "백업·쓰기 중지는 사용자 책임",
+      "sources": [{ "path": "services/bookoasis_package_import.py", "line": 1526, "end_line": 1533 }, { "path": "services/mate_service.py", "line": 4616, "end_line": 4677 }, { "path": "templates/bookoasis_mate_database_migration_status.html", "line": 191, "end_line": 199 }]
+    },
+    {
+      "id": "sqlite-apply", "lane": "sqlite", "col": 4, "type": "database",
+      "label": "DB·표지 전체 교체", "sublabel": "재검증 → 백업·교체 준비 → 적용", "tag": "존재하는 DB만 선택 백업",
+      "sources": [{ "path": "services/bookoasis_package_import.py", "line": 1535, "end_line": 1600 }, { "path": "services/bookoasis_package_import.py", "line": 1364, "end_line": 1457 }]
+    },
+    {
+      "id": "sqlite-result", "lane": "sqlite", "col": 5, "type": "backend",
+      "label": "결과 / 실패 복구", "sublabel": "예외 시 DB·표지·WAL 복원",
+      "sources": [{ "path": "services/bookoasis_package_import.py", "line": 1458, "end_line": 1496 }, { "path": "workers/database_migration_worker.py", "line": 114, "end_line": 155 }]
+    },
+    {
+      "id": "maria-inspect", "lane": "mariadb", "col": 1, "type": "backend",
+      "label": "논리 패키지 검사", "sublabel": "manifest · 엔진·버전·SHA-256",
+      "sources": [{ "path": "services/mariadb_package.py", "line": 269, "end_line": 340 }]
+    },
+    {
+      "id": "maria-dry", "lane": "mariadb", "col": 2, "type": "backend",
+      "label": "패키지 Dry Run", "sublabel": "manifest·표지 압축 검사", "tag": "SQL 복원·충돌 검사 전",
+      "sources": [{ "path": "services/mariadb_package.py", "line": 342, "end_line": 383 }, { "path": "services/mariadb_package.py", "line": 624, "end_line": 639 }]
+    },
+    {
+      "id": "maria-gate", "lane": "mariadb", "col": 3, "type": "security",
+      "label": "중지·DB 백업 필수", "sublabel": "healthy 차단 → 별도 작업자",
+      "sources": [{ "path": "services/mariadb_package.py", "line": 618, "end_line": 623 }, { "path": "services/mate_service.py", "line": 4616, "end_line": 4677 }, { "path": "templates/bookoasis_mate_database_migration_status.html", "line": 191, "end_line": 199 }]
+    },
+    {
+      "id": "maria-apply", "lane": "mariadb", "col": 4, "type": "database",
+      "label": "SQL 복원·전체 교체", "sublabel": "백업 → SQL·경로·검사 → 표지", "tag": "CHECK TABLE QUICK",
+      "sources": [{ "path": "services/mariadb_package.py", "line": 652, "end_line": 688 }, { "path": "services/migration_database.py", "line": 54, "end_line": 79 }]
+    },
+    {
+      "id": "maria-result", "lane": "mariadb", "col": 5, "type": "backend",
+      "label": "결과 / 복구 시도", "sublabel": "실패 시 SQL 백업·표지 복원", "tag": "복구도 일부 실패 가능",
+      "sources": [{ "path": "services/mariadb_package.py", "line": 689, "end_line": 711 }, { "path": "workers/database_migration_worker.py", "line": 114, "end_line": 155 }]
+    },
+    {
+      "id": "export-config", "lane": "export", "col": 1, "type": "frontend",
+      "label": "내보내기 설정", "sublabel": "이름·작업 폴더·현재 DB·표지",
+      "sources": [{ "path": "services/mate_service.py", "line": 4376, "end_line": 4393 }, { "path": "services/mate_service.py", "line": 4700, "end_line": 4711 }]
+    },
+    {
+      "id": "export-start", "lane": "export", "col": 2, "type": "messagebus",
+      "label": "별도 작업자 시작", "sublabel": "상태 JSON·로그·중지 요청 파일",
+      "sources": [{ "path": "services/mate_service.py", "line": 4501, "end_line": 4508 }, { "path": "services/mate_service.py", "line": 4616, "end_line": 4677 }, { "path": "workers/database_migration_worker.py", "line": 221, "end_line": 237 }]
+    },
+    {
+      "id": "export-db", "lane": "export", "col": 3, "type": "database",
+      "label": "DB 복사·논리 dump", "sublabel": "SQLite backup API / MariaDB dump",
+      "sources": [{ "path": "services/bookoasis_package_import.py", "line": 463, "end_line": 543 }, { "path": "services/mariadb_package.py", "line": 211, "end_line": 265 }]
+    },
+    {
+      "id": "export-pair", "lane": "export", "col": 4, "type": "backend",
+      "label": "표지 압축·쌍 확정", "sublabel": "db_*.tar.gz + covers_*.tar.gz",
+      "sources": [{ "path": "services/bookoasis_package_import.py", "line": 453, "end_line": 515 }, { "path": "services/bookoasis_package_import.py", "line": 550, "end_line": 594 }]
+    },
+    {
+      "id": "export-result", "lane": "export", "col": 5, "type": "backend",
+      "label": "경로·크기 결과", "sublabel": "예외 시 임시·불완전 쌍 정리",
+      "sources": [{ "path": "services/bookoasis_package_import.py", "line": 575, "end_line": 594 }, { "path": "workers/database_migration_worker.py", "line": 114, "end_line": 155 }]
+    }
+  ],
+  "edges": [
+    { "from": "choose", "to": "kavita-inspect", "label": "Kavita", "role": "branch" },
+    { "from": "choose", "to": "sqlite-inspect", "label": "SQLite", "role": "main" },
+    { "from": "choose", "to": "maria-inspect", "label": "MariaDB", "role": "branch" },
+    { "from": "choose", "to": "export-config", "label": "내보내기", "role": "branch" },
+    { "from": "kavita-inspect", "to": "kavita-dry" },
+    { "from": "kavita-dry", "to": "kavita-gate", "label": "결과 확인", "variant": "security" },
+    { "from": "kavita-gate", "to": "kavita-apply", "label": "실제 실행", "variant": "emphasis" },
+    { "from": "kavita-apply", "to": "kavita-result", "label": "완료 / 예외" },
+    { "from": "sqlite-inspect", "to": "sqlite-dry" },
+    { "from": "sqlite-dry", "to": "sqlite-gate", "label": "결과 확인", "variant": "security" },
+    { "from": "sqlite-gate", "to": "sqlite-apply", "label": "실제 실행", "variant": "emphasis" },
+    { "from": "sqlite-apply", "to": "sqlite-result", "label": "완료 / 예외" },
+    { "from": "maria-inspect", "to": "maria-dry" },
+    { "from": "maria-dry", "to": "maria-gate", "label": "결과 확인", "variant": "security" },
+    { "from": "maria-gate", "to": "maria-apply", "label": "실제 실행", "variant": "emphasis" },
+    { "from": "maria-apply", "to": "maria-result", "label": "완료 / 예외" },
+    { "from": "export-config", "to": "export-start" },
+    { "from": "export-start", "to": "export-db" },
+    { "from": "export-db", "to": "export-pair" },
+    { "from": "export-pair", "to": "export-result" }
+  ],
+  "cards": [
+    {
+      "dot": "amber", "title": "실행 경계",
+      "items": ["검사·Dry Run·실제 실행은 사용자가 각각 요청합니다. Dry Run도 별도 작업자에서 실행합니다.", "BookOasis·스캐너 중지는 사용자 책임입니다. healthy 차단은 중지의 증명이 아닙니다."]
+    },
+    {
+      "dot": "cyan", "title": "이관 범위",
+      "items": ["Kavita는 일반·성인 항목을 신규·갱신하며 기존 사용자 매핑에만 진행률을 적용합니다.", "통DB는 같은 엔진의 전체 교체입니다. 미디어 원본은 제외하며 DB·표지를 한 쌍으로 보관합니다."]
+    },
+    {
+      "dot": "rose", "title": "검증·복구의 한계",
+      "items": ["MariaDB SQL·경로 충돌 검사는 실제 복원 후 수행합니다. 표지 참조는 BookOasis에서 최종 확인합니다.", "여러 DB·파일의 완전한 원자성은 보장하지 않습니다. 실패 복구에 대비해 외부 백업을 유지하세요."]
+    }
+  ]
+}

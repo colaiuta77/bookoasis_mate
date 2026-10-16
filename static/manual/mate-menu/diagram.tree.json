@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "diagram_type": "tree",
+  "meta": {
+    "title": "BookOasis Mate · 메뉴와 핵심 기능",
+    "locale": "ko",
+    "output": "static/manual/mate-menu/diagram.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/colaiuta77/bookoasis_mate.git",
+      "revision": "5690ec259b7243094ee7843c5e77f1b3e2c21797",
+      "link_mode": "local-only"
+    }
+  },
+  "layout": {"direction": "right"},
+  "nodes": [
+    {
+      "id": "mate", "label": "BookOasis Mate", "sublabel": "실제 등록된 12개 메뉴",
+      "sources": [{"path": "setup.py", "line": 9, "end_line": 70}]
+    },
+    {
+      "id": "setting", "parent": "mate", "label": "설정", "sublabel": "연결 · 환경 파일 · Docker",
+      "sources": [
+        {"path": "setup.py", "line": 13},
+        {"path": "modules/mod_setting.py", "line": 24, "end_line": 45},
+        {"path": "modules/mod_setting.py", "line": 81, "end_line": 166}
+      ]
+    },
+    {
+      "id": "diagnostics", "parent": "mate", "label": "라이브러리 진단", "sublabel": "상태 · 통계 · 문제 · 표지",
+      "sources": [{"path": "setup.py", "line": 15, "end_line": 28}]
+    },
+    {
+      "id": "scan", "parent": "mate", "label": "스캔 관리", "sublabel": "스캔 상태 · 스케줄러",
+      "sources": [
+        {"path": "setup.py", "line": 30, "end_line": 35},
+        {"path": "modules/mod_scan.py", "line": 24, "end_line": 63}
+      ]
+    },
+    {
+      "id": "category", "parent": "mate", "label": "카테고리 이관", "sublabel": "카테고리 패키지 이관",
+      "sources": [
+        {"path": "setup.py", "line": 38, "end_line": 44},
+        {"path": "modules/mod_migration.py", "line": 47, "end_line": 101}
+      ]
+    },
+    {
+      "id": "database", "parent": "mate", "label": "통DB 이관", "sublabel": "Kavita · BookOasis 패키지",
+      "sources": [
+        {"path": "setup.py", "line": 47, "end_line": 53},
+        {"path": "modules/mod_database_migration.py", "line": 18, "end_line": 35},
+        {"path": "modules/mod_database_migration.py", "line": 55, "end_line": 111}
+      ]
+    },
+    {
+      "id": "drive", "parent": "mate", "label": "Google Drive 연동", "sublabel": "변경 수집 · 경로 스캔",
+      "sources": [
+        {"path": "setup.py", "line": 56, "end_line": 62},
+        {"path": "modules/mod_gdrive_scan.py", "line": 310, "end_line": 350},
+        {"path": "modules/mod_gdrive_scan.py", "line": 1042, "end_line": 1070}
+      ]
+    },
+    {
+      "id": "local", "parent": "mate", "label": "로컬 폴더 감지", "sublabel": "실시간 · 폴링 · 변경 큐",
+      "sources": [
+        {"path": "setup.py", "line": 64},
+        {"path": "modules/mod_local_watch.py", "line": 19, "end_line": 39},
+        {"path": "modules/mod_local_watch.py", "line": 56, "end_line": 80}
+      ]
+    },
+    {
+      "id": "sql", "parent": "mate", "label": "SQL 도구", "sublabel": "SQL 조회 · 진단",
+      "sources": [
+        {"path": "setup.py", "line": 65},
+        {"path": "modules/mod_sql.py", "line": 42, "end_line": 68}
+      ]
+    },
+    {
+      "id": "plugins", "parent": "mate", "label": "플러그인 관리", "sublabel": "카탈로그 · 저장소 · ZIP 설치",
+      "sources": [
+        {"path": "setup.py", "line": 66},
+        {"path": "modules/mod_plugins.py", "line": 429, "end_line": 443},
+        {"path": "modules/mod_plugins.py", "line": 444, "end_line": 485}
+      ]
+    },
+    {
+      "id": "font", "parent": "mate", "label": "커스텀 폰트", "sublabel": "폰트 목록 · 업로드",
+      "sources": [
+        {"path": "setup.py", "line": 67},
+        {"path": "modules/mod_font.py", "line": 24, "end_line": 43}
+      ]
+    },
+    {
+      "id": "manual", "parent": "mate", "label": "매뉴얼", "sublabel": "공통 요구사항 · 변경 내역",
+      "sources": [
+        {"path": "setup.py", "line": 68},
+        {"path": "modules/mod_manual.py", "line": 14, "end_line": 37}
+      ]
+    },
+    {
+      "id": "log", "parent": "mate", "label": "로그", "sublabel": "Mate 플러그인 로그",
+      "sources": [{"path": "setup.py", "line": 69}]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "violet", "title": "구성도 읽는 방법",
+      "items": ["연결선은 실제 상위 메뉴의 소속 관계입니다.", "실행 순서·호출 관계·현재 동작 상태를 뜻하지 않습니다.", "메뉴를 선택하면 연결된 구성과 소스 근거를 확인할 수 있습니다."]
+    },
+    {
+      "dot": "cyan", "title": "세부 절차 확인",
+      "items": ["이 매뉴얼은 공통 연결 조건·권한·안전 수칙을 안내합니다.", "이관·감지·진단의 세부 절차는 해당 기능의 매뉴얼을 확인하세요."]
+    }
+  ]
+}

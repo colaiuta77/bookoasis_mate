@@ -1,7 +1,7 @@
 {# BookOasis Mate의 공통 요구사항과 설치 방법을 안내합니다. #}
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=manual-diagrams-1">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=manual-archify-2">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 <div class="doctor-section doctor-card">
@@ -20,9 +20,12 @@
 <div class="doctor-section doctor-card">
   <h4>Mate 메뉴와 핵심 기능</h4>
   <figure class="doctor-manual-diagram">
-    <a href="{{ url_for('bookoasis_mate.static', filename='img/manual/mate-menu-org.svg') }}" target="_blank" rel="noopener">메뉴 구성도 원본 열기</a>
-    <div style="overflow-x:auto" tabindex="0" role="region" aria-label="Mate 메뉴 구성도 가로 스크롤"><img src="{{ url_for('bookoasis_mate.static', filename='img/manual/mate-menu-org.svg') }}" alt="BookOasis Mate의 11개 메뉴와 핵심 기능을 기능별로 묶은 조직도" style="width:100%;min-width:1100px;height:auto" loading="lazy"></div>
-    <figcaption>묶음은 설명용이며 실제 메뉴 계층이나 실행 순서가 아닙니다. 기능별 절차는 해당 메뉴의 매뉴얼을 확인하세요.</figcaption>
+    <iframe class="doctor-manual-archify"
+      src="{{ url_for('bookoasis_mate.static', filename='manual/mate-menu/diagram.html') }}"
+      title="BookOasis Mate의 실제 12개 메뉴와 핵심 기능을 보여주는 대화형 구성도"
+      loading="lazy" sandbox="allow-scripts allow-downloads allow-popups"
+      allowfullscreen referrerpolicy="no-referrer"></iframe>
+    <figcaption>연결선은 실제 메뉴의 소속 관계이며 실행 순서나 호출 관계가 아닙니다. 메뉴를 선택해 살펴보거나 확대할 수 있습니다. <a href="{{ url_for('bookoasis_mate.static', filename='manual/mate-menu/diagram.html') }}" target="_blank" rel="noopener noreferrer">큰 화면으로 열기</a> · <a href="{{ url_for('bookoasis_mate.static', filename='manual/mate-menu/diagram.tree.json') }}" target="_blank" rel="noopener noreferrer">편집 원본</a></figcaption>
   </figure>
 </div>
 <div class="doctor-section doctor-card">
