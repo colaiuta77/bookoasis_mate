@@ -535,7 +535,8 @@ function gdriveScanUpdateSingleVfsRule(mapping) {
   });
   if (active.length !== 1) return false;
   var rule = active[0].split('|');
-  var pair = String(mapping || '').split('=>');
+  mapping = String(mapping || '');
+  var pair = mapping.split(mapping.indexOf('|') !== -1 ? '|' : '=>');
   if (rule.length < 3 || pair.length !== 2) return false;
   rule[0] = pair[1].trim();
   rule[1] = pair[0].trim();
