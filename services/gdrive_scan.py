@@ -104,9 +104,16 @@ def parse_path_mappings(value):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        if "=>" not in line:
+        if "|" in line:
+            parts = line.split("|")
+            if len(parts) != 2:
+                raise ValueError(f"경로 매핑 형식이 올바르지 않습니다: {line}")
+            source, target = [part.strip() for part in parts]
+        elif "=>" in line:
+            # 기존 저장값과 이전 버전 설정도 계속 읽습니다.
+            source, target = [part.strip() for part in line.split("=>", 1)]
+        else:
             raise ValueError(f"경로 매핑 형식이 올바르지 않습니다: {line}")
-        source, target = [part.strip() for part in line.split("=>", 1)]
         if not source or not target:
             raise ValueError("경로 매핑의 양쪽 절대 경로를 모두 입력해 주세요. 루트는 /로 명시합니다.")
         source = normalize_event_path(source)
@@ -401,7 +408,7 @@ def suggest_path_mapping(path, libraries):
                 target = "/" + "/".join(root_parts[:target_size])
                 key = (library.get("db_type"), library.get("id"), library["root"])
                 candidate = {
-                    "mapping": f"{source} => {target}",
+                    "mapping": f"{source}|{target}",
                     "mapped_path": mapped,
                     "library": library,
                     "warning": "",

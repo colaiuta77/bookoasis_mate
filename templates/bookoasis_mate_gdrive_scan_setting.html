@@ -8,6 +8,7 @@
 <ul class="nav nav-tabs doctor-setting-tabs" role="tablist">
   <li class="nav-item"><a class="nav-link active" id="gdrive-scan-basic-tab" href="#">기본 설정</a></li>
   <li class="nav-item"><a class="nav-link" id="gdrive-scan-integration-tab" href="#">연동 설정</a></li>
+  <li class="nav-item"><a class="nav-link" id="gdrive-scan-advanced-tab" href="#">고급 설정</a></li>
 </ul>
 <form id="setting">
   <div id="gdrive_scan_basic_intro">
@@ -97,12 +98,13 @@
   {{ macros.setting_input_int('gdrive_scan_buffer_seconds', '스캔 묶음 대기(초)', value=arg['gdrive_scan_buffer_seconds'], desc=['같은 부모 폴더에 새 이벤트가 들어오면 대기를 연장합니다. 기본 60초, 0이면 즉시 처리합니다.', '같은 보관함의 겹치는 스캔 경로는 한 번으로 합칩니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_file_wait_seconds', '파일 반영 최대 대기(초)', value=arg.get('gdrive_scan_file_wait_seconds', '0'), desc=['0은 사용 안 함입니다. 사용 시 아래 FlaskFarm 경로 매핑이 필요합니다. 최초 파일 확인부터의 최대 대기시간입니다.', '추가·수정은 존재, 삭제는 부재, 이동·이름 변경은 새 경로 존재와 이전 경로 부재를 확인합니다. 파일 내용이나 업로드 완료까지 검증하지는 않습니다.']) }}
   <div id="gdrive_scan_file_check_options" style="display:none">
-  {{ macros.setting_input_textarea('gdrive_scan_file_check_mappings', '파일 확인 경로 매핑', value=arg.get('gdrive_scan_file_check_mappings', ''), col='12', row='2', desc=['한 줄에 /BookOasis/경로 => /FlaskFarm에서/보이는/경로를 입력합니다. 경로가 같아도 명시적으로 입력합니다.', '예: /mnt/gds/GDRIVE => /host/mnt/gds/GDRIVE. 오른쪽 루트 폴더가 없거나 접근할 수 없으면 삭제 성공으로 판단하지 않고 기다립니다.']) }}
+  {{ macros.setting_input_textarea('gdrive_scan_file_check_mappings', '파일 확인 경로 매핑', value=arg.get('gdrive_scan_file_check_mappings', ''), col='12', row='2', desc=['한 줄에 /BookOasis/경로|/FlaskFarm에서/보이는/경로를 입력합니다. 경로가 같아도 명시적으로 입력합니다.', '예: /mnt/gds/GDRIVE|/host/mnt/gds/GDRIVE. 오른쪽 루트 폴더가 없거나 접근할 수 없으면 삭제 성공으로 판단하지 않고 기다립니다.']) }}
   </div>
   <input type="hidden" id="gdrive_scan_worker_interval" name="gdrive_scan_worker_interval" value="{{ arg.get('gdrive_scan_worker_interval', '2') }}">
   {{ macros.setting_input_text('gdrive_scan_extensions', '대상 파일 확장자', value=arg['gdrive_scan_extensions'], desc=['쉼표로 구분합니다.', '도서·오디오북·비디오북·자막과 메타데이터 보조 파일 확장자를 기본값으로 제공합니다.']) }}
-  <details id="gdrive_scan_advanced_settings" class="gdrive-scan-advanced">
-  <summary>고급 설정 · 대기 한도, 재시도, 연결 제한, 이력 보관</summary>
+  </div>
+  <div id="gdrive_scan_advanced_settings" class="doctor-section" style="display:none">
+  <h4>고급 설정 · 대기 한도, 재시도, 연결 제한, 이력 보관</h4>
   <p class="doctor-muted">문제가 있을 때만 조정하세요. 접거나 숨겨도 기존 설정값은 유지됩니다.</p>
   {{ macros.setting_input_int('gdrive_scan_max_wait_seconds', '최대 버퍼 대기(초)', value=arg.get('gdrive_scan_max_wait_seconds', '600'), desc=['변경이 계속되는 폴더도 이벤트 수신 후 이 시간이 지나면 처리합니다. 기본 600초, 스캔 묶음 대기보다 작으면 묶음 대기를 적용합니다.']) }}
   <div id="gdrive_scan_file_check_advanced" style="display:none">
@@ -115,7 +117,6 @@
   {{ macros.setting_input_int('gdrive_scan_history_limit', '목록 페이지 크기 상한', value=arg['gdrive_scan_history_limit'], desc=['화면에서 한 페이지에 요청할 수 있는 최대 이벤트 수입니다. 10~1000건']) }}
   {{ macros.setting_input_int('gdrive_scan_retention_days', 'DB 삭제 기간(일)', value=arg.get('gdrive_scan_retention_days', '30'), desc=['완료와 최종 실패 이벤트만 지정 기간이 지나면 삭제합니다.', '대기·재시도·처리 중 이벤트는 삭제하지 않습니다.']) }}
   {{ macros.setting_checkbox('gdrive_scan_auto_cleanup', 'DB 자동 삭제', value=arg.get('gdrive_scan_auto_cleanup', 'True'), desc=['On이면 작업자가 보존기간이 지난 종료 이벤트를 주기적으로 삭제합니다.']) }}
-  </details>
   </div>
 
   <div id="gdrive_scan_external_settings">
@@ -123,7 +124,7 @@
     <label class="col-sm-3 control-label">gd-poller → BookOasis 경로 매핑</label>
     <div class="col-sm-9">
       <textarea class="form-control" rows="5" id="gdrive_scan_path_mappings" name="gdrive_scan_path_mappings">{{ arg.get('gdrive_scan_path_mappings', '') }}</textarea>
-      <small class="form-text text-muted">한 줄에 <code>/gd-poller/경로 =&gt; /BookOasis DB의/보관함/경로</code>를 입력합니다. 가장 긴 접두사가 우선하며 대상은 <code>libraries.physical_path</code>와 같은 논리 경로여야 합니다.</small>
+      <small class="form-text text-muted">한 줄에 <code>/gd-poller/경로|/BookOasis DB의/보관함/경로</code>를 입력합니다. 가장 긴 접두사가 우선하며 대상은 <code>libraries.physical_path</code>와 같은 논리 경로여야 합니다.</small>
     </div>
   </div>
 
@@ -364,6 +365,18 @@ if (!gdriveScanBuiltinRoots.length) gdriveScanAddRoot({});
 gdriveScanRenderStates(gdriveScanBuiltinStates);
 document.getElementById('gdrive_scan_builtin_add').addEventListener('click', function() { gdriveScanAddRoot({}); });
 
+function gdriveScanNormalizeMappingFields() {
+  ['gdrive_scan_file_check_mappings', 'gdrive_scan_path_mappings'].forEach(function(id) {
+    var field = document.getElementById(id);
+    if (!field) return;
+    field.value = field.value.split(/\r?\n/).map(function(line) {
+      var match = line.match(/^(\s*\/.*?)\s*=>\s*(\/.*)$/);
+      return match ? match[1].trim() + '|' + match[2].trim() : line;
+    }).join('\n');
+  });
+}
+gdriveScanNormalizeMappingFields();
+
 var gdriveScanActiveSettingTab = 'basic';
 
 function toggleGdriveOptionalSettings() {
@@ -381,10 +394,14 @@ toggleGdriveOptionalSettings();
 function gdriveScanShowSettingTab(tab) {
   gdriveScanActiveSettingTab = tab;
   var basic = tab === 'basic';
+  var integration = tab === 'integration';
+  var advanced = tab === 'advanced';
   $('#gdrive_scan_basic_intro, #gdrive_scan_basic_settings, #gdrive_scan_basic_discord').toggle(basic);
-  $('#gdrive_scan_integration_mode').toggle(!basic);
+  $('#gdrive_scan_integration_mode').toggle(integration);
+  $('#gdrive_scan_advanced_settings').toggle(advanced);
   $('#gdrive-scan-basic-tab').toggleClass('active', basic);
-  $('#gdrive-scan-integration-tab').toggleClass('active', !basic);
+  $('#gdrive-scan-integration-tab').toggleClass('active', integration);
+  $('#gdrive-scan-advanced-tab').toggleClass('active', advanced);
   toggleGdriveInputMode();
 }
 
@@ -392,11 +409,12 @@ function toggleGdriveInputMode() {
   var mode = $('#gdrive_scan_input_mode').val();
   var integration = gdriveScanActiveSettingTab === 'integration';
   $('#gdrive_scan_external_mode, #gdrive_scan_external_settings').toggle(integration && mode !== 'builtin');
-  $('#gdrive_scan_vfs_settings').toggle(!integration);
+  $('#gdrive_scan_vfs_settings').toggle(gdriveScanActiveSettingTab === 'basic');
   $('#gdrive_scan_builtin_mode').toggle(integration && mode === 'builtin');
 }
 $('#gdrive-scan-basic-tab').click(function(e) { e.preventDefault(); gdriveScanShowSettingTab('basic'); });
 $('#gdrive-scan-integration-tab').click(function(e) { e.preventDefault(); gdriveScanShowSettingTab('integration'); });
+$('#gdrive-scan-advanced-tab').click(function(e) { e.preventDefault(); gdriveScanShowSettingTab('advanced'); });
 $('#gdrive_scan_input_mode').change(toggleGdriveInputMode);
 function toggleGdriveVfs() {
   var enabled = $('#gdrive_scan_vfs_enabled').prop('checked');
