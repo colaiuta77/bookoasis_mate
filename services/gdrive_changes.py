@@ -1,5 +1,6 @@
 # FF rclone 인증을 재사용해 Google Drive Changes API 변경을 Mate 이벤트로 변환합니다.
 import json
+from copy import deepcopy
 import posixpath
 import shlex
 import subprocess
@@ -263,6 +264,8 @@ class GoogleDriveChangesClient:
         self.runner = runner or subprocess.run
         self.opener = opener or urlopen
         self._credentials = None
+        self.request_cache = None
+        self.credential_cache = None
         self._request_stage = {"stage": "credentials", "host": "", "attempt": 0}
         self.should_stop = lambda: False
         if not self.remote or not self.source_remote or not self.root_id or not self.local_root:
@@ -306,6 +309,9 @@ class GoogleDriveChangesClient:
         return json.loads(result.stdout or "{}")
 
     def _access(self):
+        cache_key = (self.rclone_path, self.config_path, self.source_remote)
+        if self.credential_cache is not None and cache_key in self.credential_cache:
+            self._credentials = self.credential_cache[cache_key]
         if self._credentials is not None:
             return self._credentials
         self._run_json("about", f"{self.source_remote}:", "--json")
@@ -323,6 +329,8 @@ class GoogleDriveChangesClient:
         if _token_is_expired(token):
             return self._refresh_access_token(remote, token)
         self._credentials = (access_token, str(remote.get("team_drive") or "").strip())
+        if self.credential_cache is not None:
+            self.credential_cache[cache_key] = self._credentials
         return self._credentials
 
     def _refresh_access_token(self, remote=None, token=None):
@@ -404,6 +412,8 @@ class GoogleDriveChangesClient:
                 "설정 파일과 부모 디렉터리의 쓰기·rename 권한을 확인해 주세요."
             ) from None
         self._credentials = (access_token, str(remote.get("team_drive") or "").strip())
+        if self.credential_cache is not None:
+            self.credential_cache[(self.rclone_path, self.config_path, self.source_remote)] = self._credentials
         return self._credentials
 
     def _get(self, path, params=None, activity_body=None):
@@ -420,6 +430,9 @@ class GoogleDriveChangesClient:
             url = f"{DRIVE_API}/{path}"
             if query:
                 url += "?" + urlencode(query)
+            cache_key = (self.config_path, self.source_remote, token, url)
+            if activity_body is None and self.request_cache is not None and cache_key in self.request_cache:
+                return deepcopy(self.request_cache[cache_key])
             request = Request(
                 url if activity_body is None else "https://driveactivity.googleapis.com/v2/activity:query",
                 data=None if activity_body is None else json.dumps(activity_body).encode("utf-8"),
@@ -437,7 +450,12 @@ class GoogleDriveChangesClient:
                 if self.should_stop():
                     raise InterruptedError("변경 수집 중지")
                 with self.opener(request, timeout=self.api_timeout) as response:
-                    return json.loads(response.read().decode("utf-8") or "{}")
+                    payload = json.loads(response.read().decode("utf-8") or "{}")
+                if activity_body is None and self.request_cache is not None:
+                    # 한 수집 회차에서만 공유하며 응답 변형과 무제한 누적을 막습니다.
+                    if len(self.request_cache) < 2000:
+                        self.request_cache[cache_key] = deepcopy(payload)
+                return payload
             except HTTPError as error:
                 try:
                     body = error.read()
@@ -498,6 +516,42 @@ class GoogleDriveChangesClient:
             f"files/{file_id}",
             {"fields": "id,name,mimeType,parents,trashed,modifiedTime,size,md5Checksum", "supportsAllDrives": "true"},
         )
+
+    def reconcile_path(self, path, original_id, item_type):
+        root = self.local_root.rstrip("/") or "/"
+        if not original_id or not (path == root or path.startswith(root.rstrip("/") + "/")):
+            return None
+        original = self.file(original_id)
+        if not original or original.get("id") != original_id or "trashed" not in original:
+            return None
+        relative = path[len(root.rstrip("/")):].lstrip("/")
+        remote_path = posixpath.join(self.remote_path, relative)
+        parent, name = posixpath.split(remote_path)
+        # --stat는 조회 루트의 ID를 생략할 수 있어 부모의 실제 항목을 비교합니다.
+        key = ("reconciliation_listing", self.config_path, self.remote, parent)
+        cache = self.request_cache if self.request_cache is not None else {}
+        if key not in cache:
+            cache[key] = self._run_json("lsjson", f"{self.remote}:{parent}")
+        entries = cache[key]
+        if not isinstance(entries, list):
+            return None
+        matches = [entry for entry in entries if entry.get("Name") == name]
+        if len(matches) != 1:
+            return None
+        current_id = str(matches[0].get("ID") or "")
+        if not current_id or matches[0].get("IsDir") != (item_type == "directory"):
+            return None
+        current = original if current_id == original_id else self.file(current_id)
+        if (not current or current.get("id") != current_id or current.get("trashed") is not False
+                or current.get("name") != name):
+            return None
+        return {
+            "state": "restored" if current_id == original_id else "replaced",
+            "path": path, "original_id": original_id, "current_id": current_id,
+            "original_trashed": original["trashed"],
+            "checked_at": datetime.now().isoformat(timespec="seconds"),
+            "message": "현재 Drive ID 상태를 확인해 삭제 부재 대기 대신 현재 폴더 스캔으로 전환했습니다.",
+        }
 
     def validate_root(self):
         root = self.file(self.root_id)

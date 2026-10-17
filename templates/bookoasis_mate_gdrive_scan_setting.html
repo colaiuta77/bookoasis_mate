@@ -1,13 +1,14 @@
 {# gd-poller 변경 감지와 rclone VFS·BookOasis 스캔 연동값을 설정합니다. #}
 {% extends "base.html" %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=drive-settings-2">
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=drive-settings-3">
 <script src="{{ url_for('bookoasis_mate.static', filename='js/bookoasis_mate.js') }}"></script>
 
 {{ macros.m_button_group([['setting_save_btn', '설정 저장'], ['gdrive_scan_wake_btn', '작업자 깨우기'], ['gdrive_scan_stop_btn', '작업 중지']]) }}
 <ul class="nav nav-tabs doctor-setting-tabs" role="tablist">
   <li class="nav-item"><a class="nav-link active" id="gdrive-scan-basic-tab" href="#">기본 설정</a></li>
   <li class="nav-item"><a class="nav-link" id="gdrive-scan-integration-tab" href="#">연동 설정</a></li>
+  <li class="nav-item"><a class="nav-link" id="gdrive-scan-advanced-tab" href="#">고급 설정</a></li>
 </ul>
 <form id="setting">
   <div id="gdrive_scan_basic_intro">
@@ -65,18 +66,11 @@
       <strong>rclone.conf 권한 범위.</strong>
       Changes는 <code>drive.readonly</code>, Activity는 <code>drive.readonly,drive.activity.readonly</code>가 필요합니다. 권한을 추가하면 rclone 재인증과 Google Cloud의 Drive Activity API 활성화가 필요합니다. Activity는 바로가기의 실제 대상 폴더 ID를 입력하세요.
     </div>
-    <div class="gdrive-scan-poll-setting">
-      <label for="gdrive_scan_builtin_poll_seconds"><strong>변경 확인 주기(초)</strong></label>
-      <input type="number" class="form-control" id="gdrive_scan_builtin_poll_seconds" name="gdrive_scan_builtin_poll_seconds" min="15" max="3600" value="{{ arg.get('gdrive_scan_builtin_poll_seconds', '60') }}">
-      <small class="form-text text-muted">15~3600초 사이에서 Google Drive 변경 내역을 확인합니다.</small>
-    </div>
-    <div class="gdrive-scan-poll-settings">
-    <div class="gdrive-scan-poll-setting">
-      <label for="gdrive_scan_activity_delay_seconds"><strong>Activity 조회 지연(초)</strong></label>
-      <input type="number" class="form-control" id="gdrive_scan_activity_delay_seconds" name="gdrive_scan_activity_delay_seconds" min="0" max="3600" value="{{ arg.get('gdrive_scan_activity_delay_seconds', '60') }}">
-      <small class="form-text text-muted">기본 60초. 현재 시각에서 이 시간만큼 이전까지 Activity를 조회합니다. 늦게 공개되는 활동을 기다리는 설정이며, Changes 방식과 이벤트 처리 대기 시간에는 적용하지 않습니다.</small>
-    </div>
-    </div>
+    {{ macros.setting_input_int('gdrive_scan_builtin_poll_seconds', '변경 확인 주기(초)', value=arg.get('gdrive_scan_builtin_poll_seconds', '60'), min='15', max='3600', desc=['기본 60초. 15~3600초 사이에서 Google Drive 변경 내역을 확인합니다.']) }}
+    <details id="gdrive_scan_activity_advanced" class="gdrive-scan-advanced" style="display:none">
+      <summary>Activity 고급 설정</summary>
+      {{ macros.setting_input_int('gdrive_scan_activity_delay_seconds', 'Activity 조회 지연(초)', value=arg.get('gdrive_scan_activity_delay_seconds', '60'), min='0', max='3600', desc=['기본 60초. 현재 시각에서 이 시간만큼 이전까지 Activity를 조회합니다. 늦게 공개되는 활동을 기다리며 Changes 방식과 스캔 묶음 대기에는 적용하지 않습니다.']) }}
+    </details>
     <input type="hidden" id="gdrive_scan_builtin_roots" name="gdrive_scan_builtin_roots" value="[]">
     <div class="gdrive-scan-root-heading">
       <div>
@@ -101,10 +95,22 @@
   </div>
   </div>
   <div id="gdrive_scan_basic_settings">
-  {{ macros.setting_input_int('gdrive_scan_buffer_seconds', '이벤트 버퍼 시간(초)', value=arg['gdrive_scan_buffer_seconds'], desc=['기본 60초이며 같은 시간 구간의 동일 보관함 스캔 요청을 한 번으로 합칩니다.', '0이면 즉시 처리합니다.']) }}
-  {{ macros.setting_input_int('gdrive_scan_worker_interval', '작업자 확인 주기(초)', value=arg['gdrive_scan_worker_interval'], desc=['대기 이벤트를 확인하는 주기입니다.']) }}
-  {{ macros.setting_input_int('gdrive_scan_max_attempts', '최대 처리 횟수', value=arg['gdrive_scan_max_attempts'], desc=['실패 시 지수형 대기 후 재시도하며 마지막 실패는 변경 이벤트 메뉴에서 다시 실행할 수 있습니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_buffer_seconds', '스캔 묶음 대기(초)', value=arg['gdrive_scan_buffer_seconds'], desc=['같은 부모 폴더에 새 이벤트가 들어오면 대기를 연장합니다. 기본 60초, 0이면 즉시 처리합니다.', '같은 보관함의 겹치는 스캔 경로는 한 번으로 합칩니다.']) }}
+  {{ macros.setting_input_int('gdrive_scan_file_wait_seconds', '파일 반영 최대 대기(초)', value=arg.get('gdrive_scan_file_wait_seconds', '0'), desc=['0은 사용 안 함입니다. 사용 시 아래 FlaskFarm 경로 매핑이 필요합니다. 최초 파일 확인부터의 최대 대기시간입니다.', '추가·수정은 존재, 삭제는 부재, 이동·이름 변경은 새 경로 존재와 이전 경로 부재를 확인합니다. 파일 내용이나 업로드 완료까지 검증하지는 않습니다.']) }}
+  <div id="gdrive_scan_file_check_options" style="display:none">
+  {{ macros.setting_input_textarea('gdrive_scan_file_check_mappings', '파일 확인 경로 매핑', value=arg.get('gdrive_scan_file_check_mappings', ''), col='12', row='2', desc=['한 줄에 /BookOasis/경로|/FlaskFarm에서/보이는/경로를 입력합니다. 경로가 같아도 명시적으로 입력합니다.', '예: /mnt/gds/GDRIVE|/host/mnt/gds/GDRIVE. 오른쪽 루트 폴더가 없거나 접근할 수 없으면 삭제 성공으로 판단하지 않고 기다립니다.']) }}
+  </div>
+  <input type="hidden" id="gdrive_scan_worker_interval" name="gdrive_scan_worker_interval" value="{{ arg.get('gdrive_scan_worker_interval', '2') }}">
   {{ macros.setting_input_text('gdrive_scan_extensions', '대상 파일 확장자', value=arg['gdrive_scan_extensions'], desc=['쉼표로 구분합니다.', '도서·오디오북·비디오북·자막과 메타데이터 보조 파일 확장자를 기본값으로 제공합니다.']) }}
+  </div>
+  <div id="gdrive_scan_advanced_settings" class="doctor-section" style="display:none">
+  <h4>고급 설정 · 대기 한도, 재시도, 연결 제한, 이력 보관</h4>
+  <p class="doctor-muted">문제가 있을 때만 조정하세요. 접거나 숨겨도 기존 설정값은 유지됩니다.</p>
+  {{ macros.setting_input_int('gdrive_scan_max_wait_seconds', '최대 버퍼 대기(초)', value=arg.get('gdrive_scan_max_wait_seconds', '600'), desc=['변경이 계속되는 폴더도 이벤트 수신 후 이 시간이 지나면 처리합니다. 기본 600초, 스캔 묶음 대기보다 작으면 묶음 대기를 적용합니다.']) }}
+  <div id="gdrive_scan_file_check_advanced" style="display:none">
+  {{ macros.setting_input_int('gdrive_scan_file_check_seconds', '파일 확인 주기(초)', value=arg.get('gdrive_scan_file_check_seconds', '20'), desc=['기본 20초, 5~300초. 대기 중에는 스캔을 요청하지 않으며 실패 재시도 횟수를 소모하지 않습니다.']) }}
+  </div>
+  {{ macros.setting_input_int('gdrive_scan_max_attempts', '최대 처리 횟수', value=arg['gdrive_scan_max_attempts'], desc=['실패 시 지수형 대기 후 재시도하며 마지막 실패는 변경 이벤트 메뉴에서 다시 실행할 수 있습니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_rc_timeout', 'rclone 명령 제한 시간(초)', value=arg['gdrive_scan_rc_timeout'], desc=['리모트 목록·연결 정보 확인과 갱신 토큰 저장에 적용합니다. 1~300초, 기본값 30']) }}
   {{ macros.setting_input_int('gdrive_scan_changes_timeout', 'Google Drive Changes API 제한 시간(초)', value=arg.get('gdrive_scan_changes_timeout', '60'), desc=['변경 내역 HTTP 조회와 OAuth 토큰 갱신에 적용합니다. 1~300초, 기본값 60', '401은 refresh_token으로 액세스 토큰을 갱신·저장한 뒤 1회, 읽기 제한 시간은 1초 뒤 1회 재시도합니다.']) }}
   {{ macros.setting_input_int('gdrive_scan_path_timeout', '개별 경로 스캔 제한 시간(초)', value=arg.get('gdrive_scan_path_timeout', '120'), desc=['동기식 경로 스캔에만 적용합니다. 10~600초, 기본값 120']) }}
@@ -118,7 +124,7 @@
     <label class="col-sm-3 control-label">gd-poller → BookOasis 경로 매핑</label>
     <div class="col-sm-9">
       <textarea class="form-control" rows="5" id="gdrive_scan_path_mappings" name="gdrive_scan_path_mappings">{{ arg.get('gdrive_scan_path_mappings', '') }}</textarea>
-      <small class="form-text text-muted">한 줄에 <code>/gd-poller/경로 =&gt; /BookOasis DB의/보관함/경로</code>를 입력합니다. 가장 긴 접두사가 우선하며 대상은 <code>libraries.physical_path</code>와 같은 논리 경로여야 합니다.</small>
+      <small class="form-text text-muted">한 줄에 <code>/gd-poller/경로|/BookOasis DB의/보관함/경로</code>를 입력합니다. 가장 긴 접두사가 우선하며 대상은 <code>libraries.physical_path</code>와 같은 논리 경로여야 합니다.</small>
     </div>
   </div>
 
@@ -142,21 +148,50 @@
     value=arg.get('gdrive_scan_vfs_rules', ''), col='12', row='2',
     desc=['한 줄에 로컬경로|리모트경로|RC주소#VFS이름|사용자|비밀번호를 입력합니다. 인증이 없으면 마지막 두 필드를 생략합니다.',
           '자체 감지에도 필요합니다. 로컬경로는 BookOasis 경로이며 RC 주소는 FlaskFarm에서 접속 가능해야 합니다. rclone.conf의 리모트 이름만으로 RC 주소를 자동 결정할 수 없습니다.']) }}
+  <div class="doctor-section doctor-card">
+    <h4>VFS 경로 자동 감지</h4>
+    <p class="doctor-muted">위 규칙에 BookOasis 경로와 RC 주소·인증을 먼저 입력하세요. 활성 VFS와 경로 끝부분을 읽기 전용으로 검사합니다. 같은 이름의 폴더가 있을 수 있으므로 실제 VFS·경로를 확인한 뒤 선택하고 설정을 저장하세요.</p>
+    <div class="doctor-toolbar">
+      <select id="gdrive_scan_vfs_rule_select" class="form-control" aria-label="탐색할 VFS 규칙" style="flex:1 1 360px"></select>
+      <button type="button" class="btn btn-outline-primary" id="gdrive_scan_vfs_discover">후보 검사·미리보기</button>
+      <span id="gdrive_scan_vfs_discovery_status" class="doctor-query-status" role="status"></span>
+    </div>
+    <div id="gdrive_scan_vfs_candidates"></div>
   </div>
-</form>
-
+  </div>
 <div id="gdrive_scan_basic_discord" class="doctor-section doctor-card">
   <h4>Discord 변경 요약 알림</h4>
-  <p class="doctor-muted">Mate 작업자가 버퍼 단위 처리를 마친 뒤 변경 수량·처리 결과·대상 보관함·실제 스캔 방식을 한 번만 요약해 전송합니다. 전송 실패는 Google Drive 스캔 결과에 영향을 주지 않습니다.</p>
+  <p class="doctor-muted">처리 결과를 DB 대기열에 보존하고 별도 작업자가 묶어 전송합니다. 기본 60초 묶음·최대 180초 대기이며 고급 설정에서 조정할 수 있습니다. 알림 재전송은 스캔을 다시 실행하지 않습니다.</p>
+  <details class="gdrive-scan-advanced">
+  <summary>Discord 고급 설정 · 알림 묶음과 대기 한도</summary>
+  <p class="doctor-muted">기본 60초 묶음·최대 180초 대기입니다. 변경한 값은 상단 설정 저장으로 저장합니다.</p>
+  <div class="row">
+    <div class="col-lg-6">{{ macros.setting_input_int('gdrive_scan_discord_batch_seconds', '알림 묶음(초)', value=arg.get('gdrive_scan_discord_batch_seconds', 60), desc=['기본 60초. 0이면 즉시 발송합니다.']) }}</div>
+    <div class="col-lg-6">{{ macros.setting_input_int('gdrive_scan_discord_max_wait_seconds', '최대 알림 대기(초)', value=arg.get('gdrive_scan_discord_max_wait_seconds', 180), desc=['기본 180초. 묶음 시간보다 작으면 묶음 시간을 적용합니다.']) }}</div>
+  </div>
+  </details>
   <div class="doctor-toolbar">
     <input type="password" class="form-control" id="gdrive_scan_discord_webhook_url" style="flex:1 1 560px" autocomplete="new-password" placeholder="https://discord.com/api/webhooks/...">
     <button type="button" class="btn btn-outline-primary" id="gdrive_scan_discord_save">저장</button>
     <button type="button" class="btn btn-outline-danger" id="gdrive_scan_discord_clear">삭제</button>
   </div>
   <small id="gdrive_scan_discord_status" class="form-text text-muted">{{ '웹훅이 설정되어 있습니다. 새 값을 입력하지 않으면 기존 값은 표시되지 않습니다.' if arg.get('gdrive_scan_discord_webhook_configured') else '웹훅 URL이 비어 있으면 Discord 알림을 사용하지 않습니다.' }}</small>
+  <div id="gdrive_scan_discord_queue" class="doctor-muted" aria-live="polite"></div>
 </div>
+</form>
 
 <script>
+function renderDiscordQueue(data) {
+  $('#gdrive_scan_discord_queue').text('알림 대기 ' + data.pending + '건 · 발송 실패 ' + data.failed + '건' +
+    (data.blocked ? ' · 웹훅 설정 확인 필요' : '') + (data.last_error ? ' · ' + data.last_error : ''));
+}
+renderDiscordQueue({{ arg.get('gdrive_scan_discord_queue', {'pending':0, 'failed':0, 'last_error':''})|tojson }});
+setInterval(function() {
+  if (document.hidden) return;
+  bookoasisMateAjax('gdrive_scan', 'discord_status', {}, function(ret) {
+    if (ret.ret === 'success') renderDiscordQueue(ret.data);
+  }, null, {global:false, silent:true});
+}, 10000);
 var gdriveScanDriveSources = {{ arg.get('gdrive_scan_drive_sources', [])|tojson }};
 var gdriveScanBuiltinRoots = {{ arg.get('gdrive_scan_builtin_root_rows', [])|tojson }};
 var gdriveScanBuiltinStates = {{ arg.get('gdrive_scan_builtin_states', [])|tojson }};
@@ -291,11 +326,12 @@ function gdriveScanAddRoot(row) {
   remove.type = 'button';
   remove.className = 'btn btn-outline-danger';
   remove.textContent = '삭제';
-  remove.addEventListener('click', function() { card.remove(); });
+  remove.addEventListener('click', function() { card.remove(); toggleGdriveOptionalSettings(); });
   removeWrap.appendChild(remove);
   grid.appendChild(removeWrap);
   card.appendChild(grid);
   document.getElementById('gdrive_scan_builtin_root_rows').appendChild(card);
+  toggleGdriveOptionalSettings();
 }
 
 function gdriveScanSerializeRoots() {
@@ -329,15 +365,43 @@ if (!gdriveScanBuiltinRoots.length) gdriveScanAddRoot({});
 gdriveScanRenderStates(gdriveScanBuiltinStates);
 document.getElementById('gdrive_scan_builtin_add').addEventListener('click', function() { gdriveScanAddRoot({}); });
 
+function gdriveScanNormalizeMappingFields() {
+  ['gdrive_scan_file_check_mappings', 'gdrive_scan_path_mappings'].forEach(function(id) {
+    var field = document.getElementById(id);
+    if (!field) return;
+    field.value = field.value.split(/\r?\n/).map(function(line) {
+      var match = line.match(/^(\s*\/.*?)\s*=>\s*(\/.*)$/);
+      return match ? match[1].trim() + '|' + match[2].trim() : line;
+    }).join('\n');
+  });
+}
+gdriveScanNormalizeMappingFields();
+
 var gdriveScanActiveSettingTab = 'basic';
+
+function toggleGdriveOptionalSettings() {
+  var fileWait = Number($('#gdrive_scan_file_wait_seconds').val()) > 0;
+  $('#gdrive_scan_file_check_options, #gdrive_scan_file_check_advanced').toggle(fileWait);
+  var activity = Array.from(document.querySelectorAll('.gdrive-scan-builtin-root [data-field="detection_mode"]')).some(function(input) {
+    return input.value === 'activity';
+  });
+  $('#gdrive_scan_activity_advanced').toggle(activity);
+}
+$('#gdrive_scan_file_wait_seconds').on('input change', toggleGdriveOptionalSettings);
+$('#gdrive_scan_builtin_root_rows').on('change', '[data-field="detection_mode"]', toggleGdriveOptionalSettings);
+toggleGdriveOptionalSettings();
 
 function gdriveScanShowSettingTab(tab) {
   gdriveScanActiveSettingTab = tab;
   var basic = tab === 'basic';
+  var integration = tab === 'integration';
+  var advanced = tab === 'advanced';
   $('#gdrive_scan_basic_intro, #gdrive_scan_basic_settings, #gdrive_scan_basic_discord').toggle(basic);
-  $('#gdrive_scan_integration_mode').toggle(!basic);
+  $('#gdrive_scan_integration_mode').toggle(integration);
+  $('#gdrive_scan_advanced_settings').toggle(advanced);
   $('#gdrive-scan-basic-tab').toggleClass('active', basic);
-  $('#gdrive-scan-integration-tab').toggleClass('active', !basic);
+  $('#gdrive-scan-integration-tab').toggleClass('active', integration);
+  $('#gdrive-scan-advanced-tab').toggleClass('active', advanced);
   toggleGdriveInputMode();
 }
 
@@ -345,11 +409,12 @@ function toggleGdriveInputMode() {
   var mode = $('#gdrive_scan_input_mode').val();
   var integration = gdriveScanActiveSettingTab === 'integration';
   $('#gdrive_scan_external_mode, #gdrive_scan_external_settings').toggle(integration && mode !== 'builtin');
-  $('#gdrive_scan_vfs_settings').toggle(!integration);
+  $('#gdrive_scan_vfs_settings').toggle(gdriveScanActiveSettingTab === 'basic');
   $('#gdrive_scan_builtin_mode').toggle(integration && mode === 'builtin');
 }
 $('#gdrive-scan-basic-tab').click(function(e) { e.preventDefault(); gdriveScanShowSettingTab('basic'); });
 $('#gdrive-scan-integration-tab').click(function(e) { e.preventDefault(); gdriveScanShowSettingTab('integration'); });
+$('#gdrive-scan-advanced-tab').click(function(e) { e.preventDefault(); gdriveScanShowSettingTab('advanced'); });
 $('#gdrive_scan_input_mode').change(toggleGdriveInputMode);
 function toggleGdriveVfs() {
   var enabled = $('#gdrive_scan_vfs_enabled').prop('checked');
@@ -488,7 +553,8 @@ function gdriveScanUpdateSingleVfsRule(mapping) {
   });
   if (active.length !== 1) return false;
   var rule = active[0].split('|');
-  var pair = String(mapping || '').split('=>');
+  mapping = String(mapping || '');
+  var pair = mapping.split(mapping.indexOf('|') !== -1 ? '|' : '=>');
   if (rule.length < 3 || pair.length !== 2) return false;
   rule[0] = pair[1].trim();
   rule[1] = pair[0].trim();
@@ -558,5 +624,75 @@ $('#gdrive_scan_preview_btn').click(function() {
     }
   }, {global:false});
 });
+</script>
+<script>
+function gdriveScanInitVfsDiscovery() {
+  var rules = document.getElementById('gdrive_scan_vfs_rules');
+  var select = document.getElementById('gdrive_scan_vfs_rule_select');
+  var button = document.getElementById('gdrive_scan_vfs_discover');
+  var target = document.getElementById('gdrive_scan_vfs_candidates');
+  var status = document.getElementById('gdrive_scan_vfs_discovery_status');
+  function reset() {
+    target.textContent = '';
+    status.textContent = '';
+    var selected = select.value;
+    select.textContent = '';
+    rules.value.split(/\r?\n/).forEach(function(line, index) {
+      if (!line.trim() || line.trim().charAt(0) === '#') return;
+      var option = document.createElement('option');
+      option.value = String(index);
+      option.textContent = (index + 1) + ' · ' + line.split('|')[0];
+      select.appendChild(option);
+    });
+    if (Array.from(select.options).some(function(option) { return option.value === selected; })) select.value = selected;
+  }
+  rules.addEventListener('input', reset);
+  select.addEventListener('change', function() { target.textContent = ''; status.textContent = ''; });
+  button.addEventListener('click', function() {
+    var source = rules.value;
+    var index = select.value;
+    if (index === '') { notify('검사할 VFS 규칙을 입력해 주세요.', 'warning'); return; }
+    var lines = source.split(/\r?\n/);
+    target.textContent = '';
+    status.textContent = '읽기 전용 검사 중';
+    button.disabled = true;
+    bookoasisMateAjax('gdrive_scan', 'vfs_discover', {rule:lines[Number(index)]}, function(ret) {
+      if (rules.value !== source || select.value !== index) return;
+      var data = ret.data || {};
+      if (ret.ret !== 'success') { status.textContent = ret.msg || '검사 실패'; return; }
+      status.textContent = '검사 ' + (data.checked || 0) + '곳 · 후보 ' + (data.candidates || []).length + '개' +
+        (data.failures ? ' · 조회 실패 ' + data.failures + '곳' : '') + (data.limited ? ' · 검사 한도 도달' : '');
+      (data.candidates || []).forEach(function(candidate) {
+        var row = document.createElement('div');
+        row.className = 'doctor-toolbar';
+        var label = document.createElement('span');
+        label.textContent = candidate.vfs + ' · ' + (candidate.remote || '(VFS 루트)');
+        row.appendChild(label);
+        var apply = document.createElement('button');
+        apply.type = 'button';
+        apply.className = 'btn btn-sm btn-outline-primary';
+        apply.textContent = '이 후보 적용';
+        apply.addEventListener('click', function() {
+          if (rules.value !== source || select.value !== index) { reset(); return; }
+          if (!confirm('실제 마운트와 같은 경로인지 확인했습니까? 입력란에 적용하며, 설정 저장 전에는 운영에 반영되지 않습니다.')) return;
+          var parts = lines[Number(index)].split('|');
+          parts[1] = candidate.remote ? '/' + candidate.remote : '';
+          parts[2] = parts[2].split('#')[0] + '#' + candidate.vfs;
+          lines[Number(index)] = parts.join('|');
+          rules.value = lines.join('\n');
+          reset();
+          status.textContent = '후보를 입력란에 적용했습니다. 설정 저장으로 확정하세요.';
+        });
+        row.appendChild(apply);
+        target.appendChild(row);
+      });
+    }, function() {
+      button.disabled = false;
+      if (status.textContent === '읽기 전용 검사 중') status.textContent = '검사 실패';
+    }, {global:false});
+  });
+  reset();
+}
+gdriveScanInitVfsDiscovery();
 </script>
 {% endblock %}

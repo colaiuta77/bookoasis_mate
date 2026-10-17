@@ -1,19 +1,15 @@
 {# Google Drive 감지 설정과 중지·대기열 관리 방법을 안내합니다. #}
 {% extends "base.html" %}
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}?v=drive-manual-archify-1">
 <div class="doctor-section doctor-card">
   <h4>변경 감지 흐름</h4>
   <figure class="doctor-manual-diagram">
-    <img src="{{ url_for('bookoasis_mate.static', filename='img/manual/gdrive-change-workflow.svg') }}" alt="변경 감지 흐름" loading="lazy">
-    <figcaption>현재 Mate 버전 기준 개념도입니다. 세부 설정과 제약은 아래 안내를 확인하세요.</figcaption>
+    <iframe class="doctor-manual-archify" src="{{ url_for('bookoasis_mate.static', filename='manual/gdrive-change-workflow.html') }}" title="Google Drive 변경 수집·VFS 갱신·스캔·DB 반영 확인 흐름" loading="lazy" sandbox="allow-scripts allow-downloads allow-popups" allowfullscreen referrerpolicy="no-referrer"></iframe>
+    <figcaption>Archify 대화형 도식입니다. 항목을 선택하면 관련 흐름과 상세 설명을 확인할 수 있습니다. <a href="{{ url_for('bookoasis_mate.static', filename='manual/gdrive-change-workflow.html') }}" target="_blank" rel="noopener noreferrer">큰 화면으로 열기</a> · <a href="{{ url_for('bookoasis_mate.static', filename='manual/gdrive-change-workflow.workflow.json') }}" target="_blank" rel="noopener noreferrer">편집 원본</a></figcaption>
   </figure>
-  <details class="mt-3">
-    <summary>상세 흐름 보기 · 입력 방식 / 이벤트 큐 / 스캔 처리</summary>
-    <p class="mt-2"><a href="{{ url_for('bookoasis_mate.static', filename='img/manual/gdrive-change-detail.svg') }}" target="_blank" rel="noopener">상세 구성도 원본 열기</a></p>
-    <div style="overflow-x:auto" tabindex="0" role="region" aria-label="Google Drive 상세 구성도 가로 스크롤"><img src="{{ url_for('bookoasis_mate.static', filename='img/manual/gdrive-change-detail.svg') }}" alt="Google Drive 입력 방식별 이벤트 수집, 영속 큐, 경로 검증, BookOasis 스캔의 담당 영역별 상세 흐름" style="width:100%;min-width:1100px;height:auto" loading="lazy"></div>
-  </details>
+  <p class="doctor-muted mb-0">Mate가 스캔 전에 VFS를 갱신합니다. 파일 확인 대기·스캔 요청 처리·DB 반영 확인은 서로 다른 단계이며, Discord는 별도 대기열에서 발송합니다. 도식은 로컬 소스 기준 안내이며 운영 서버의 실시간 상태를 표시하지 않습니다.</p>
 </div>
-<link rel="stylesheet" href="{{ url_for('bookoasis_mate.static', filename='css/bookoasis_mate.css') }}">
 <div class="doctor-section doctor-card">
   <h3>Google Drive 연동 매뉴얼</h3>
   <p>변경을 수집해 Mate 대기열에 저장하고 BookOasis에 개별 경로 스캔을 요청합니다. 입력 방식을 하나 선택하며, 대기열 이후의 처리 경로는 같습니다.</p>
@@ -26,15 +22,16 @@
     </tbody>
   </table></div>
   <p>공통 설정에서 현재 DB 엔진과 연결 정보를 설정하고 BookOasis URL·관리자 계정·웹훅 토큰을 확인하세요. 일반·성인·오디오북·비디오 DB의 보관함에 연결할 수 있습니다.</p>
+  <p><strong>기본 설정</strong>은 연동 사용·감지 방식·스캔 묶음·파일 확인·VFS·Discord, <strong>연동 설정</strong>은 선택한 감지 방식의 연결·감시 경로, <strong>고급 설정</strong>은 대기 한도·재시도·연결 제한·이력 보관을 다룹니다. 탭을 바꾸어도 같은 설정 폼의 입력값을 함께 저장합니다. Activity 조회 지연과 Discord 묶음 시간은 해당 기능 안의 접기 영역에 있습니다.</p>
 </div>
 <div class="doctor-section doctor-card">
   <h4>1. Mate 자체 감지 시작</h4>
   <ol>
-    <li>연동 설정에서 <strong>Mate 자체 감지</strong>를 선택합니다.</li>
-    <li>FF에서 실행 가능한 rclone 경로와 <code>/data/rclone.conf</code>를 함께 입력합니다. <strong>버전 확인</strong>·<strong>설정 확인</strong>으로 확인합니다. 둘 다 비우면 FF rclone 플러그인 설정을 사용합니다.</li>
+    <li><strong>기본 설정</strong>의 변경 감지 방식에서 <strong>Mate 자체 감지</strong>를 선택합니다.</li>
+    <li><strong>연동 설정</strong>에서 FF가 실행할 수 있는 rclone 경로와 <code>/data/rclone.conf</code>를 함께 입력합니다. <strong>버전 확인</strong>·<strong>설정 확인</strong>으로 확인합니다. 둘 다 비우면 FF rclone 플러그인 설정을 사용합니다.</li>
     <li>리모트·실제 폴더 ID·리모트 상대 경로·BookOasis 경로 루트를 등록합니다. 감시 경로는 최대 10개이며 동일 폴더 ID·중첩 경로는 등록할 수 없습니다.</li>
     <li>각 경로에서 Changes 또는 Activity를 선택합니다. Union은 실제 감시할 직접 Drive upstream을 추가로 선택합니다.</li>
-    <li>설정 저장 → <strong>토큰 갱신 및 연결 테스트</strong> → 경로 매핑 검사를 완료하고 연동 사용을 켜서 저장합니다.</li>
+    <li>설정 저장 → <strong>토큰 갱신 및 연결 테스트</strong>를 실행합니다. 기본 설정의 VFS 규칙·필요한 파일 확인 경로 매핑을 확인한 뒤 연동 사용을 켜서 저장합니다. 외부 gd-poller용 경로 매핑은 자체 감지에 적용하지 않습니다.</li>
   </ol>
   <p>최초 실행은 전체 재귀 목록 조회를 실행하지 않고 현재 시점부터 시작합니다. 기존 파일 전체를 스캔하거나 과거 변경을 복구하는 기능이 아닙니다.</p>
   <p class="alert alert-warning">rclone.conf는 부모 디렉터리까지 쓰기 가능하고 영구 저장되는 곳에 두세요. 파일 하나만 bind mount하면 토큰 저장 시 교체에 실패할 수 있습니다. GDS와 저장 경쟁을 피하려면 Mate 전용 사본을 사용하고 양방향 자동 동기화하지 마세요.</p>
@@ -71,8 +68,9 @@
   <p>VFS는 기본 설정 탭에서 세 감지 방식에 공통으로 설정합니다. rclone vfs/refresh 사용은 기본 On이며, Off이면 Mate의 사전 forget·refresh를 생략합니다. 이때 캐시 갱신은 외부에서 보장해야 합니다.</p>
   <p>변경 이벤트 목록의 시간은 최근 시도 기준입니다. 처리 완료는 Mate의 이벤트 처리 종료이며, 비동기 스캔 요청의 실제 완료를 의미하지 않습니다. 과거 이벤트에 기록되지 않은 처리 시작·스캔 요청 시각은 빈 값으로 표시합니다.</p>
   <p>이벤트 경로를 BookOasis DB의 보관함 경로에 맞춥니다. 이미 같으면 매핑은 비웁니다. gd-poller와 Mate 양쪽에서 중복 변환하지 마세요.</p>
-  <pre><code>/GDRIVE =&gt; /mnt/gds/GDRIVE</code></pre>
-  <p><strong>경로 매핑 검사</strong>에서 실제 수신 예상 경로를 넣고 변환 결과·보관함·VFS 규칙을 확인합니다. 자동 제안은 한 보관함에 명확히 대응할 때만 사용합니다.</p>
+  <pre><code>/GDRIVE|/mnt/gds/GDRIVE</code></pre>
+  <p>외부 입력용 매핑과 파일 확인용 매핑은 모두 <code>왼쪽 경로|오른쪽 경로</code> 형식입니다. 이전에 저장한 <code>=&gt;</code> 형식도 계속 읽으며, 설정 화면에서는 <code>|</code>로 표시합니다. 외부 입력용 매핑은 gd-poller 경로를 BookOasis 경로로, 파일 확인용 매핑은 BookOasis 경로를 FlaskFarm에서 보이는 경로로 변환합니다.</p>
+  <p>외부 연동의 <strong>경로 매핑 검사</strong>에서 실제 수신 예상 경로를 넣고 변환 결과·보관함·VFS 규칙을 확인합니다. 자동 제안은 한 보관함에 명확히 대응할 때만 사용하며 <code>|</code> 형식으로 입력합니다. 활성 VFS 규칙이 하나이면 그 경로 쌍도 함께 맞추고 RC 주소·VFS 이름·인증값은 유지합니다. 적용 후 설정 저장으로 확정하세요.</p>
   <p>BookOasis 경로 루트는 DB 기준이며 FF에 같은 미디어 마운트가 없어도 됩니다. rclone 실행 파일·설정 파일은 FF에 있어야 합니다.</p>
   <p>스캔에는 보관함 기준 상대 디렉터리를 사용합니다. 보관함이 <code>/books</code>이고 파일이 <code>/books/작품/A.cbz</code>이면 <code>작품</code>을 전달합니다.</p>
   <details><summary>VFS 규칙 예시</summary>
@@ -81,19 +79,26 @@
     <p>형식은 BookOasis 경로 접두사 | rclone 경로 | RC 주소 | 사용자명 | 비밀번호입니다. 인증정보는 URL에 넣지 마세요.</p>
     <p>자체 감지와 외부 연동 모두 VFS 규칙이 필요합니다. Mate는 이동·이름 변경·삭제 시 이전 항목을 forget하고, 스캔 전에 부모 폴더 목록을 refresh합니다. BookOasis는 VFS 갱신보다 먼저 경로 존재 여부를 검사할 수 있습니다.</p>
     <p>삭제·이동 이전 경로가 없다는 응답이면 해당 보관함 안의 상위 폴더를 재요청합니다. 루트까지 올라가면 해당 보관함의 증분 스캔을 요청합니다. 생성 경로의 404나 인증·통신 오류에는 이 처리를 하지 않습니다.</p>
-    <p>rclone.conf만으로 RC 주소·VFS 이름을 알아낼 수는 없습니다. 규칙이 없거나 VFS 갱신이 실패하면 스캔을 보류합니다.</p>
+    <p>rclone.conf만으로 RC 주소를 알아낼 수는 없습니다. 규칙이 없거나 VFS 갱신이 실패하면 스캔을 보류합니다.</p>
+    <p><strong>VFS 경로 자동 감지</strong>는 규칙에 입력한 RC의 활성 VFS와 경로 후보를 읽기 전용으로 검사합니다. 폴더 존재만 확인하므로 같은 이름의 다른 폴더일 수도 있습니다. 실제 마운트 경로를 확인하고 <strong>이 후보 적용 → 설정 저장</strong>으로 확정하세요. RC에 활성 VFS가 없거나 경로가 다르면 수동 규칙을 사용합니다. 최대 64개 후보·약 20초를 검사하며 마지막 HTTP 요청의 제한 시간만큼 더 걸릴 수 있습니다.</p>
   </details>
 </div>
 <div class="doctor-section doctor-card">
   <h4>4. 스캔 처리·오류 확인</h4>
   <ul>
-    <li>기본 버퍼 60초 후 최대 500개 이벤트를 한 배치로 처리합니다. 같은 DB·보관함·상대 폴더는 합치고 상위 경로가 하위 경로를 포함하면 요청을 줄입니다.</li>
+    <li>같은 부모 폴더의 마지막 변경부터 기본 60초를 기다린 뒤 최대 500개 이벤트를 한 배치로 처리합니다. 변경이 계속되어도 각 이벤트는 최대 버퍼 대기(기본 600초) 후 처리합니다. 0초 버퍼는 즉시 처리하며, 같은 DB·보관함·상대 폴더와 겹치는 상위 경로는 합칩니다.</li>
+    <li><strong>파일 확인 대기</strong>는 기본 0초(미사용)입니다. 사용하려면 BookOasis 경로 → FlaskFarm에서 보이는 경로를 명시적으로 매핑하세요. 추가·수정은 존재, 삭제는 부재, 이동·이름 변경은 새 경로 존재와 이전 경로 부재를 확인합니다. 파일 내용·크기 안정화·업로드 완료를 확인하는 기능은 아닙니다. 접근 불가 루트는 삭제 성공으로 처리하지 않습니다.</li>
+    <li>파일 대기는 스캔 전에 VFS 갱신 후 시작하며, 기본 20초마다 재확인합니다. 대기 상태·시작 시각은 DB에 남고 재시작 후에도 유지됩니다. 다른 폴더의 처리를 막지 않고 실패 횟수를 소모하지 않습니다. 제한 시간을 넘으면 실패로 표시하고 수동 재시도 시 새 대기를 시작합니다.</li>
+    <li>자체 감지의 과거 Drive 활동은 현재 ID 상태와 대조합니다. 수집 시 이미 복원된 항목은 현재 상태 이벤트로 전환하고 원본 액션·사유를 JSON의 <code>drive</code>에 남깁니다. 파일 확인에서 막힌 경로는 원본 ID와 현재 부모 목록의 유일한 ID를 비교하며, 복원·교체가 확인되면 부재 대기 대신 기존 상위 폴더 스캔으로 진행합니다. 판단 상세는 JSON의 <code>reconciliation</code>에 기록합니다. ID가 없거나 API·마운트 접근에 실패하면 기존 대기를 유지하며, 조회 실패 종류는 <code>reconciliation_error</code>에 남깁니다. 동일 경로 재동기화는 DB 경로만으로 내용 갱신을 증명할 수 없어 자동 확인 미지원으로 기록합니다.</li>
+    <li>VFS forget·refresh는 동일 규칙·인증별로 최대 64개 경로를 묶습니다. 삭제 경로 처리를 먼저 실행하며 경로별 갱신 실패가 있는 스캔은 보류합니다. 갱신 묶음의 응답 시간이 초과되면 개별 경로로 나누어 재확인합니다. 자체 감지는 한 수집 회차에서 같은 인증·조회 조건의 Drive GET 응답과 인증 정보를 공유합니다. Activity 조회와 스캔 실행 요청은 캐시하지 않습니다.</li>
     <li>관리자 계정이 있으면 <strong>관리자 경로 스캔</strong>을 우선 사용합니다. 계정이 없거나 404/405이면 토큰 기반 경로 웹훅을 사용합니다.</li>
     <li>파일은 상위 폴더, 폴더는 해당 경로를 스캔합니다. 이동은 이전·현재 경로, 삭제된 폴더는 상위 폴더를 처리합니다.</li>
     <li>다중 루트 보관함은 관리자 scan-path API에 보관함 내부의 절대 경로를 전달하여 해당 경로만 스캔합니다. 관리자 계정이나 API가 없으면 오류를 표시하며 자동으로 전체 스캔하지 않습니다.</li>
     <li>단일 보관함 루트 변경 또는 삭제 경로의 상위 폴더도 없을 때는 보관함 전체 증분 스캔으로 전환하며 사유를 표시합니다. 강제 전체 재분석은 아닙니다. 요청 접수는 실제 스캔 완료와 구분됩니다.</li>
+    <li><strong>DB 경로 반영 확인</strong>은 새로 처리한 일반·성인 도서 파일 이벤트에 적용됩니다. 요청 처리 후 이벤트별 20초 간격·10분 대기 한도로 BookOasis DB를 읽기 전용으로 확인합니다. 기존 스캔 작업자가 확인하므로 긴 스캔 배치 실행 중이거나 작업 중지 상태에서는 확인과 시간 초과 표시가 늦어질 수 있습니다. 추가·복원은 현재 활성 경로, 이동·이름 변경은 새 활성 경로와 이전 활성 경로 부재, 삭제는 활성 경로 부재를 확인합니다. DB 확인 대기는 Mate 재시작 후 이어집니다.</li>
+    <li><strong>확인 시간 초과</strong>는 스캔 실패를 뜻하지 않으며 자동 재스캔이나 DB 수정을 하지 않습니다. 파일 수정·폴더·보조 파일·오디오/비디오는 경로만으로 판단할 수 없어 JSON에 자동 확인 미지원으로 기록합니다. 목록에는 확인된 경우 <strong>반영 확인</strong> 시각만 표시하며, 확인 대기·시간 초과 문구는 유지합니다. 반영 확인은 관측한 DB 경로 상태이며 전체 스캔·메타데이터·표지 갱신 완료를 보장하지 않습니다. 상세 판정과 사유는 JSON의 <code>db_verification</code>에서 확인하세요. 과거 처리 이력은 소급 확인하지 않으며 Discord는 기존 요청 처리 알림을 유지합니다.</li>
     <li>시간 초과·연결 단절·408/502/503/504 등 완료 여부가 불명확한 경로 스캔은 자동 재시도하지 않습니다. BookOasis 결과·로그 확인 후 수동 재시도하세요.</li>
-    <li>실패 상세는 <strong>JSON</strong>에서 확인합니다. 잘못된 원본 경로는 <strong>경로 수정</strong> 후 재시도합니다. 일반 재시도는 현재 매핑을 다시 적용합니다.</li>
+    <li>목록의 삭제 이벤트는 <strong>삭제 경로</strong> 하나만 표시하며 <strong>이동 전</strong>은 이동·이름 변경에만 표시합니다. 실패 상세는 <strong>JSON</strong>에서 확인합니다. 잘못된 원본 경로는 <strong>경로 수정</strong> 후 재시도합니다. 일반 재시도는 현재 매핑을 다시 적용합니다.</li>
     <li>지원하지 않는 확장자는 무시합니다. 디렉터리와 <code>.bookoasisignore</code> 이벤트는 항상 처리합니다.</li>
   </ul>
   <p>Google 호출 제한은 약 60초부터 최대 15분까지 대기 시간을 늘려 재시도합니다. 여러 서버가 같은 계정·프로젝트를 쓰면 할당량을 공유할 수 있습니다. MariaDB 1205는 DB 잠금 대기 오류이므로 스캐너·메타데이터 작업과 DB 로그를 함께 확인하세요.</p>
@@ -145,5 +150,16 @@ gd-poller /path/to/config.yaml</code></pre>
     <p>poller의 감시 폴더·경로·actions도 설정하세요. 수정·복원을 받으려면 edit·restore를 포함합니다. 명령 뒤의 action·파일 유형·현재/이전 경로는 Dispatcher가 추가합니다.</p>
     <p class="alert alert-warning">명령행 키는 로그·프로세스 목록에 노출될 수 있고, 웹훅 URL의 키도 오류·프록시 로그에 남을 수 있습니다. 외부 구간은 HTTPS를 사용하고 설정·로그 접근을 제한하세요.</p>
   </details>
+</div>
+<div class="doctor-section doctor-card">
+  <h4>Discord 알림 대기열</h4>
+  <p>Mate 자체 감지는 감시 대상별 첫 실제 오류와 이후 실제 수집 성공에 따른 복구를 알립니다. 반복 오류·재시작·사용자 중지·호출 제한 대기는 새 상태 전환으로 보지 않습니다. 이 알림은 묶음 대기 없이 처리하되 웹훅의 호출 제한은 따릅니다. 외부 입력 방식의 송신자 상태는 추정하지 않습니다.</p>
+  <p>최종 처리 결과를 DB에 보존하고 스캔과 독립된 작업자가 기본 60초 동안 묶어 발송합니다. 새 결과가 계속 들어와도 최초 결과부터 최대 180초 후 발송하며, 묶음 시간을 0으로 설정하면 추가 지연 없이 다음 작업자 실행에서 처리합니다. 0초여도 그 사이 쌓인 결과는 함께 보낼 수 있습니다. 실패 항목을 먼저 표시하고 카드 한도를 넘는 상세는 건수로 요약합니다.</p>
+  <p><strong>카드 10건 표시 · 외 47건 생략</strong>은 57개 이벤트를 집계하되 상세 카드만 10개 보냈다는 뜻입니다. 스캔을 생략한 것이 아니며 나머지 상세를 후속 메시지로 보내지는 않습니다. 카드 수는 최대 10개이고 전체 카드 문자 한도에 따라 더 적어질 수 있습니다. 개별 결과는 변경 이벤트 목록·JSON에서 확인하세요.</p>
+  <p>HTTP 413은 해당 발송 묶음을 최종 실패로 남기며 자동 재발송하지 않습니다. 이 상태 코드만으로 문자 한도·프록시·Discord 측 거절 중 어느 원인인지 단정할 수 없습니다. 알림 묶음을 0초로 줄이거나 이전 방식으로 바꾸는 것만으로 413 해결을 보장하지 않습니다.</p>
+  <p>429 호출 제한은 Discord가 알려 준 시간 동안 해당 웹훅 전체를 기다립니다. 연결 오류·5xx는 30초부터 최대 30분 간격으로 재시도하며 10회 실패하면 종료합니다. 401·403·404는 목적지 발송을 차단합니다. 웹훅을 확인하고 다시 저장하면 차단이 해제되며 이전 실패 알림은 자동 재발송하지 않습니다.</p>
+  <p>웹훅 저장·삭제 시 기존 미발송 알림을 취소합니다. 이미 진행 중인 HTTP 요청은 소급 취소할 수 없습니다. 플러그인 재시작 시 대기열을 복구하며 Drive 작업 중지만으로 기존 알림 대기열을 삭제하지 않습니다. 완료·취소·최종 발송 실패는 7일 후 정리합니다.</p>
+  <p>알림 대기열 기록만 실패하면 이벤트에 ‘스캔 결과 확인됨 · 알림 기록 재시도 대기’를 표시하고 저장을 재시도합니다. 이 상태는 재시작 후에도 스캔 요청을 다시 보내지 않습니다.</p>
+  <p>실제 메시지 생성 응답을 확인하지만, Discord가 수신한 직후 연결이나 프로세스가 끊기면 재전송으로 중복될 수 있습니다. 알림의 ‘요청 접수’는 코어의 실제 스캔 완료를 보장하지 않습니다. 알림 전송 실패가 스캔을 다시 실행하지는 않으나, 스캔 결과 자체를 저장할 수 없는 전체 DB 장애까지 정확히 한 번 실행을 보장하지는 않습니다.</p>
 </div>
 {% endblock %}

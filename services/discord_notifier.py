@@ -1,5 +1,6 @@
 # Google Drive 변경 이벤트를 Discord 웹훅 배치 요약으로 전송합니다.
 import json
+import math
 from collections import Counter
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
@@ -7,7 +8,10 @@ from urllib.request import Request, urlopen
 
 
 class DiscordWebhookError(RuntimeError):
-    pass
+    def __init__(self, message, status_code=None, retry_after=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after = retry_after
 
 
 class DiscordWebhookNotifier:
@@ -86,11 +90,34 @@ class DiscordWebhookNotifier:
                 status = int(getattr(response, "status", 204) or 204)
                 if status < 200 or status >= 300:
                     raise DiscordWebhookError(
-                        f"Discord 알림 전송이 HTTP {status}로 실패했습니다."
+                        f"Discord 알림 전송이 HTTP {status}로 실패했습니다.", status_code=status
                     )
+                if urlsplit(url).query == 'wait=true':
+                    try:
+                        data = json.loads(response.read(65537))
+                        message_id = str(data.get('id') or '')
+                        if not message_id.isdigit():
+                            raise ValueError('missing message id')
+                        return {'message_id': message_id}
+                    except (ValueError, TypeError, AttributeError):
+                        raise DiscordWebhookError('Discord 메시지 생성 응답을 확인하지 못했습니다.') from None
         except HTTPError as error:
+            delays = []
+            try:
+                body = json.loads(error.read(65537))
+            except (ValueError, TypeError):
+                body = {}
+            for value in ((error.headers or {}).get('Retry-After'), body.get('retry_after') if isinstance(body, dict) else None):
+                try:
+                    seconds = float(value)
+                    if math.isfinite(seconds) and 0 <= seconds <= 604800:
+                        delays.append(seconds)
+                except (ValueError, TypeError):
+                    pass
+            error.close()
             raise DiscordWebhookError(
-                f"Discord 알림 전송이 HTTP {int(error.code)}로 실패했습니다."
+                f"Discord 알림 전송이 HTTP {int(error.code)}로 실패했습니다.",
+                status_code=int(error.code), retry_after=max(delays) if delays else None
             ) from None
         except URLError as error:
             reason = getattr(error, "reason", None)
@@ -296,3 +323,28 @@ class DiscordWebhookNotifier:
                 f"Discord 알림 전송에 실패했습니다. ({type(error).__name__})"
             ) from None
         return {"sent": True, "disabled": False}
+
+    def send_payload(self, payload, wait=False):
+        if not self.webhook_url:
+            return {'sent': False, 'disabled': True}
+        try:
+            result = self.sender(self.webhook_url + ('?wait=true' if wait else ''), payload, self.timeout)
+            if wait and (not isinstance(result, dict) or not result.get('message_id')):
+                raise DiscordWebhookError('Discord 메시지 생성 응답을 확인하지 못했습니다.')
+            return dict(result or {}, sent=True, disabled=False)
+        except DiscordWebhookError:
+            raise
+        except Exception as error:
+            raise DiscordWebhookError(f'Discord 알림 전송에 실패했습니다. ({type(error).__name__})') from None
+
+    def build_batch_payload(self, events, results, statuses):
+        events = sorted(events, key=lambda event: statuses.get(int(event['id'])) != 'failed')
+        return self._payload(events, results, statuses)
+
+    def build_health_payload(self, display_name, recovered, error_kind):
+        state = '복구' if recovered else '오류'
+        return {'content': f'**BookOasis Google Drive 감지 {state}**',
+                'embeds': [{'title': self._truncate(display_name, 100),
+                            'description': '실제 변경 수집에 다시 성공했습니다.' if recovered else self._truncate(error_kind, 100),
+                            'color': 0x57F287 if recovered else 0xED4245}],
+                'allowed_mentions': {'parse': []}}

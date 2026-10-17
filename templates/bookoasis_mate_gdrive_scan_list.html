@@ -307,6 +307,7 @@ function renderGdriveEvents(data) {
   items.forEach(function(item) {
     var row = document.createElement('article');
     row.className = 'doctor-gdrive-row';
+    var waiting = item.status === 'retry' && (item.result || {}).waiting;
 
     var idColumn = document.createElement('div');
     idColumn.className = 'doctor-gdrive-id';
@@ -326,18 +327,19 @@ function renderGdriveEvents(data) {
     infoColumn.appendChild(bookoasisMateText(
       'span',
       'doctor-gdrive-status doctor-gdrive-status-' + (item.status || 'unknown'),
-      gdriveEventStatusLabel(item.status)
+      waiting ? '파일 확인 대기' : gdriveEventStatusLabel(item.status)
     ));
     infoColumn.appendChild(bookoasisMateText('span', 'doctor-muted', '시도 ' + (item.attempts || 0) + '회'));
     row.appendChild(infoColumn);
 
     var pathColumn = document.createElement('div');
     pathColumn.className = 'doctor-gdrive-paths';
-    pathColumn.appendChild(gdriveEventInfoLine('경로', item.path || '경로 확인 보류', 'doctor-path'));
+    var displayPath = item.action === 'delete' ? item.removed_path || item.path : item.path;
+    pathColumn.appendChild(gdriveEventInfoLine(item.action === 'delete' ? '삭제 경로' : '경로', displayPath || '경로 확인 보류', 'doctor-path'));
     if (!item.path && item.result && item.result.activity) {
       pathColumn.appendChild(gdriveEventInfoLine('파일', item.result.activity.title || item.result.activity.file_id, 'doctor-path'));
     }
-    if (item.removed_path) {
+    if ((item.action === 'move' || item.action === 'rename') && item.removed_path) {
       pathColumn.appendChild(gdriveEventInfoLine('이동 전', item.removed_path, 'doctor-path doctor-gdrive-previous'));
     }
     pathColumn.appendChild(gdriveEventInfoLine(
@@ -346,7 +348,7 @@ function renderGdriveEvents(data) {
       'doctor-gdrive-library'
     ));
     if (item.error) {
-      pathColumn.appendChild(bookoasisMateText('div', 'doctor-error doctor-gdrive-error', item.error));
+      pathColumn.appendChild(bookoasisMateText('div', (waiting ? 'doctor-muted' : 'doctor-error') + ' doctor-gdrive-error', item.error));
     }
     row.appendChild(pathColumn);
 
@@ -368,7 +370,16 @@ function renderGdriveEvents(data) {
     addTime('처리 완료', item.completed_at);
     var fallbackReasons = Array.from(new Set(scans.map(function(scan) { return scan.fallback_reason; }).filter(Boolean)));
     if (fallbackReasons.length) timeColumn.appendChild(bookoasisMateText('span', 'doctor-muted', '전체 스캔 전환 · ' + fallbackReasons.join(' · ')));
-    if (item.status === 'completed' && scans.some(function(scan) {
+    var verification = result.db_verification;
+    if (verification) {
+      if (verification.state === 'confirmed') addTime('반영 확인', verification.checked_at);
+      else if (verification.state !== 'unsupported') {
+        var verificationLabels = {pending: '요청 접수 · DB 반영 확인 대기', timeout: 'DB 반영 확인 시간 초과'};
+        var verificationLine = bookoasisMateText('span', 'doctor-muted', verificationLabels[verification.state] || 'DB 반영 확인 불가');
+        verificationLine.title = verification.message || '';
+        timeColumn.appendChild(verificationLine);
+      }
+    } else if (item.status === 'completed' && scans.some(function(scan) {
       return scan.success && (scan.mode !== 'admin_scan_path' || (scan.response || {}).cleanup_scope === 'library');
     })) {
       timeColumn.appendChild(bookoasisMateText('span', 'doctor-muted', '요청 접수 · 실제 스캔 완료 미확인'));
