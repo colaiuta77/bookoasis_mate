@@ -327,11 +327,11 @@ class DiscordWebhookNotifier:
                 groups.setdefault(key, []).append(event)
         hidden = set()
         for group in groups.values():
-            primary = next((event for event in group if
-                ((event.get('result') or {}).get('drive') or {}).get('activity_primary') is True), None)
-            if primary is not None:
+            primaries = [event for event in group if
+                ((event.get('result') or {}).get('drive') or {}).get('activity_primary') is True]
+            if len(primaries) == 1:
                 hidden.update(int(event['id']) for event in group
-                              if event is not primary and statuses.get(int(event['id'])) == 'completed')
+                              if event is not primaries[0] and statuses.get(int(event['id'])) == 'completed')
         events = sorted((event for event in events if int(event['id']) not in hidden),
                         key=lambda event: statuses.get(int(event['id'])) != 'failed')
         payloads, batch, embeds, character_count = [], [], [], 0
