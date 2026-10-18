@@ -59,9 +59,10 @@ class DiscordDeliveryWorker:
                 self.model.save_payload(delivery['id'], payload)
             delivery['payload'] = payload
             message = payload['payloads'][payload['next']] if delivery['kind'] == 'result' else payload
+            position = (payload['next'] + 1, len(payload['payloads'])) if delivery['kind'] == 'result' else None
         # HTTP 요청 중에는 DB 트랜잭션이나 설정 잠금을 점유하지 않습니다.
         try:
-            response = notifier.send_payload(message, wait=True)
+            response = notifier.send_payload(message, wait=True, position=position)
         except DiscordWebhookError as error:
             with self.lock:
                 if self.model.is_sending(delivery['id']):

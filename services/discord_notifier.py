@@ -291,13 +291,17 @@ class DiscordWebhookNotifier:
     def send_batch(self, events, results, statuses):
         if not self.webhook_url:
             return {"sent": False, "disabled": True}
-        for payload in self.build_batch_payloads(events, results, statuses):
-            self.send_payload(payload)
+        payloads = self.build_batch_payloads(events, results, statuses)
+        for index, payload in enumerate(payloads):
+            self.send_payload(payload, position=(index + 1, len(payloads)))
         return {"sent": True, "disabled": False}
 
-    def send_payload(self, payload, wait=False):
+    def send_payload(self, payload, wait=False, position=None):
         if not self.webhook_url:
             return {'sent': False, 'disabled': True}
+        if position is not None:
+            suffix = f'\n메시지 {position[0]}/{position[1]}'
+            payload = dict(payload, content=str(payload.get('content') or '')[:2000 - len(suffix)] + suffix)
         try:
             result = self.sender(self.webhook_url + ('?wait=true' if wait else ''), payload, self.timeout)
             if wait and (not isinstance(result, dict) or not result.get('message_id')):
