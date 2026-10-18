@@ -2,6 +2,7 @@
 import hashlib
 import json
 import posixpath
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 try:
@@ -70,6 +71,26 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
             group_identity = json.dumps([self.item_scope, activity], sort_keys=True, separators=(",", ":"))
             activity_group = hashlib.sha256(group_identity.encode("utf-8")).hexdigest()
             primary = activity.get("primaryActionDetail") or {}
+            primary_counts = Counter()
+            for candidate in activity.get("actions") or []:
+                if not primary or (candidate.get("detail") or {}) != primary:
+                    continue
+                when = candidate.get("timestamp") or (candidate.get("timeRange") or {}).get("endTime")
+                when = when or activity.get("timestamp") or (activity.get("timeRange") or {}).get("endTime")
+                if not when:
+                    continue
+                try:
+                    stamp = self._stamp(self._time(when))
+                except (ValueError, TypeError, AttributeError):
+                    # 잘못된 시각은 아래 원본 action 처리에서 기존 방식으로 보고합니다.
+                    continue
+                targets = [candidate["target"]] if candidate.get("target") else activity.get("targets") or []
+                for target in targets:
+                    if "driveItem" not in target:
+                        continue
+                    file_id = str((target.get("driveItem") or {}).get("name") or "").removeprefix("items/")
+                    if file_id:
+                        primary_counts[(file_id, stamp)] += 1
             for action in activity.get("actions") or []:
                 detail = action.get("detail") or {}
                 if not any(kind in detail for kind in ("create", "edit", "move", "rename", "delete", "restore")):
@@ -90,7 +111,8 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
                     identity = json.dumps([file_id, when, detail, action.get("actor")], sort_keys=True, separators=(",", ":"))
                     receipt_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
                     yield {"fileId": file_id, "activity_action": dict(action, target=target),
-                           "activity_group": activity_group, "activity_primary": detail == primary,
+                           "activity_group": activity_group,
+                           "activity_primary": detail == primary and primary_counts[(file_id, stamp)] == 1,
                            "receipt": {"file_id": receipt_id, "parent_id": stamp, "path": "activity"}}, ""
         next_page = payload.get("nextPageToken")
         if next_page:
