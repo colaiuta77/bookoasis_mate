@@ -82,7 +82,10 @@ class ModelDiscordDelivery(ModelBase):
         clean_event['id'] = event['id']
         drive = (event.get('result') or {}).get('drive') or {}
         clean_event['result'] = {'drive': {key: str(drive[key])[:1024] for key in
-            ('name', 'file_id', 'mime_type', 'action_detail', 'occurred_at') if drive.get(key)}}
+            ('name', 'file_id', 'mime_type', 'action_detail', 'occurred_at',
+             'activity_group', 'original_action', 'resolution') if drive.get(key)}}
+        if 'activity_primary' in drive:
+            clean_event['result']['drive']['activity_primary'] = drive['activity_primary'] is True
         clean_result = {
             'libraries': [{'name': str(item.get('name') or '')[:256]} for item in (result.get('libraries') or [])[:20]],
             'scans': [{'mode': str(item.get('mode') or '')[:64], 'request_accepted': bool(item.get('request_accepted')),
@@ -103,7 +106,7 @@ class ModelDiscordDelivery(ModelBase):
             query = session.query(cls).filter(cls.destination == destination)
             retry = query.filter(cls.status == 'retry', cls.due_at <= now).order_by(cls.id).first()
             if retry:
-                rows = query.filter(cls.batch_id == retry.batch_id, cls.status == 'retry').all()
+                rows = query.filter(cls.batch_id == retry.batch_id, cls.status == 'retry').order_by(cls.id).all()
             else:
                 rows = query.filter(cls.status == 'pending', cls.kind == 'health').order_by(cls.id).limit(1).all()
                 if not rows:
@@ -127,7 +130,8 @@ class ModelDiscordDelivery(ModelBase):
     @classmethod
     def save_payload(cls, delivery_id, payload):
         with delivery_session() as session:
-            session.query(cls).filter(cls.id == delivery_id).update({cls.payload: json.dumps(payload, ensure_ascii=False)})
+            session.query(cls).filter(cls.id == delivery_id, cls.status == 'sending').update(
+                {cls.payload: json.dumps(payload, ensure_ascii=False)})
 
     @classmethod
     def is_sending(cls, delivery_id):
@@ -137,12 +141,25 @@ class ModelDiscordDelivery(ModelBase):
     @classmethod
     def complete(cls, delivery_id, message_id, now):
         with delivery_session() as session:
+            row = session.query(cls).filter(cls.id == delivery_id, cls.status == 'sending').first()
+            if row is None:
+                return
+            payload = json.loads(row.payload) if row.payload else {}
+            remaining = False
+            if payload.get('version') == 1:
+                payload['next'] += 1
+                remaining = payload['next'] < len(payload['payloads'])
+                row.payload = json.dumps(payload, ensure_ascii=False)
             session.query(cls).filter(cls.batch_id == delivery_id, cls.status == 'sending').update(
-                {cls.status: 'sent', cls.message_id: message_id, cls.updated_at: now, cls.error: ''})
+                {cls.status: 'retry' if remaining else 'sent', cls.message_id: message_id,
+                 cls.updated_at: now, cls.due_at: now, cls.attempts: 0, cls.error: ''})
 
     @classmethod
-    def reschedule(cls, delivery_id, due_at, error, count_failure):
+    def reschedule(cls, delivery_id, due_at, error, count_failure, payload=None):
         with delivery_session() as session:
+            if payload is not None:
+                session.query(cls).filter(cls.id == delivery_id, cls.status == 'sending').update(
+                    {cls.payload: json.dumps(payload, ensure_ascii=False)})
             session.query(cls).filter(cls.batch_id == delivery_id, cls.status == 'sending').update({
                 cls.status: 'retry', cls.due_at: due_at, cls.error: error[:500],
                 cls.attempts: cls.attempts + int(count_failure)})

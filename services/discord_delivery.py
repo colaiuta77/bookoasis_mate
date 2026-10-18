@@ -46,30 +46,48 @@ class DiscordDeliveryWorker:
                 return False
             notifier = self.notifier_factory(url)
             payload = delivery['payload']
-            if payload is None:
+            if payload is None or (delivery['kind'] == 'result' and payload.get('version') != 1):
                 if delivery['kind'] == 'health':
                     payload = notifier.build_health_payload(**delivery['items'][0])
                 else:
                     items = delivery['items']
                     events = [dict(item['event'], id=index) for index, item in enumerate(items)]
-                    payload = notifier.build_batch_payload(events,
+                    payloads = notifier.build_batch_payloads(events,
                         {index: item['result'] for index, item in enumerate(items)},
                         {index: item['status'] for index, item in enumerate(items)})
+                    payload = {'version': 1, 'payloads': payloads, 'next': 0}
                 self.model.save_payload(delivery['id'], payload)
+            delivery['payload'] = payload
+            message = payload['payloads'][payload['next']] if delivery['kind'] == 'result' else payload
         # HTTP 요청 중에는 DB 트랜잭션이나 설정 잠금을 점유하지 않습니다.
         try:
-            response = notifier.send_payload(payload, wait=True)
+            response = notifier.send_payload(message, wait=True)
         except DiscordWebhookError as error:
             with self.lock:
                 if self.model.is_sending(delivery['id']):
                     self._retry(delivery, destination, error)
         else:
-            self.model.complete(delivery['id'], response['message_id'], self.clock())
+            with self.lock:
+                self.model.complete(delivery['id'], response['message_id'], self.clock())
         return True
 
     def _retry(self, delivery, destination, error):
         now, code = self.clock(), error.status_code
-        if code == 429:
+        if code == 413 and delivery['kind'] == 'result':
+            plan = delivery['payload']
+            position = plan['next']
+            current = plan['payloads'][position]
+            embeds = current['embeds']
+            if len(embeds) <= 1:
+                self.model.fail(delivery['id'], 'HTTP 413: 단일 카드도 거절되어 발송을 완료하지 못했습니다.', now)
+                return
+            middle = len(embeds) // 2
+            parts = [dict(current, embeds=cards,
+                          content=f'**BookOasis Google Drive 변경 처리**\n카드 {len(cards)}건 · 크기 제한으로 분할 전송')
+                     for cards in (embeds[:middle], embeds[middle:])]
+            plan['payloads'][position:position + 1] = parts
+            self.model.reschedule(delivery['id'], now, str(error), False, payload=plan)
+        elif code == 429:
             due = now + timedelta(seconds=max(1, error.retry_after if error.retry_after is not None else 30))
             self.model.set_destination_limit(destination, until=due, error=str(error))
             self.model.reschedule(delivery['id'], due, str(error), False)

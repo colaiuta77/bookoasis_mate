@@ -67,6 +67,9 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
             body.pop("pageToken")
             payload = self._query(body)
         for activity in payload.get("activities") or []:
+            group_identity = json.dumps([self.item_scope, activity], sort_keys=True, separators=(",", ":"))
+            activity_group = hashlib.sha256(group_identity.encode("utf-8")).hexdigest()
+            primary = activity.get("primaryActionDetail") or {}
             for action in activity.get("actions") or []:
                 detail = action.get("detail") or {}
                 if not any(kind in detail for kind in ("create", "edit", "move", "rename", "delete", "restore")):
@@ -87,6 +90,7 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
                     identity = json.dumps([file_id, when, detail, action.get("actor")], sort_keys=True, separators=(",", ":"))
                     receipt_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
                     yield {"fileId": file_id, "activity_action": dict(action, target=target),
+                           "activity_group": activity_group, "activity_primary": detail == primary,
                            "receipt": {"file_id": receipt_id, "parent_id": stamp, "path": "activity"}}, ""
         next_page = payload.get("nextPageToken")
         if next_page:
@@ -118,7 +122,9 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
 
     def activity_event(self, change, previous, item_model):
         try:
-            return self._resolve_activity_event(change, previous)
+            current, event = self._resolve_activity_event(change, previous)
+            event['drive'].update(self._notification_metadata(change))
+            return current, event
         except GoogleDriveApiError as error:
             if error.status_code != 404:
                 raise
@@ -135,11 +141,15 @@ class GoogleDriveActivityClient(GoogleDriveChangesClient):
         # 경로를 추측해 스캔하지 않고 실패 행과 receipt를 함께 저장합니다.
         return previous, {"action": kind, "item_type": "directory" if "driveFolder" in target else "file",
                           "path": "", "removed_path": "", "activity_hold": metadata,
-                          "drive": {"file_id": change["fileId"], "name": str(target.get("title") or ""),
-                                    "action_detail": next(iter(detail.get("create") or {}), "") if "create" in detail else str((detail.get("delete") or detail.get("restore") or {}).get("type") or ""),
-                                    "occurred_at": change["receipt"]["parent_id"],
-                                    "mime_type": str(target.get("mimeType") or "")},
+                          "drive": dict(self._notification_metadata(change), file_id=change["fileId"], name=str(target.get("title") or ""),
+                                    action_detail=next(iter(detail.get("create") or {}), "") if "create" in detail else str((detail.get("delete") or detail.get("restore") or {}).get("type") or ""),
+                                    occurred_at=change["receipt"]["parent_id"],
+                                    mime_type=str(target.get("mimeType") or "")),
                           "ingestion_error": f"Activity 경로 확인 보류 ({kind}, 파일 ID {change['fileId']}): {reason} 경로 수정 후 재시도해 주세요. 다른 활동 수집은 계속합니다."}
+
+    @staticmethod
+    def _notification_metadata(change):
+        return {key: change[key] for key in ('activity_group', 'activity_primary') if key in change}
 
     def _resolve_activity_event(self, change, previous):
         action = change["activity_action"]
