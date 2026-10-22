@@ -42,9 +42,9 @@
         <h4>BookOasis API 연결</h4>
         <p class="doctor-muted">API 연결 정보를 입력합니다. <a href="/bookoasis_mate/manual#manual-connection" target="_blank" rel="noopener">연결 매뉴얼 ↗</a></p>
         {{ macros.setting_input_text('bookoasis_url', 'BookOasis URL', value=arg['bookoasis_url'], desc=['예: http://172.17.0.1:5930 또는 HTTPS 대표 주소']) }}
-        {{ macros.setting_input_text('bookoasis_username', 'BookOasis 관리자 계정', value=arg['bookoasis_username'], desc=['개별 도서 재스캔과 메타데이터 검색·적용에 사용합니다.']) }}
+        {{ macros.setting_input_text('bookoasis_username', 'BookOasis 관리자 계정', value=arg['bookoasis_username'], desc=['실시간 스캔·TTS 상태, 보관함 스캔·예약 관리, 코어 문제 처리, 메타데이터 검색·적용과 플러그인 관리 등 관리자 API에 사용합니다.']) }}
         {{ macros.setting_input_text('bookoasis_password', 'BookOasis 관리자 비밀번호', value=arg['bookoasis_password'], type='password', desc=['서버 측 관리자 세션 생성에만 사용하며 로그나 API 응답에 표시하지 않습니다.']) }}
-        {{ macros.setting_input_text('webhook_token', '스캔 웹훅 토큰', value=arg['webhook_token'], desc=['BookOasis .env의 WEBHOOK_TOKEN 값입니다.']) }}
+        {{ macros.setting_input_text('webhook_token', '스캔 웹훅 토큰', value=arg['webhook_token'], desc=['BookOasis에서 사용 중인 WEBHOOK_TOKEN 값입니다. 코어의 시스템 설정값을 먼저 확인하고, 없으면 환경변수 값을 사용합니다.']) }}
         {{ macros.setting_input_int('api_timeout', 'API 연결 제한 시간(초)', value=arg['api_timeout'], desc=['1~30초 · 기본값 30초']) }}
       </div>
     </div>

@@ -137,7 +137,7 @@
     },
     {
       "id": "processor", "lane": "scan", "col": 3, "type": "backend",
-      "label": "공통 스캔 처리", "sublabel": "보관함 매칭·중복 경로 통합", "tag": "로컬은 VFS 갱신 안 함",
+      "label": "공통 스캔 처리", "sublabel": "보관함 매칭·중복 경로 통합", "tag": "Mate 사전 VFS 갱신 없음",
       "sources": [
         {"path": "modules/mod_local_watch.py", "line": 252, "end_line": 259},
         {"path": "services/gdrive_scan.py", "line": 730, "end_line": 758},
@@ -200,10 +200,10 @@
     {
       "dot": "violet", "title": "스캔 범위와 결과 해석",
       "items": [
-        "GDriveScanProcessor를 재사용하되 refresh_vfs=False로 실행합니다. 로컬 감지는 rclone VFS를 갱신하지 않으며, FUSE 캐시에 보이지 않는 변경을 발견하거나 캐시를 강제로 최신화하지 않습니다.",
+        "GDriveScanProcessor를 재사용하되 refresh_vfs=False로 실행합니다. Mate의 로컬 감지 사전 처리에서는 rclone VFS 명령을 보내지 않으며, FUSE 캐시에 보이지 않는 변경을 발견하거나 캐시를 강제로 최신화하지 않습니다. BookOasis 자체의 스캔 전 갱신 설정은 별도로 적용될 수 있습니다.",
         "가장 긴 보관함 루트에 매칭하고 겹친 디렉터리 요청을 합칩니다. 부분 경로가 있으면 부분 스캔, 보관함 루트 변경은 보관함 스캔을 요청합니다. 삭제 경로가 없다는 응답일 때만 안전 조건에 따라 상위 범위로 넓힙니다.",
         "관리자 API를 우선 사용하며 미설정·미지원 시 가능한 웹훅으로 대체합니다. 다중 루트 절대 경로 부분 스캔을 지원하지 않으면 전체 스캔으로 자동 전환하지 않습니다. 성공 응답은 completed, 오류는 조건에 따라 retry 또는 failed로 기록합니다.",
-        "completed는 Mate의 API 처리 결과입니다. 웹훅 접수와 관리자 부분 스캔 응답은 반환 방식이 다르며, 로컬 작업자는 최종 DB 반영이나 전체 스캔 완료를 따로 추적하지 않습니다. 최종 상태는 BookOasis에서 확인하세요. 이 도식은 실시간 운영 상태가 아닌 소스 기반 안내입니다."
+        "completed는 Mate의 API 처리 결과입니다. 보관함 전체 웹훅은 큐 접수이고, 경로 웹훅·관리자 부분 스캔은 동기 응답입니다. 로컬 작업자는 최종 DB 반영이나 전체 스캔 완료를 따로 추적하지 않습니다. 최종 상태는 BookOasis에서 확인하세요. 이 도식은 실시간 운영 상태가 아닌 소스 기반 안내입니다."
       ]
     }
   ]
