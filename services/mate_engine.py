@@ -1502,28 +1502,29 @@ class BookOasisMateEngine:
                 break
             with closing(self._connect(target)) as connection:
                 if target.db_type == "audiobook":
-                    table, alias, field = "audiobooks", "a", "poster"
+                    table, alias, fields = "audiobooks", "a", ("poster",)
                 elif target.db_type == "video":
-                    table, alias, field = "videos", "v", "poster"
+                    table, alias, fields = "videos", "v", ("poster",)
                 else:
-                    table, alias, field = "books", "b", "cover_image"
+                    table, alias, fields = "books", "b", ("cover_image", "banner_image")
                 if table not in self._tables(connection):
                     continue
                 columns = self._columns(connection, table)
-                if field not in columns:
+                fields = [field for field in fields if field in columns]
+                if not fields:
                     continue
-                conditions = [f"TRIM(COALESCE({alias}.{field}, '')) != ''"]
-                if "is_deleted" in columns:
-                    conditions.append(
-                        f"({alias}.is_deleted = 0 OR {alias}.is_deleted IS NULL)"
-                    )
+                # 휴지통 복구도 기존 이미지 경로를 사용하므로 삭제 표시된 행까지 보호합니다.
+                conditions = ["(" + " OR ".join(
+                    f"TRIM(COALESCE({alias}.{field}, '')) != ''" for field in fields
+                ) + ")"]
                 params = []
                 if selected_ids and "library_id" in columns:
                     placeholders = ", ".join("?" for _ in selected_ids)
                     conditions.append(f"{alias}.library_id IN ({placeholders})")
                     params.extend(selected_ids)
                 cursor = connection.execute(
-                    f"SELECT {alias}.{field} FROM {table} {alias} WHERE "
+                    "SELECT " + ", ".join(f"{alias}.{field}" for field in fields)
+                    + f" FROM {table} {alias} WHERE "
                     + " AND ".join(conditions),
                     params,
                 )
@@ -1533,8 +1534,8 @@ class BookOasisMateEngine:
                     rows = cursor.fetchmany(batch_size)
                     if not rows:
                         break
-                    for row in rows:
-                        value = str(row[0] or "").strip()
+                    for value in (row[index] for row in rows for index in range(len(fields))):
+                        value = str(value or "").strip()
                         if value.lower().startswith(("http://", "https://")):
                             continue
                         raw_path = Path(value.split("?", 1)[0]).expanduser()
