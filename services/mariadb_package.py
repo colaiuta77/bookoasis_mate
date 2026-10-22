@@ -563,25 +563,29 @@ class MariaDBPackageEngine:
                         track_updates,
                     )
             if db_type == "video" and "video_episodes" in tables:
+                path_fields = ["file_path"]
+                if "subtitle_path" in connection.columns("video_episodes"):
+                    path_fields.append("subtitle_path")
+                update_sql = f"UPDATE video_episodes SET {', '.join(field + '=?' for field in path_fields)} WHERE id=?"
                 episode_updates = []
                 for row in self._iter_rows(
                     connection.execute(
-                        "SELECT id, file_path FROM video_episodes ORDER BY id"
+                        f"SELECT id, {', '.join(path_fields)} FROM video_episodes ORDER BY id"
                     )
                 ):
-                    current = str(row["file_path"] or "")
-                    mapped = _apply_mapping(current, mappings)
+                    current = tuple(row[field] for field in path_fields)
+                    mapped = tuple(_apply_mapping(value, mappings) if value else value for value in current)
                     if mapped != current:
-                        episode_updates.append((mapped, int(row["id"])))
+                        episode_updates.append((*mapped, int(row["id"])))
                     if len(episode_updates) >= WRITE_BATCH_SIZE:
                         connection.executemany(
-                            "UPDATE video_episodes SET file_path=? WHERE id=?",
+                            update_sql,
                             episode_updates,
                         )
                         episode_updates = []
                 if episode_updates:
                     connection.executemany(
-                        "UPDATE video_episodes SET file_path=? WHERE id=?",
+                        update_sql,
                         episode_updates,
                     )
             connection.commit()
