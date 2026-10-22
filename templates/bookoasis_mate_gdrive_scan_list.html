@@ -374,13 +374,13 @@ function renderGdriveEvents(data) {
     if (verification) {
       if (verification.state === 'confirmed') addTime('반영 확인', verification.checked_at);
       else if (verification.state !== 'unsupported') {
-        var verificationLabels = {pending: '요청 접수 · DB 반영 확인 대기', timeout: 'DB 반영 확인 시간 초과'};
+        var verificationLabels = {pending: 'API 처리 후 · DB 경로 반영 확인 대기', timeout: 'DB 반영 확인 시간 초과'};
         var verificationLine = bookoasisMateText('span', 'doctor-muted', verificationLabels[verification.state] || 'DB 반영 확인 불가');
         verificationLine.title = verification.message || '';
         timeColumn.appendChild(verificationLine);
       }
     } else if (item.status === 'completed' && scans.some(function(scan) {
-      return scan.success && (scan.mode !== 'admin_scan_path' || (scan.response || {}).cleanup_scope === 'library');
+      return scan.success && (scan.request_accepted || ['library', 'full_webhook_compat'].indexOf(scan.mode) !== -1 || (scan.response || {}).cleanup_scope === 'library');
     })) {
       timeColumn.appendChild(bookoasisMateText('span', 'doctor-muted', '요청 접수 · 실제 스캔 완료 미확인'));
     }
