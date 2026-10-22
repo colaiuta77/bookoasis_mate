@@ -13,6 +13,7 @@ except ImportError:
 
 SENSITIVE_COLUMNS = {
     ("users", "password_hash"),
+    ("kosync_credentials", "key_hash"),
     ("settings", "value"),
 }
 
@@ -160,7 +161,7 @@ ORDER BY id""",
     l.physical_path,
     l.scan_status,
     l.last_scanned_at,
-    SUM(CASE WHEN COALESCE(b.is_deleted, 0) = 0 THEN 1 ELSE 0 END) AS active_books,
+    COUNT(CASE WHEN COALESCE(b.is_deleted, 0) = 0 THEN b.id END) AS active_books,
     SUM(CASE WHEN COALESCE(b.is_deleted, 0) != 0 THEN 1 ELSE 0 END) AS deleted_books
 FROM libraries l
 LEFT JOIN books b ON b.library_id = l.id
@@ -598,7 +599,7 @@ class ReadOnlySqlTool:
         sanitized = _strip_literals_and_comments(query, identifiers=True).lower()
         if re.search(r"\binto\s+(outfile|dumpfile)\b", sanitized):
             raise ValueError("읽기 전용 SQL에서는 MariaDB 파일 출력(OUTFILE/DUMPFILE)을 사용할 수 없습니다.")
-        if re.search(r"\b(password_hash|load_file|sleep|benchmark|get_lock|release_lock)\b", sanitized):
+        if re.search(r"\b(password_hash|key_hash|load_file|sleep|benchmark|get_lock|release_lock)\b", sanitized):
             raise ValueError("민감 컬럼 또는 위험한 MariaDB 함수를 조회할 수 없습니다.")
         if re.search(r"\b(for\s+update|lock\s+in\s+share\s+mode|into)\b", sanitized):
             raise ValueError("잠금 또는 변수·파일 출력을 사용하는 SQL은 허용하지 않습니다.")
@@ -615,7 +616,7 @@ class ReadOnlySqlTool:
                 raise ValueError("스키마를 지정한 쉼표 조인 대신 명시적 JOIN을 사용해 주세요.")
         if re.search(r"\bsettings\b", sanitized):
             raise ValueError("민감 설정을 포함하는 settings 테이블은 조회할 수 없습니다.")
-        if re.search(r"\busers\b", sanitized):
+        if re.search(r"\b(users|kosync_credentials)\b", sanitized):
             select_part = sanitized
             select_without_count = re.sub(
                 r"\bcount\s*\(\s*\*\s*\)",
@@ -623,7 +624,7 @@ class ReadOnlySqlTool:
                 select_part,
             )
             if "*" in select_without_count:
-                raise ValueError("users 테이블은 필요한 비민감 컬럼만 명시해 주세요.")
+                raise ValueError("인증정보 테이블은 필요한 비민감 컬럼만 명시해 주세요.")
 
     def _execute_mariadb(self, db_key, target, query, row_limit, timeout, mode="safe"):
         self._guard_mariadb_sensitive(query, mode=mode, database=target.database)
