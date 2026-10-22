@@ -209,7 +209,7 @@ class DiscordWebhookNotifier:
             file_id = quote(str(drive["file_id"]), safe="")
             is_folder = event.get("item_type") == "directory" or drive.get("mime_type") == "application/vnd.google-apps.folder"
             link = f"https://drive.google.com/drive/folders/{file_id}" if is_folder else f"https://drive.google.com/file/d/{file_id}/view"
-            fields.append({"name": "Google Drive", "value": f"[Google Drive에서 열기]({link})", "inline": False})
+            fields.append({"name": "Google Drive", "value": self._truncate(f"[Google Drive에서 열기]({link})", self.MAX_FIELD_VALUE), "inline": False})
 
         libraries = []
         for library in result.get("libraries") or []:
@@ -261,7 +261,7 @@ class DiscordWebhookNotifier:
             "footer": {"text": f"BookOasis Mate · {self.source_name} 변경 감지"},
         }
 
-    def _content(self, events, statuses, omitted=0):
+    def _content(self, events, statuses):
         actions = Counter(str(event.get("action") or "unknown") for event in events)
         state_counts = Counter(
             str(statuses.get(int(event["id"])) or "failed") for event in events
@@ -283,50 +283,25 @@ class DiscordWebhookNotifier:
             f"결과  {state_text or '처리 상태 없음'}",
             "```",
         ]
-        if omitted:
-            lines.append(f"카드 {len(events) - omitted}건 표시 · 외 {omitted}건 생략")
         return "\n".join(lines)[:1900]
 
     def _payload(self, events, results, statuses):
-        embeds = []
-        character_count = 0
-        for event in events:
-            if len(embeds) >= self.MAX_EMBEDS:
-                break
-            event_id = int(event["id"])
-            result = results.get(event_id) or {}
-            status = str(statuses.get(event_id) or "failed")
-            embed = self._event_embed(event, result, status)
-            embed_size = self._embed_text_size(embed)
-            if character_count + embed_size > self.MAX_EMBED_CHARACTERS:
-                break
-            embeds.append(embed)
-            character_count += embed_size
-
-        omitted = max(0, len(events) - len(embeds))
-        return {
-            "content": self._content(events, statuses, omitted),
-            "embeds": embeds,
-            "allowed_mentions": {"parse": []},
-        }
+        return self.build_batch_payload(events, results, statuses)
 
     def send_batch(self, events, results, statuses):
         if not self.webhook_url:
             return {"sent": False, "disabled": True}
-        payload = self._payload(events, results, statuses)
-        try:
-            self.sender(self.webhook_url, payload, self.timeout)
-        except DiscordWebhookError:
-            raise
-        except Exception as error:
-            raise DiscordWebhookError(
-                f"Discord 알림 전송에 실패했습니다. ({type(error).__name__})"
-            ) from None
+        payloads = self.build_batch_payloads(events, results, statuses)
+        for index, payload in enumerate(payloads):
+            self.send_payload(payload, position=(index + 1, len(payloads)))
         return {"sent": True, "disabled": False}
 
-    def send_payload(self, payload, wait=False):
+    def send_payload(self, payload, wait=False, position=None):
         if not self.webhook_url:
             return {'sent': False, 'disabled': True}
+        if position is not None:
+            suffix = f'\n메시지 {position[0]}/{position[1]}'
+            payload = dict(payload, content=str(payload.get('content') or '')[:2000 - len(suffix)] + suffix)
         try:
             result = self.sender(self.webhook_url + ('?wait=true' if wait else ''), payload, self.timeout)
             if wait and (not isinstance(result, dict) or not result.get('message_id')):
@@ -338,8 +313,49 @@ class DiscordWebhookNotifier:
             raise DiscordWebhookError(f'Discord 알림 전송에 실패했습니다. ({type(error).__name__})') from None
 
     def build_batch_payload(self, events, results, statuses):
-        events = sorted(events, key=lambda event: statuses.get(int(event['id'])) != 'failed')
-        return self._payload(events, results, statuses)
+        payloads = self.build_batch_payloads(events, results, statuses)
+        if len(payloads) > 1:
+            raise DiscordWebhookError('여러 메시지가 필요합니다. build_batch_payloads로 모든 카드를 발송해 주세요.')
+        return payloads[0] if payloads else {'content': self._content([], statuses), 'embeds': [], 'allowed_mentions': {'parse': []}}
+
+    def build_batch_payloads(self, events, results, statuses):
+        groups = {}
+        for event in events:
+            drive = (event.get('result') or {}).get('drive') or {}
+            key = tuple(drive.get(name) for name in ('activity_group', 'file_id', 'occurred_at'))
+            if all(key):
+                groups.setdefault(key, []).append(event)
+        hidden = set()
+        for group in groups.values():
+            primaries = [event for event in group if
+                ((event.get('result') or {}).get('drive') or {}).get('activity_primary') is True]
+            if len(primaries) == 1:
+                hidden.update(int(event['id']) for event in group
+                              if event is not primaries[0] and statuses.get(int(event['id'])) == 'completed')
+        events = sorted((event for event in events if int(event['id']) not in hidden),
+                        key=lambda event: statuses.get(int(event['id'])) != 'failed')
+        payloads, batch, embeds, character_count = [], [], [], 0
+        for event in events:
+            event_id = int(event['id'])
+            embed = self._event_embed(event, results.get(event_id) or {}, str(statuses.get(event_id) or 'failed'))
+            # 단일 카드가 예산보다 커도 카드는 유지하고 긴 필드부터 줄입니다.
+            excess = self._embed_text_size(embed) - self.MAX_EMBED_CHARACTERS
+            for field in sorted(embed['fields'], key=lambda field: len(field['value']), reverse=True):
+                if excess <= 0:
+                    break
+                before = len(field['value'])
+                field['value'] = self._truncate(field['value'], max(1, before - excess))
+                excess -= before - len(field['value'])
+            size = self._embed_text_size(embed)
+            if embeds and (len(embeds) >= self.MAX_EMBEDS or character_count + size > self.MAX_EMBED_CHARACTERS):
+                payloads.append({'content': self._content(batch, statuses), 'embeds': embeds, 'allowed_mentions': {'parse': []}})
+                batch, embeds, character_count = [], [], 0
+            batch.append(event)
+            embeds.append(embed)
+            character_count += size
+        if embeds:
+            payloads.append({'content': self._content(batch, statuses), 'embeds': embeds, 'allowed_mentions': {'parse': []}})
+        return payloads
 
     def build_health_payload(self, display_name, recovered, error_kind):
         state = '복구' if recovered else '오류'

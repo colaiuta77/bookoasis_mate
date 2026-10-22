@@ -1009,7 +1009,7 @@ class GDriveScanProcessor:
                 "mode": response.get("mode") or mode,
                 "path": relative_path,
                 "fallback_reason": fallback_reason,
-                "request_accepted": success and (mode == "library" or response.get("cleanup_scope") == "library" or response.get("mode") != "admin_scan_path"),
+                "request_accepted": success and (mode == "library" or response.get("cleanup_scope") == "library" or response.get("mode") not in {"admin_scan_path", "path_webhook"}),
             }
 
         for event in prepared:

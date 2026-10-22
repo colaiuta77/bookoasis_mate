@@ -33,6 +33,8 @@ class ModuleLocalWatch(PluginModuleBase):
         self._process = None
         self._reader = None
         self._worker = None
+        self._scan_client = None
+        self._scan_client_config = None
         self._states = {}
         self._error = ""
         self._busy = False
@@ -193,11 +195,16 @@ class ModuleLocalWatch(PluginModuleBase):
                 roots = [root for root in self._active_roots if target and overlaps(root["target"], target)]
                 return self._stop.is_set() or not roots or any(
                     self._states.get(root["path"], {}).get("status") != "감시 중" for root in roots)
-        client = BookOasisClient(settings.get("bookoasis_url"), int(settings.get("api_timeout") or 30),
-                                username=settings.get("bookoasis_username"), password=settings.get("bookoasis_password"))
-        client.should_stop = blocked
         if blocked():
             return {"success": False, "cancelled": True, "message": "작업 중지 또는 감시 경로 확인 대기"}
+        config = (settings.get("bookoasis_url"), int(settings.get("api_timeout") or 30),
+                  settings.get("bookoasis_username"), settings.get("bookoasis_password"))
+        # 단일 로컬 작업자의 로그인 세션은 재사용하고 요청별 감시 경로 검사는 갱신합니다.
+        if self._scan_client is None or self._scan_client_config != config:
+            self._scan_client = BookOasisClient(*config)
+            self._scan_client_config = config
+        client = self._scan_client
+        client.should_stop = blocked
         if settings.get("bookoasis_username") and settings.get("bookoasis_password"):
             if relative:
                 result = client.scan_library_path(library_id, relative, db_type=db_type, force=False, timeout=120,
