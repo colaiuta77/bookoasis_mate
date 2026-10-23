@@ -481,7 +481,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
     body {
       --archify-page-top: 2rem;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
       -webkit-font-smoothing: antialiased;
       background: var(--bg);
       min-height: 100vh;
@@ -721,7 +721,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
     html[data-preset="editorial"] h1,
     html[data-preset="editorial"] .card h3 {
-      font-family: Georgia, 'Times New Roman', 'Songti SC', STSong, serif;
+      font-family: inherit;
       letter-spacing: -0.02em;
     }
     html[data-preset="editorial"] h1 { font-size: 1.72rem; font-weight: 600; }
@@ -742,7 +742,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       padding: 0.32rem 0 0.24rem;
       border-bottom: 2px solid var(--arrow-emphasis);
       color: var(--arrow-emphasis);
-      font-family: Georgia, 'Times New Roman', serif;
+      font-family: inherit;
       font-size: 0.625rem;
       font-style: italic;
       font-weight: 600;
@@ -758,13 +758,13 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 16px 40px -20px rgba(15, 23, 42, 0.18);
       padding: 1.5rem;
       padding-bottom: calc(1.5rem + var(--archify-nav-reserve));
-      overflow: hidden;
+      overflow: auto;
       position: relative;
     }
 
     html[data-preset="signal-flow"] .diagram-container {
       position: relative;
-      overflow: hidden;
+      overflow: auto;
       background: linear-gradient(180deg, rgba(8, 20, 38, 0.82), rgba(3, 8, 18, 0.94));
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 28px 80px rgba(0, 0, 0, 0.34);
     }
@@ -798,7 +798,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       opacity: 0.58;
     }
     html[data-preset="editorial"] .diagram-container {
-      overflow: hidden;
+      overflow: auto;
       border-color: var(--panel-border);
       border-radius: 0.38rem;
       background:
@@ -818,7 +818,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       background: var(--panel);
       color: var(--arrow-emphasis);
       content: attr(data-preset-badge-editorial-plate);
-      font-family: Georgia, 'Times New Roman', serif;
+      font-family: inherit;
       font-size: 0.52rem;
       font-style: italic;
       font-weight: 600;
@@ -907,7 +907,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     }
 
     svg {
-      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
       width: 100%;
       min-width: min(900px, 100%);
       display: block;
@@ -5159,7 +5159,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     <!-- Main Diagram -->
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / 도판 04">
-      <svg viewBox="0 0 1056 660" data-layout-contract="readable-v2" role="img" lang="ko" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="">
+      <svg style="min-width: 1320px" viewBox="0 0 1056 660" data-reader-fit="width-first" data-layout-contract="readable-v2" role="img" lang="ko" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="">
         <title id="archify-diagram-title">로컬 폴더 감지 · 기준 복원부터 스캔 요청까지</title>
         <desc id="archify-diagram-description">Archify로 생성한 워크플로우 다이어그램입니다.</desc>
         <!-- Definitions -->
@@ -5255,7 +5255,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="100" y="128.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">시작·재시작</text>
-          <text data-detail="context" x="100" y="141.8" class="t-muted" font-size="6.9" text-anchor="middle">활성화 상태면 자동 재개</text>
+          <text data-detail="context" x="100" y="141.8" class="t-muted" font-size="8" text-anchor="middle">활성화 상태면 자동 재개</text>
         </g>
 
         <g id="node-validate" data-node-id="validate" data-node-label="설정·경로 검증" tabindex="0" role="button" aria-label="설정·경로 검증 포커스, 중복 감시·범위 밖 거부, 시작·저장 기준" aria-pressed="false" data-node-kind="security" data-node-sublabel="중복 감시·범위 밖 거부" data-node-context="시작·저장 기준">
@@ -5266,8 +5266,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="310.8" y="128.1" class="t-primary" font-size="10.9" font-weight="600" text-anchor="middle">설정·경로 검증</text>
-          <text data-detail="context" x="310.8" y="141.7" class="t-muted" font-size="6.9" text-anchor="middle">중복 감시·범위 밖 거부</text>
+          <text data-node-label="" data-detail-anchor="" x="310.8" y="128.1" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">설정·경로 검증</text>
+          <text data-detail="context" x="310.8" y="141.7" class="t-muted" font-size="8" text-anchor="middle">중복 감시·범위 밖 거부</text>
         </g>
 
         <g id="node-baseline-mode" data-node-id="baseline-mode" data-node-label="시작 기준 선택" tabindex="0" role="button" aria-label="시작 기준 선택 포커스, 이어서 / 새 기준, 시작·저장 기준" aria-pressed="false" data-node-kind="database" data-node-sublabel="이어서 / 새 기준" data-node-tag="최초는 기준만" data-node-context="시작·저장 기준">
@@ -5278,7 +5278,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="484" y="119" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">시작 기준 선택</text>
+          <text data-node-label="" data-detail-anchor="" x="484" y="119" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">시작 기준 선택</text>
           <text data-detail="context" x="484" y="133.6" class="t-muted" font-size="8" text-anchor="middle">이어서 / 새 기준</text>
         <text data-detail="fine" x="484" y="146.4" class="t-database" font-size="7" text-anchor="middle">최초는 기준만</text>
         </g>
@@ -5290,7 +5290,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(640.4 92) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="680.4" y="119" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">감지 방식 준비</text>
+          <text data-node-label="" data-detail-anchor="" x="680.4" y="119" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">감지 방식 준비</text>
           <text data-detail="context" x="680.4" y="133.6" class="t-muted" font-size="8" text-anchor="middle">실시간 / 폴링</text>
         <text data-detail="fine" x="680.4" y="146.4" class="t-backend" font-size="7" text-anchor="middle">독립 Python 프로세스</text>
         </g>
@@ -5303,8 +5303,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="979.5999999999999" y="127.5" class="t-primary" font-size="10.4" font-weight="600" text-anchor="middle">보류·기준 유지</text>
-          <text data-detail="context" x="979.5999999999999" y="140.9" class="t-muted" font-size="6.9" text-anchor="middle">마운트·권한·설정 확인</text>
+          <text data-node-label="" data-detail-anchor="" x="979.5999999999999" y="127.5" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">보류·기준 유지</text>
+          <text data-detail="context" x="979.5999999999999" y="140.9" class="t-muted" font-size="8" text-anchor="middle">마운트·권한·설정 확인</text>
         </g>
 
         <g id="node-collect" data-node-id="collect" data-node-label="파일·폴더 수집" tabindex="0" role="button" aria-label="파일·폴더 수집 포커스, 전체 / 변경 범위 비교, 감지·안전 검사" aria-pressed="false" data-node-kind="backend" data-node-sublabel="전체 / 변경 범위 비교" data-node-context="감지·안전 검사">
@@ -5314,8 +5314,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(638.4 226) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="680.4" y="253.5" class="t-primary" font-size="10.4" font-weight="600" text-anchor="middle">파일·폴더 수집</text>
-          <text data-detail="context" x="680.4" y="266.9" class="t-muted" font-size="6.9" text-anchor="middle">전체 / 변경 범위 비교</text>
+          <text data-node-label="" data-detail-anchor="" x="680.4" y="253.5" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">파일·폴더 수집</text>
+          <text data-detail="context" x="680.4" y="266.9" class="t-muted" font-size="8" text-anchor="middle">전체 / 변경 범위 비교</text>
         </g>
 
         <g id="node-guard" data-node-id="guard" data-node-label="안전 검사·차이 대조" tabindex="0" role="button" aria-label="안전 검사·차이 대조 포커스, 생성·수정·삭제 판정, 감지·안전 검사" aria-pressed="false" data-node-kind="security" data-node-sublabel="생성·수정·삭제 판정" data-node-tag="이동 = 삭제 + 생성" data-node-context="감지·안전 검사">
@@ -5326,7 +5326,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="824.4" y="245.2" class="t-primary" font-size="10.1" font-weight="600" text-anchor="middle">안전 검사·차이 대조</text>
+          <text data-node-label="" data-detail-anchor="" x="824.4" y="245.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">안전 검사·차이 대조</text>
           <text data-detail="context" x="824.4" y="259.9" class="t-muted" font-size="8" text-anchor="middle">생성·수정·삭제 판정</text>
         <text data-detail="fine" x="824.4" y="272.7" class="t-security" font-size="7" text-anchor="middle">이동 = 삭제 + 생성</text>
         </g>
@@ -5365,7 +5365,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <circle cx="7" cy="11.5" r="1" class="sigil-fill"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="824.4" y="380.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">저장 확인 ok</text>
-          <text data-detail="context" x="824.4" y="393.8" class="t-muted" font-size="6.9" text-anchor="middle">확인 없으면 기준 유지</text>
+          <text data-detail="context" x="824.4" y="393.8" class="t-muted" font-size="8" text-anchor="middle">확인 없으면 기준 유지</text>
         </g>
 
         <g id="node-event-store" data-node-id="event-store" data-node-label="로컬 이벤트 DB" tabindex="0" role="button" aria-label="로컬 이벤트 DB 포커스, 검증 후 commit, 이벤트·기준 저장" aria-pressed="false" data-node-kind="database" data-node-sublabel="검증 후 commit" data-node-tag="대기열·재시도 보존" data-node-context="이벤트·기준 저장">
@@ -5376,7 +5376,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="979.5999999999999" y="371" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">로컬 이벤트 DB</text>
+          <text data-node-label="" data-detail-anchor="" x="979.5999999999999" y="371" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">로컬 이벤트 DB</text>
           <text data-detail="context" x="979.5999999999999" y="385.6" class="t-muted" font-size="8" text-anchor="middle">검증 후 commit</text>
         <text data-detail="fine" x="979.5999999999999" y="398.4" class="t-database" font-size="7" text-anchor="middle">대기열·재시도 보존</text>
         </g>
@@ -5390,7 +5390,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="100" y="506.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">최종 상태 확인</text>
-          <text data-detail="context" x="100" y="519.8" class="t-muted" font-size="6.9" text-anchor="middle">BookOasis에서 별도 확인</text>
+          <text data-detail="context" x="100" y="519.8" class="t-muted" font-size="8" text-anchor="middle">BookOasis에서 별도 확인</text>
         </g>
 
         <g id="node-result" data-node-id="result" data-node-label="처리 결과 저장" tabindex="0" role="button" aria-label="처리 결과 저장 포커스, 성공 / 재시도 / 최종 실패, 독립 스캔 작업자" aria-pressed="false" data-node-kind="database" data-node-sublabel="성공 / 재시도 / 최종 실패" data-node-context="독립 스캔 작업자">
@@ -5413,12 +5413,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="484" y="498.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">BookOasis API</text>
-          <text data-detail="context" x="484" y="511.8" class="t-muted" font-size="6.9" text-anchor="middle">관리자 우선·웹훅 대체</text>
+          <text data-detail="context" x="484" y="511.8" class="t-muted" font-size="8" text-anchor="middle">관리자 우선·웹훅 대체</text>
         <text data-detail="fine" x="484" y="524.3" class="t-cloud" font-size="7" text-anchor="middle">force=False</text>
         </g>
 
-        <g id="node-processor" data-node-id="processor" data-node-label="공통 스캔 처리" tabindex="0" role="button" aria-label="공통 스캔 처리 포커스, 보관함 매칭·중복 경로 통합, 독립 스캔 작업자" aria-pressed="false" data-node-kind="backend" data-node-sublabel="보관함 매칭·중복 경로 통합" data-node-tag="로컬은 VFS 갱신 안 함" data-node-context="독립 스캔 작업자">
-          <title>공통 스캔 처리 · 보관함 매칭·중복 경로 통합 · 독립 스캔 작업자 · 로컬은 VFS 갱신 안 함</title>
+        <g id="node-processor" data-node-id="processor" data-node-label="공통 스캔 처리" tabindex="0" role="button" aria-label="공통 스캔 처리 포커스, 보관함 매칭·중복 경로 통합, 독립 스캔 작업자" aria-pressed="false" data-node-kind="backend" data-node-sublabel="보관함 매칭·중복 경로 통합" data-node-tag="Mate 사전 VFS 갱신 없음" data-node-context="독립 스캔 작업자">
+          <title>공통 스캔 처리 · 보관함 매칭·중복 경로 통합 · 독립 스캔 작업자 · Mate 사전 VFS 갱신 없음</title>
           <rect x="612.4" y="464" width="136" height="68" rx="8" class="c-mask"/>
           <rect x="612.4" y="464" width="136" height="68" rx="8" class="c-backend" data-animate="node" style="--step:12" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(618.4 470) scale(0.6875)">
@@ -5426,7 +5426,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           </g>
           <text data-node-label="" data-detail-anchor="" x="680.4" y="498.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">공통 스캔 처리</text>
           <text data-detail="context" x="680.4" y="513.1" class="t-muted" font-size="8" text-anchor="middle">보관함 매칭·중복 경로 통합</text>
-        <text data-detail="fine" x="680.4" y="525.9" class="t-backend" font-size="7" text-anchor="middle">로컬은 VFS 갱신 안 함</text>
+        <text data-detail="fine" x="680.4" y="525.9" class="t-backend" font-size="7" text-anchor="middle">Mate 사전 VFS 갱신 없음</text>
         </g>
 
         <g id="node-worker" data-node-id="worker" data-node-label="대기열 처리" tabindex="0" role="button" aria-label="대기열 처리 포커스, 감시 정상인 루트만 실행, 독립 스캔 작업자" aria-pressed="false" data-node-kind="backend" data-node-sublabel="감시 정상인 루트만 실행" data-node-tag="최대 100건씩" data-node-context="독립 스캔 작업자">
@@ -5437,7 +5437,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="979.5999999999999" y="498.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">대기열 처리</text>
-          <text data-detail="context" x="979.5999999999999" y="511.8" class="t-muted" font-size="6.9" text-anchor="middle">감시 정상인 루트만 실행</text>
+          <text data-detail="context" x="979.5999999999999" y="511.8" class="t-muted" font-size="8" text-anchor="middle">감시 정상인 루트만 실행</text>
         <text data-detail="fine" x="979.5999999999999" y="524.3" class="t-backend" font-size="7" text-anchor="middle">최대 100건씩</text>
         </g>
 
@@ -5741,10 +5741,10 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>스캔 범위와 결과 해석</h3>
         </div>
         <ul>
-          <li>GDriveScanProcessor를 재사용하되 refresh_vfs=False로 실행합니다. 로컬 감지는 rclone VFS를 갱신하지 않으며, FUSE 캐시에 보이지 않는 변경을 발견하거나 캐시를 강제로 최신화하지 않습니다.</li>
+          <li>GDriveScanProcessor를 재사용하되 refresh_vfs=False로 실행합니다. Mate의 로컬 감지 사전 처리에서는 rclone VFS 명령을 보내지 않으며, FUSE 캐시에 보이지 않는 변경을 발견하거나 캐시를 강제로 최신화하지 않습니다. BookOasis 자체의 스캔 전 갱신 설정은 별도로 적용될 수 있습니다.</li>
           <li>가장 긴 보관함 루트에 매칭하고 겹친 디렉터리 요청을 합칩니다. 부분 경로가 있으면 부분 스캔, 보관함 루트 변경은 보관함 스캔을 요청합니다. 삭제 경로가 없다는 응답일 때만 안전 조건에 따라 상위 범위로 넓힙니다.</li>
           <li>관리자 API를 우선 사용하며 미설정·미지원 시 가능한 웹훅으로 대체합니다. 다중 루트 절대 경로 부분 스캔을 지원하지 않으면 전체 스캔으로 자동 전환하지 않습니다. 성공 응답은 completed, 오류는 조건에 따라 retry 또는 failed로 기록합니다.</li>
-          <li>completed는 Mate의 API 처리 결과입니다. 웹훅 접수와 관리자 부분 스캔 응답은 반환 방식이 다르며, 로컬 작업자는 최종 DB 반영이나 전체 스캔 완료를 따로 추적하지 않습니다. 최종 상태는 BookOasis에서 확인하세요. 이 도식은 실시간 운영 상태가 아닌 소스 기반 안내입니다.</li>
+          <li>completed는 Mate의 API 처리 결과입니다. 보관함 전체 웹훅은 큐 접수이고, 경로 웹훅·관리자 부분 스캔은 동기 응답입니다. 로컬 작업자는 최종 DB 반영이나 전체 스캔 완료를 따로 추적하지 않습니다. 최종 상태는 BookOasis에서 확인하세요. 이 도식은 실시간 운영 상태가 아닌 소스 기반 안내입니다.</li>
         </ul>
       </div>
     </div>
@@ -6558,7 +6558,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
           style.textContent =
             fontCss + "\n" +
-            "svg { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace; }\n" +
+            "svg { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; }\n" +
             hostStyle + "\n" +
             ":root, svg { " + darkTheme.vars + " }\n" +
             "@media (prefers-color-scheme: light) { :root, svg { " + lightTheme.vars + " } }\n" +
@@ -6587,7 +6587,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           // Keep this order.
           style.textContent =
             fontCss + "\n" +
-            "svg { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace; }\n" +
+            "svg { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; }\n" +
             hostStyle + "\n" +
             ":root, svg { " + vars + " }\n";
 
@@ -6808,7 +6808,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       function fitCanvasText(ctx, text, maxWidth, startSize, minSize, weight, fontFamily) {
         var value = String(text || '').trim();
         var size = startSize;
-        var family = fontFamily || "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+        var family = fontFamily || "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'";
         while (size > minSize) {
           ctx.font = (weight || '600') + ' ' + size + 'px ' + family;
           if (ctx.measureText(value).width <= maxWidth) return value;

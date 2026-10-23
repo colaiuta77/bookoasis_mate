@@ -335,7 +335,7 @@
     <div class="scan-scheduler-form-group">
       <label for="scheduler_cron_input">Cron 표현식</label>
       <input id="scheduler_cron_input" class="form-control form-control-sm" type="text" maxlength="50" placeholder="0 3 * * *">
-      <div class="doctor-muted" style="margin-top:5px">분 · 시 · 일 · 월 · 요일 순서의 5필드 Cron입니다. 기존 스케줄 제거는 아래의 삭제 버튼을 사용합니다.</div>
+      <div class="doctor-muted" style="margin-top:5px">분 · 시 · 일 · 월 · 요일 순서의 5필드 Cron입니다. 요일은 0~6(일~토) 또는 MON,FRI처럼 개별 목록을 권장합니다. 코어에서 의미가 달라질 수 있는 요일 간격·복합 범위·7은 저장하지 않습니다. 기존 스케줄 제거는 아래의 삭제 버튼을 사용합니다.</div>
     </div>
 
     <div id="scheduler_preview_box" class="scan-scheduler-preview">
@@ -1151,10 +1151,10 @@ function schedulerSetHelperFromCron(cron) {
   if (parts.length === 5 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) {
     time = String(Number(parts[1])).padStart(2,'0') + ':' + String(Number(parts[0])).padStart(2,'0');
     if (parts[2] === '*' && parts[3] === '*' && parts[4] === '*') type = 'daily';
-    else if (parts[2] === '*' && parts[3] === '*' && /^(?:[0-7]|SUN|MON|TUE|WED|THU|FRI|SAT)$/i.test(parts[4])) {
+    else if (parts[2] === '*' && parts[3] === '*' && /^(?:[0-6]|SUN|MON|TUE|WED|THU|FRI|SAT)$/i.test(parts[4])) {
       type = 'weekly';
       var weekdayMap = {SUN:'0',MON:'1',TUE:'2',WED:'3',THU:'4',FRI:'5',SAT:'6'};
-      $('#scheduler_helper_weekday').val(weekdayMap[String(parts[4]).toUpperCase()] || (parts[4] === '7' ? '0' : parts[4]));
+      $('#scheduler_helper_weekday').val(weekdayMap[String(parts[4]).toUpperCase()] || parts[4]);
     } else if (/^\d+$/.test(parts[2]) && parts[3] === '*' && parts[4] === '*') {
       type = 'monthly'; $('#scheduler_helper_monthday').val(parts[2]);
     }

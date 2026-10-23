@@ -24,6 +24,10 @@ MAX_MANIFEST_JSON_SIZE = 4 * 1024 * 1024
 MAX_METADATA_JSON_SIZE = 2 * 1024 * 1024 * 1024
 MAX_INLINE_INSPECTION_METADATA_SIZE = 64 * 1024 * 1024
 MAX_LIBRARY_JSON_PREFIX_CHARS = 8 * 1024 * 1024
+LIBRARY_OPTIONS = (
+    "content_kind", "hide_title", "cover_aspect_ratio", "is_remote",
+    "vfs_refresh_before_scan", "rclone_rc_url",
+)
 BOOK_COLUMNS = (
     "library_id",
     "title",
@@ -48,6 +52,9 @@ BOOK_COLUMNS = (
     "metadata_locked",
     "file_mtime",
     "file_size",
+    "books_lv", "publication_status", "series_alias", "title_alias",
+    "cover_artist", "teams", "locations", "characters", "cover_align",
+    "banner_image", "banner_updated_at",
 )
 OFFSET_COLUMNS = (
     "book_id",
@@ -57,8 +64,10 @@ OFFSET_COLUMNS = (
     "compress_size",
     "file_size",
     "compress_type",
+    "data_offset",
 )
 AUDIOBOOK_COLUMNS = (
+    "metadata_locked",
     "library_id",
     "title",
     "sort_title",
@@ -83,6 +92,7 @@ AUDIOBOOK_COLUMNS = (
     "deleted_at",
 )
 AUDIOBOOK_TRACK_COLUMNS = (
+    "artist",
     "audiobook_id",
     "track_number",
     "track_code",
@@ -224,6 +234,38 @@ class CategoryMigrationEngine:
             row["name"]
             for row in connection.execute(f'PRAGMA table_info("{safe_table}")').fetchall()
         }
+
+    def _export_library_options(self, connection, library):
+        values = {key: library[key] for key in LIBRARY_OPTIONS if key in library}
+        if library.get("content_kind") and "library_kinds" in self._tables(connection):
+            row = connection.execute(
+                "SELECT name FROM library_kinds WHERE code = ?", (library["content_kind"],)
+            ).fetchone()
+            if row:
+                values["content_kind_name"] = row["name"]
+        return values
+
+    def _import_library_options(self, connection, metadata):
+        columns = self._columns(connection, "libraries")
+        values = {key: metadata[key] for key in LIBRARY_OPTIONS if key in metadata and key in columns}
+        code = str(values.get("content_kind") or "").strip().lower()
+        if "content_kind" in values:
+            code = code or "unspecified"
+            if not re.fullmatch(r"[a-z][a-z0-9_-]{0,23}", code):
+                raise ValueError("패키지의 카테고리 종류 코드가 올바르지 않습니다.")
+            values["content_kind"] = code
+        if code and "library_kinds" in self._tables(connection):
+            if connection.execute("SELECT code FROM library_kinds WHERE code = ?", (code,)).fetchone() is None:
+                base = (str(metadata.get("content_kind_name") or "").strip() or code)[:25]
+                name = base
+                suffix = 2
+                while connection.execute("SELECT code FROM library_kinds WHERE name = ?", (name,)).fetchone():
+                    tail = f" ({suffix})"
+                    name = base[:25 - len(tail)] + tail
+                    suffix += 1
+                order = connection.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM library_kinds").fetchone()[0]
+                self._insert_row(connection, "library_kinds", {"code": code, "name": name, "is_builtin": 0, "sort_order": order})
+        return values
 
     def _progress(self, stage, current=0, total=0, message="", log=None):
         if self.on_progress:
@@ -733,7 +775,7 @@ class CategoryMigrationEngine:
             cover_paths = {}
             has_offsets = "book_offsets" in tables
             offset_columns = self._columns(connection, "book_offsets") if has_offsets else set()
-            required_offsets = set(OFFSET_COLUMNS) - {"book_id"}
+            required_offsets = set(OFFSET_COLUMNS) - {"book_id", "data_offset"}
             can_read_offsets = has_offsets and required_offsets.issubset(offset_columns)
 
             for book_index, book in enumerate(books):
@@ -746,18 +788,19 @@ class CategoryMigrationEngine:
                 payload["root_index"] = root_index
                 payload["relative_path"] = relative_path
                 books_payload.append(payload)
-                cover = self._cover_path(book.get("cover_image"))
-                if cover is not None and cover.is_file():
-                    try:
-                        relative_cover = cover.resolve().relative_to(self.cover_root).as_posix()
-                    except ValueError:
-                        relative_cover = cover.name
-                    cover_paths[relative_cover] = cover
+                for field in ("cover_image", "banner_image"):
+                    cover = self._cover_path(book.get(field))
+                    if cover is not None and cover.is_file():
+                        try:
+                            relative_cover = cover.resolve().relative_to(self.cover_root).as_posix()
+                        except ValueError:
+                            relative_cover = cover.name
+                        cover_paths[relative_cover] = cover
                 if can_read_offsets:
+                    selected_offsets = ", ".join(key for key in OFFSET_COLUMNS if key != "book_id" and key in offset_columns)
                     offset_rows = connection.execute(
-                        """
-                        SELECT page_idx, filename, local_header_offset,
-                               compress_size, file_size, compress_type
+                        f"""
+                        SELECT {selected_offsets}
                         FROM book_offsets
                         WHERE book_id = ?
                         ORDER BY page_idx
@@ -810,6 +853,7 @@ class CategoryMigrationEngine:
             }
             metadata = {
                 "library": {
+                    **self._export_library_options(connection, library),
                     "id": library_id,
                     "name": library_name,
                     "physical_paths": root_paths,
@@ -996,6 +1040,7 @@ class CategoryMigrationEngine:
             }
             metadata = {
                 "library": {
+                    **self._export_library_options(connection, library),
                     "id": library_id, "name": library_name,
                     "physical_paths": root_paths,
                     "cron_schedule": library.get("cron_schedule"),
@@ -1191,6 +1236,7 @@ class CategoryMigrationEngine:
             }
             metadata = {
                 "library": {
+                    **self._export_library_options(connection, library),
                     "id": library_id,
                     "name": library_name,
                     "physical_paths": root_paths,
@@ -1509,6 +1555,7 @@ class CategoryMigrationEngine:
                 physical_paths = [str(target) for target in targets]
                 added_paths = list(physical_paths)
                 values = {
+                    **self._import_library_options(connection, library_meta),
                     "name": library_name,
                     "physical_path": "\n".join(physical_paths),
                     "cron_schedule": library_meta.get("cron_schedule"),
@@ -1604,6 +1651,18 @@ class CategoryMigrationEngine:
                         filename=episode.get("filename") or file_path.name,
                         file_path=str(file_path),
                     )
+                    subtitle = str(episode.get("subtitle_path") or "")
+                    for source_index, source in enumerate(library_meta.get("physical_paths") or []):
+                        if not subtitle or subtitle.startswith(("http://", "https://")):
+                            break
+                        try:
+                            relative_subtitle = PurePosixPath(subtitle.replace("\\", "/")).relative_to(PurePosixPath(str(source).replace("\\", "/")))
+                        except ValueError:
+                            continue
+                        relative_subtitle = self._safe_relative_path(relative_subtitle.as_posix())
+                        target = targets[source_index] if source_index < len(targets) else targets[0]
+                        values["subtitle_path"] = str(target.joinpath(*relative_subtitle.parts))
+                        break
                     episode_id = self._insert_row(
                         connection, "video_episodes",
                         {key: value for key, value in values.items() if key in episode_columns},
@@ -1924,6 +1983,7 @@ class CategoryMigrationEngine:
                 physical_paths = [str(target) for target in resolved_targets]
                 added_physical_paths = list(physical_paths)
                 library_values = {
+                    **self._import_library_options(connection, library_meta),
                     "name": target_name,
                     "physical_path": "\n".join(physical_paths),
                     "cron_schedule": library_meta.get("cron_schedule"),
@@ -2003,6 +2063,7 @@ class CategoryMigrationEngine:
                         poster_name = cover_name_map.get(poster_name, poster_name)
                         poster = str(final_cover_dir / poster_name)
                     values = {
+                        **{key: audiobook[key] for key in AUDIOBOOK_COLUMNS if key in audiobook},
                         "library_id": new_library_id,
                         "title": audiobook.get("title") or "Unknown Audiobook",
                         "sort_title": audiobook.get("sort_title"),
@@ -2071,6 +2132,7 @@ class CategoryMigrationEngine:
                     skipped_duplicate_tracks += 1
                 else:
                     values = {
+                        **{key: track[key] for key in AUDIOBOOK_TRACK_COLUMNS if key in track},
                         "audiobook_id": new_audiobook_id,
                         "track_number": track_number,
                         "track_code": track.get("track_code"),
@@ -2463,6 +2525,7 @@ class CategoryMigrationEngine:
                 physical_paths = [str(path) for path in resolved_targets]
                 added_physical_paths = list(physical_paths)
                 library_values = {
+                    **self._import_library_options(connection, library_meta),
                     "name": target_name,
                     "physical_path": "\n".join(physical_paths),
                     "cron_schedule": library_meta.get("cron_schedule"),
@@ -2527,14 +2590,16 @@ class CategoryMigrationEngine:
                     skipped_duplicate_books += 1
                     book_index_to_id[book_index] = int(duplicate["id"])
                 else:
-                    cover_image = str(book.get("cover_image") or "").strip()
-                    if cover_image:
-                        original_name = Path(cover_image).name
-                        cover_image = (
-                            f"{new_library_id}/"
-                            f"{cover_name_map.get(original_name, original_name)}"
-                        )
+                    images = {}
+                    for field in ("cover_image", "banner_image"):
+                        image = str(book.get(field) or "").strip()
+                        if image and not image.startswith(("http://", "https://")):
+                            original_name = Path(image).name
+                            image = f"{new_library_id}/{cover_name_map.get(original_name, original_name)}"
+                        images[field] = image
                     values = {
+                        **{key: book[key] for key in BOOK_COLUMNS if key in book},
+                        **images,
                         "library_id": new_library_id,
                         "title": book.get("title") or "Unknown Title",
                         "series_name": book.get("series_name"),
@@ -2544,7 +2609,6 @@ class CategoryMigrationEngine:
                         "file_format": book.get("file_format", "zip"),
                         "total_pages": book.get("total_pages", 0),
                         "has_offsets": book.get("has_offsets", 0),
-                        "cover_image": cover_image,
                         "publisher": book.get("publisher"),
                         "link": book.get("link"),
                         "score": book.get("score"),
@@ -2554,7 +2618,7 @@ class CategoryMigrationEngine:
                         "tags": book.get("tags"),
                         "is_favorite": book.get("is_favorite", 0),
                         "cover_updated_at": book.get("cover_updated_at") or now,
-                        "created_at": now,
+                        "created_at": book.get("created_at") or now,
                         "metadata_locked": book.get("metadata_locked", 0),
                         "file_mtime": book.get("file_mtime", 0.0),
                         "file_size": book.get("file_size", 0),
@@ -2575,6 +2639,7 @@ class CategoryMigrationEngine:
                         offset_items if isinstance(offset_items, list) else []
                     ):
                         offset_values = {
+                            **{key: offset[key] for key in OFFSET_COLUMNS if key in offset},
                             "book_id": new_book_id,
                             "page_idx": offset.get("page_idx"),
                             "filename": offset.get("filename"),

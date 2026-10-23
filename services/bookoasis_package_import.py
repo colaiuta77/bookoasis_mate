@@ -1303,17 +1303,23 @@ class BookOasisPackageImportEngine:
                 )
                 changed_items = len(updates)
             if child_table in self._tables(connection):
+                path_fields = ["file_path"]
+                if child_table == "video_episodes" and any(
+                    row["name"] == "subtitle_path"
+                    for row in connection.execute("PRAGMA table_info(video_episodes)")
+                ):
+                    path_fields.append("subtitle_path")
                 child_updates = []
                 for row in self._iter_rows(
-                    connection.execute(f"SELECT id, file_path FROM {child_table} ORDER BY id")
+                    connection.execute(f"SELECT id, {', '.join(path_fields)} FROM {child_table} ORDER BY id")
                 ):
-                    old_path = str(row["file_path"] or "")
-                    new_path = apply_media_mappings(old_path, mappings)
-                    if new_path != old_path:
-                        child_updates.append((new_path, int(row["id"])))
+                    old_paths = tuple(row[field] for field in path_fields)
+                    new_paths = tuple(apply_media_mappings(value, mappings) if value else value for value in old_paths)
+                    if new_paths != old_paths:
+                        child_updates.append((*new_paths, int(row["id"])))
                 if child_updates:
                     connection.executemany(
-                        f"UPDATE {child_table} SET file_path=? WHERE id=?",
+                        f"UPDATE {child_table} SET {', '.join(field + '=?' for field in path_fields)} WHERE id=?",
                         child_updates,
                     )
             for row in self._iter_rows(

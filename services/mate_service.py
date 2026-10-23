@@ -265,13 +265,22 @@ def _scheduler_parse_cron(expression):
     fields = str(expression or "").strip().split()
     if len(fields) != 5:
         raise ValueError("Cron 표현식은 '분 시 일 월 요일' 5개 필드여야 합니다.")
+    weekday = fields[4].upper()
+    # 코어의 요일 정규화가 간격·복합 범위를 다르게 해석하므로 확실한 구문만 허용한다.
+    if "/" in weekday or ("-" in weekday and (
+        "," in weekday or weekday.startswith("SUN-") or not (
+            re.fullmatch(r"[1-6]-[1-6]", weekday)
+            or re.fullmatch(r"[A-Z]{3}-[A-Z]{3}", weekday)
+        )
+    )):
+        raise ValueError("코어와 실행 요일이 달라질 수 있는 Cron입니다. 요일은 0~6 또는 MON,TUE처럼 개별 목록으로 입력해 주세요.")
     return {
         "minutes": _scheduler_cron_values(fields[0], 0, 59),
         "hours": _scheduler_cron_values(fields[1], 0, 23),
         "days": _scheduler_cron_values(fields[2], 1, 31),
         "months": _scheduler_cron_values(fields[3], 1, 12, SCHEDULER_MONTH_NAMES),
         "weekdays": _scheduler_cron_values(
-            fields[4], 0, 7, SCHEDULER_WEEKDAY_NAMES, sunday=True
+            fields[4], 0, 6, SCHEDULER_WEEKDAY_NAMES
         ),
     }
 
@@ -2531,7 +2540,7 @@ class BookOasisMateService:
                 data = {
                     "success": success,
                     "requested": len(selected),
-                    "queued": len(selected) if success else 0,
+                    "queued": (None if all_libraries else len(selected)) if success else 0,
                     "already_queued": 0,
                     "source": "admin_api",
                     "message": (

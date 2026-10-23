@@ -33,10 +33,11 @@
   <ol>
     <li><strong>설정</strong>에서 BookOasis URL과 DB 엔진을 선택합니다. SQLite는 DB 파일 경로, MariaDB는 접속 정보를 입력합니다.</li>
     <li>관리자 API를 사용할 계정과 BookOasis <code>WEBHOOK_TOKEN</code>을 입력하고 연결을 확인합니다.</li>
-    <li>표지·로그·플러그인·폰트 경로는 <strong>FlaskFarm 컨테이너에서 보이는 경로</strong>로 지정합니다. Google Drive 감시의 BookOasis 경로 루트는 BookOasis DB 경로를 따릅니다.</li>
+    <li>표지·로그·플러그인·폰트 경로는 <strong>FlaskFarm 컨테이너에서 보이는 경로</strong>로 지정합니다. Google Drive 감시의 BookOasis 경로 루트는 선택한 보관함의 physical_path와 같은 컨테이너 기준 경로를 사용합니다.</li>
     <li>필요한 기능만 설정한 뒤 해당 메뉴에서 실행합니다. 진단 조회와 실제 삭제·이관·스캔 요청은 별도 작업입니다.</li>
   </ol>
   <p>자동 감지는 <code>DB_ENGINE</code>·<code>DBMS</code>와 설정을 확인합니다. MariaDB 연결 실패 시 SQLite로 자동 전환하지 않습니다.</p>
+  <p class="doctor-muted">코어 v3.0.1 소스 기준 주의사항입니다. 비디오 예약은 코어 재시작 후 복원되지 않을 수 있고, 삭제된 비디오 폴더의 DB 정리는 보장되지 않습니다. 두 동작은 코어의 개선이 필요합니다. 오디오·비디오의 비강제 스캔은 파일 경로·크기가 같으면 보조 메타데이터 변경을 건너뛸 수 있으므로, 재분석이 필요한 범위만 BookOasis에서 강제 스캔하세요.</p>
 </div>
 
 <div class="doctor-section doctor-card">
