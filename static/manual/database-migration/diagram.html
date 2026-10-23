@@ -481,7 +481,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
     body {
       --archify-page-top: 2rem;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
       -webkit-font-smoothing: antialiased;
       background: var(--bg);
       min-height: 100vh;
@@ -721,7 +721,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
     html[data-preset="editorial"] h1,
     html[data-preset="editorial"] .card h3 {
-      font-family: Georgia, 'Times New Roman', 'Songti SC', STSong, serif;
+      font-family: inherit;
       letter-spacing: -0.02em;
     }
     html[data-preset="editorial"] h1 { font-size: 1.72rem; font-weight: 600; }
@@ -742,7 +742,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       padding: 0.32rem 0 0.24rem;
       border-bottom: 2px solid var(--arrow-emphasis);
       color: var(--arrow-emphasis);
-      font-family: Georgia, 'Times New Roman', serif;
+      font-family: inherit;
       font-size: 0.625rem;
       font-style: italic;
       font-weight: 600;
@@ -758,13 +758,13 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 16px 40px -20px rgba(15, 23, 42, 0.18);
       padding: 1.5rem;
       padding-bottom: calc(1.5rem + var(--archify-nav-reserve));
-      overflow: hidden;
+      overflow: auto;
       position: relative;
     }
 
     html[data-preset="signal-flow"] .diagram-container {
       position: relative;
-      overflow: hidden;
+      overflow: auto;
       background: linear-gradient(180deg, rgba(8, 20, 38, 0.82), rgba(3, 8, 18, 0.94));
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 28px 80px rgba(0, 0, 0, 0.34);
     }
@@ -798,7 +798,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       opacity: 0.58;
     }
     html[data-preset="editorial"] .diagram-container {
-      overflow: hidden;
+      overflow: auto;
       border-color: var(--panel-border);
       border-radius: 0.38rem;
       background:
@@ -818,7 +818,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       background: var(--panel);
       color: var(--arrow-emphasis);
       content: attr(data-preset-badge-editorial-plate);
-      font-family: Georgia, 'Times New Roman', serif;
+      font-family: inherit;
       font-size: 0.52rem;
       font-style: italic;
       font-weight: 600;
@@ -907,7 +907,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     }
 
     svg {
-      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
       width: 100%;
       min-width: min(900px, 100%);
       display: block;
@@ -5159,7 +5159,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     <!-- Main Diagram -->
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / 도판 04">
-      <svg viewBox="0 0 1106 786" data-reader-fit="width-first" data-layout-contract="readable-v2" role="img" lang="ko" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="">
+      <svg style="min-width: 1383px" viewBox="0 0 1106 786" data-reader-fit="width-first" data-layout-contract="readable-v2" role="img" lang="ko" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="">
         <title id="archify-diagram-title">통DB 이관 · 엔진별 실행과 복구</title>
         <desc id="archify-diagram-description">Archify로 생성한 워크플로우 다이어그램입니다.</desc>
         <!-- Definitions -->
@@ -5280,7 +5280,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="230" y="252" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">DB 검사·매핑 확인</text>
-          <text data-detail="context" x="230" y="263.6" class="t-muted" font-size="7.3" text-anchor="middle">kavita.db · 경로·기존 사용자</text>
+          <text data-detail="context" x="230" y="263.6" class="t-muted" font-size="8" text-anchor="middle">kavita.db · 경로·기존 사용자</text>
         </g>
 
         <g id="node-kavita-dry" data-node-id="kavita-dry" data-node-label="Dry Run" tabindex="0" role="button" aria-label="Dry Run 포커스, 신규·갱신·중복·진행률 집계, Kavita 이관 › 시험 · 사용자 확인" aria-pressed="false" data-node-kind="backend" data-node-sublabel="신규·갱신·중복·진행률 집계" data-node-tag="표지 변환·쓰기 없음" data-node-context="Kavita 이관 › 시험 · 사용자 확인">
@@ -5304,7 +5304,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="601.2" y="246.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">수동 확인 후 시작</text>
-          <text data-detail="context" x="601.2" y="260.3" class="t-muted" font-size="7.3" text-anchor="middle">백업·쓰기 중지 → 별도 작업자</text>
+          <text data-detail="context" x="601.2" y="260.3" class="t-muted" font-size="8" text-anchor="middle">백업·쓰기 중지 → 별도 작업자</text>
         <text data-detail="fine" x="601.2" y="272.9" class="t-security" font-size="7" text-anchor="middle">사용자 확인 절차</text>
         </g>
 
@@ -5316,9 +5316,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="800.4000000000001" y="245.2" class="t-primary" font-size="10.1" font-weight="600" text-anchor="middle">신규 생성·기존 갱신</text>
-          <text data-detail="context" x="800.4000000000001" y="259.2" class="t-muted" font-size="7.4" text-anchor="middle">일반·성인 / SQLite·MariaDB</text>
-        <text data-detail="fine" x="800.4000000000001" y="271.1" class="t-database" font-size="6.4" text-anchor="middle">표지 준비 → DB → 표지 → commit</text>
+          <text data-node-label="" data-detail-anchor="" x="800.4000000000001" y="245.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">신규 생성·기존 갱신</text>
+          <text data-detail="context" x="800.4000000000001" y="259.2" class="t-muted" font-size="8" text-anchor="middle">일반·성인 / SQLite·MariaDB</text>
+        <text data-detail="fine" x="800.4000000000001" y="271.1" class="t-database" font-size="7" text-anchor="middle">표지 준비 → DB → 표지 → commit</text>
         </g>
 
         <g id="node-kavita-result" data-node-id="kavita-result" data-node-label="결과 / 실패 복구" tabindex="0" role="button" aria-label="결과 / 실패 복구 포커스, 예외 시 DB rollback·표지 복원, Kavita 이관 › 독립 작업자 · 결과" aria-pressed="false" data-node-kind="backend" data-node-sublabel="예외 시 DB rollback·표지 복원" data-node-context="Kavita 이관 › 독립 작업자 · 결과">
@@ -5339,8 +5339,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(174 352) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="230" y="379.2" class="t-primary" font-size="10.1" font-weight="600" text-anchor="middle">DB·표지 패키지 검사</text>
-          <text data-detail="context" x="230" y="393.2" class="t-muted" font-size="7.4" text-anchor="middle">일반·성인 필수 / 같은 엔진</text>
+          <text data-node-label="" data-detail-anchor="" x="230" y="379.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">DB·표지 패키지 검사</text>
+          <text data-detail="context" x="230" y="393.2" class="t-muted" font-size="8" text-anchor="middle">일반·성인 필수 / 같은 엔진</text>
         </g>
 
         <g id="node-sqlite-dry" data-node-id="sqlite-dry" data-node-label="임시 DB·표지 Dry Run" tabindex="0" role="button" aria-label="임시 DB·표지 Dry Run 포커스, 압축·경로 변환·무결성 검사, SQLite 복원 › 시험 · 사용자 확인" aria-pressed="false" data-node-kind="backend" data-node-sublabel="압축·경로 변환·무결성 검사" data-node-tag="대상 교체 없음" data-node-context="SQLite 복원 › 시험 · 사용자 확인">
@@ -5350,8 +5350,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(346 344) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="406" y="371.4" class="t-primary" font-size="10.3" font-weight="600" text-anchor="middle">임시 DB·표지 Dry Run</text>
-          <text data-detail="context" x="406" y="386" class="t-muted" font-size="7.9" text-anchor="middle">압축·경로 변환·무결성 검사</text>
+          <text data-node-label="" data-detail-anchor="" x="406" y="371.4" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">임시 DB·표지 Dry Run</text>
+          <text data-detail="context" x="406" y="386" class="t-muted" font-size="8" text-anchor="middle">압축·경로 변환·무결성 검사</text>
         <text data-detail="fine" x="406" y="398.8" class="t-backend" font-size="7" text-anchor="middle">대상 교체 없음</text>
         </g>
 
@@ -5364,8 +5364,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="601.2" y="372.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">중지 확인 후 시작</text>
-          <text data-detail="context" x="601.2" y="386.4" class="t-muted" font-size="7.4" text-anchor="middle">healthy 차단 → 별도 작업자</text>
-        <text data-detail="fine" x="601.2" y="398.9" class="t-security" font-size="6.9" text-anchor="middle">백업·쓰기 중지는 사용자 책임</text>
+          <text data-detail="context" x="601.2" y="386.4" class="t-muted" font-size="8" text-anchor="middle">healthy 차단 → 별도 작업자</text>
+        <text data-detail="fine" x="601.2" y="398.9" class="t-security" font-size="7" text-anchor="middle">백업·쓰기 중지는 사용자 책임</text>
         </g>
 
         <g id="node-sqlite-apply" data-node-id="sqlite-apply" data-node-label="DB·표지 전체 교체" tabindex="0" role="button" aria-label="DB·표지 전체 교체 포커스, 재검증 → 백업·교체 준비 → 적용, SQLite 복원 › 독립 작업자 · 결과" aria-pressed="false" data-node-kind="database" data-node-sublabel="재검증 → 백업·교체 준비 → 적용" data-node-tag="존재하는 DB만 선택 백업" data-node-context="SQLite 복원 › 독립 작업자 · 결과">
@@ -5388,8 +5388,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(957.2 352) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1007.2" y="377.8" class="t-primary" font-size="10.8" font-weight="600" text-anchor="middle">결과 / 실패 복구</text>
-          <text data-detail="context" x="1007.2" y="389.3" class="t-muted" font-size="7.2" text-anchor="middle">예외 시 DB·표지·WAL 복원</text>
+          <text data-node-label="" data-detail-anchor="" x="1007.2" y="377.8" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">결과 / 실패 복구</text>
+          <text data-detail="context" x="1007.2" y="389.3" class="t-muted" font-size="8" text-anchor="middle">예외 시 DB·표지·WAL 복원</text>
         </g>
 
         <g id="node-maria-inspect" data-node-id="maria-inspect" data-node-label="논리 패키지 검사" tabindex="0" role="button" aria-label="논리 패키지 검사 포커스, manifest · 엔진·버전·SHA-256, MariaDB 복원 › 원본 선택 · 검사" aria-pressed="false" data-node-kind="backend" data-node-sublabel="manifest · 엔진·버전·SHA-256" data-node-context="MariaDB 복원 › 원본 선택 · 검사">
@@ -5411,7 +5411,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="406" y="498.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">패키지 Dry Run</text>
-          <text data-detail="context" x="406" y="512.2" class="t-muted" font-size="7.2" text-anchor="middle">manifest·표지 압축 검사</text>
+          <text data-detail="context" x="406" y="512.2" class="t-muted" font-size="8" text-anchor="middle">manifest·표지 압축 검사</text>
         <text data-detail="fine" x="406" y="524.8" class="t-backend" font-size="7" text-anchor="middle">SQL 복원·충돌 검사 전</text>
         </g>
 
@@ -5424,7 +5424,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="601.2" y="504" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">중지·DB 백업 필수</text>
-          <text data-detail="context" x="601.2" y="515.7" class="t-muted" font-size="7.4" text-anchor="middle">healthy 차단 → 별도 작업자</text>
+          <text data-detail="context" x="601.2" y="515.7" class="t-muted" font-size="8" text-anchor="middle">healthy 차단 → 별도 작업자</text>
         </g>
 
         <g id="node-maria-apply" data-node-id="maria-apply" data-node-label="SQL 복원·전체 교체" tabindex="0" role="button" aria-label="SQL 복원·전체 교체 포커스, 백업 → SQL·경로·검사 → 표지, MariaDB 복원 › 독립 작업자 · 결과" aria-pressed="false" data-node-kind="database" data-node-sublabel="백업 → SQL·경로·검사 → 표지" data-node-tag="CHECK TABLE QUICK" data-node-context="MariaDB 복원 › 독립 작업자 · 결과">
@@ -5436,7 +5436,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="800.4000000000001" y="498.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">SQL 복원·전체 교체</text>
-          <text data-detail="context" x="800.4000000000001" y="512.4" class="t-muted" font-size="7.4" text-anchor="middle">백업 → SQL·경로·검사 → 표지</text>
+          <text data-detail="context" x="800.4000000000001" y="512.4" class="t-muted" font-size="8" text-anchor="middle">백업 → SQL·경로·검사 → 표지</text>
         <text data-detail="fine" x="800.4000000000001" y="525.1" class="t-database" font-size="7" text-anchor="middle">CHECK TABLE QUICK</text>
         </g>
 
@@ -5448,7 +5448,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="1007.2" y="498.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">결과 / 복구 시도</text>
-          <text data-detail="context" x="1007.2" y="512.4" class="t-muted" font-size="7.4" text-anchor="middle">실패 시 SQL 백업·표지 복원</text>
+          <text data-detail="context" x="1007.2" y="512.4" class="t-muted" font-size="8" text-anchor="middle">실패 시 SQL 백업·표지 복원</text>
         <text data-detail="fine" x="1007.2" y="525.1" class="t-backend" font-size="7" text-anchor="middle">복구도 일부 실패 가능</text>
         </g>
 
@@ -6619,7 +6619,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
           style.textContent =
             fontCss + "\n" +
-            "svg { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace; }\n" +
+            "svg { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; }\n" +
             hostStyle + "\n" +
             ":root, svg { " + darkTheme.vars + " }\n" +
             "@media (prefers-color-scheme: light) { :root, svg { " + lightTheme.vars + " } }\n" +
@@ -6648,7 +6648,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           // Keep this order.
           style.textContent =
             fontCss + "\n" +
-            "svg { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace; }\n" +
+            "svg { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; }\n" +
             hostStyle + "\n" +
             ":root, svg { " + vars + " }\n";
 
@@ -6869,7 +6869,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       function fitCanvasText(ctx, text, maxWidth, startSize, minSize, weight, fontFamily) {
         var value = String(text || '').trim();
         var size = startSize;
-        var family = fontFamily || "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+        var family = fontFamily || "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'";
         while (size > minSize) {
           ctx.font = (weight || '600') + ' ' + size + 'px ' + family;
           if (ctx.measureText(value).width <= maxWidth) return value;

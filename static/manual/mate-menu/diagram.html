@@ -481,7 +481,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
     body {
       --archify-page-top: 2rem;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
       -webkit-font-smoothing: antialiased;
       background: var(--bg);
       min-height: 100vh;
@@ -721,7 +721,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
     html[data-preset="editorial"] h1,
     html[data-preset="editorial"] .card h3 {
-      font-family: Georgia, 'Times New Roman', 'Songti SC', STSong, serif;
+      font-family: inherit;
       letter-spacing: -0.02em;
     }
     html[data-preset="editorial"] h1 { font-size: 1.72rem; font-weight: 600; }
@@ -742,7 +742,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       padding: 0.32rem 0 0.24rem;
       border-bottom: 2px solid var(--arrow-emphasis);
       color: var(--arrow-emphasis);
-      font-family: Georgia, 'Times New Roman', serif;
+      font-family: inherit;
       font-size: 0.625rem;
       font-style: italic;
       font-weight: 600;
@@ -758,13 +758,13 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 16px 40px -20px rgba(15, 23, 42, 0.18);
       padding: 1.5rem;
       padding-bottom: calc(1.5rem + var(--archify-nav-reserve));
-      overflow: hidden;
+      overflow: auto;
       position: relative;
     }
 
     html[data-preset="signal-flow"] .diagram-container {
       position: relative;
-      overflow: hidden;
+      overflow: auto;
       background: linear-gradient(180deg, rgba(8, 20, 38, 0.82), rgba(3, 8, 18, 0.94));
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 28px 80px rgba(0, 0, 0, 0.34);
     }
@@ -798,7 +798,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       opacity: 0.58;
     }
     html[data-preset="editorial"] .diagram-container {
-      overflow: hidden;
+      overflow: auto;
       border-color: var(--panel-border);
       border-radius: 0.38rem;
       background:
@@ -818,7 +818,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       background: var(--panel);
       color: var(--arrow-emphasis);
       content: attr(data-preset-badge-editorial-plate);
-      font-family: Georgia, 'Times New Roman', serif;
+      font-family: inherit;
       font-size: 0.52rem;
       font-style: italic;
       font-weight: 600;
@@ -907,7 +907,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     }
 
     svg {
-      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
       width: 100%;
       min-width: min(900px, 100%);
       display: block;
@@ -5159,7 +5159,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     <!-- Main Diagram -->
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / 도판 04">
-      <svg viewBox="0 0 487 1232" role="img" lang="ko" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-tree-ui="" data-tree-direction="right" data-reader-fit="intrinsic-height" data-reader-min-text="7.5">
+      <svg style="min-width: 487px" viewBox="0 0 487 1232" role="img" lang="ko" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-tree-ui="" data-tree-direction="right" data-reader-fit="intrinsic-height" data-reader-min-text="11">
         <title id="archify-diagram-title">BookOasis Mate · 메뉴와 핵심 기능</title>
         <desc id="archify-diagram-description">Archify로 생성한 계층 구조 다이어그램입니다.</desc>
         <!-- Definitions -->
@@ -6398,7 +6398,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
           style.textContent =
             fontCss + "\n" +
-            "svg { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace; }\n" +
+            "svg { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; }\n" +
             hostStyle + "\n" +
             ":root, svg { " + darkTheme.vars + " }\n" +
             "@media (prefers-color-scheme: light) { :root, svg { " + lightTheme.vars + " } }\n" +
@@ -6427,7 +6427,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           // Keep this order.
           style.textContent =
             fontCss + "\n" +
-            "svg { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace; }\n" +
+            "svg { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; }\n" +
             hostStyle + "\n" +
             ":root, svg { " + vars + " }\n";
 
@@ -6648,7 +6648,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       function fitCanvasText(ctx, text, maxWidth, startSize, minSize, weight, fontFamily) {
         var value = String(text || '').trim();
         var size = startSize;
-        var family = fontFamily || "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+        var family = fontFamily || "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'";
         while (size > minSize) {
           ctx.font = (weight || '600') + ' ' + size + 'px ' + family;
           if (ctx.measureText(value).width <= maxWidth) return value;

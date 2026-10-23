@@ -481,7 +481,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
     body {
       --archify-page-top: 2rem;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
       -webkit-font-smoothing: antialiased;
       background: var(--bg);
       min-height: 100vh;
@@ -721,7 +721,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
     html[data-preset="editorial"] h1,
     html[data-preset="editorial"] .card h3 {
-      font-family: Georgia, 'Times New Roman', 'Songti SC', STSong, serif;
+      font-family: inherit;
       letter-spacing: -0.02em;
     }
     html[data-preset="editorial"] h1 { font-size: 1.72rem; font-weight: 600; }
@@ -742,7 +742,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       padding: 0.32rem 0 0.24rem;
       border-bottom: 2px solid var(--arrow-emphasis);
       color: var(--arrow-emphasis);
-      font-family: Georgia, 'Times New Roman', serif;
+      font-family: inherit;
       font-size: 0.625rem;
       font-style: italic;
       font-weight: 600;
@@ -758,13 +758,13 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 16px 40px -20px rgba(15, 23, 42, 0.18);
       padding: 1.5rem;
       padding-bottom: calc(1.5rem + var(--archify-nav-reserve));
-      overflow: hidden;
+      overflow: auto;
       position: relative;
     }
 
     html[data-preset="signal-flow"] .diagram-container {
       position: relative;
-      overflow: hidden;
+      overflow: auto;
       background: linear-gradient(180deg, rgba(8, 20, 38, 0.82), rgba(3, 8, 18, 0.94));
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 28px 80px rgba(0, 0, 0, 0.34);
     }
@@ -798,7 +798,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       opacity: 0.58;
     }
     html[data-preset="editorial"] .diagram-container {
-      overflow: hidden;
+      overflow: auto;
       border-color: var(--panel-border);
       border-radius: 0.38rem;
       background:
@@ -818,7 +818,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       background: var(--panel);
       color: var(--arrow-emphasis);
       content: attr(data-preset-badge-editorial-plate);
-      font-family: Georgia, 'Times New Roman', serif;
+      font-family: inherit;
       font-size: 0.52rem;
       font-style: italic;
       font-weight: 600;
@@ -907,7 +907,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     }
 
     svg {
-      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
       width: 100%;
       min-width: min(900px, 100%);
       display: block;
@@ -5159,7 +5159,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     <!-- Main Diagram -->
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / 도판 04">
-      <svg viewBox="0 0 946 786" data-reader-fit="width-first" data-layout-contract="readable-v2" role="img" lang="ko" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="">
+      <svg style="min-width: 1183px" viewBox="0 0 946 786" data-reader-fit="width-first" data-layout-contract="readable-v2" role="img" lang="ko" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="">
         <title id="archify-diagram-title">Google Drive 변경 처리 · Mate 현재 흐름</title>
         <desc id="archify-diagram-description">Archify로 생성한 워크플로우 다이어그램입니다.</desc>
         <!-- Definitions -->
@@ -5251,7 +5251,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="94" y="120.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">감지 입력</text>
-          <text data-detail="context" x="94" y="133.5" class="t-muted" font-size="6.6" text-anchor="middle">자체 감지 / 외부 연동</text>
+          <text data-detail="context" x="94" y="133.5" class="t-muted" font-size="8" text-anchor="middle">자체 감지 / 외부 연동</text>
         <text data-detail="fine" x="94" y="145.9" class="t-external" font-size="7" text-anchor="middle">입력 방식 택1</text>
         </g>
 
@@ -5264,8 +5264,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="220" y="120.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">이벤트 DB</text>
-          <text data-detail="context" x="220" y="133.1" class="t-muted" font-size="6.3" text-anchor="middle">폴더별 버퍼·재시작 보존</text>
-        <text data-detail="fine" x="220" y="145" class="t-database" font-size="6.6" text-anchor="middle">기본 60초 / 최대 600초</text>
+          <text data-detail="context" x="220" y="133.1" class="t-muted" font-size="8" text-anchor="middle">폴더별 버퍼·재시작 보존</text>
+        <text data-detail="fine" x="220" y="145" class="t-database" font-size="7" text-anchor="middle">기본 60초 / 최대 600초</text>
         </g>
 
         <g id="node-mapping" data-node-id="mapping" data-node-label="경로·보관함 확인" tabindex="0" role="button" aria-label="경로·보관함 확인 포커스, 현재·이전 경로 검증, Mate 사전 처리" aria-pressed="false" data-node-kind="backend" data-node-sublabel="현재·이전 경로 검증" data-node-context="Mate 사전 처리">
@@ -5275,7 +5275,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(174 226) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="220" y="253" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">경로·보관함 확인</text>
+          <text data-node-label="" data-detail-anchor="" x="220" y="253" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">경로·보관함 확인</text>
           <text data-detail="context" x="220" y="267.6" class="t-muted" font-size="8" text-anchor="middle">현재·이전 경로 검증</text>
         </g>
 
@@ -5324,8 +5324,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="739.2" y="371" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">처리 결과 저장</text>
-          <text data-detail="context" x="739.2" y="384.8" class="t-muted" font-size="7.3" text-anchor="middle">요청·응답·처리 시각</text>
+          <text data-node-label="" data-detail-anchor="" x="739.2" y="371" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">처리 결과 저장</text>
+          <text data-detail="context" x="739.2" y="384.8" class="t-muted" font-size="8" text-anchor="middle">요청·응답·처리 시각</text>
         <text data-detail="fine" x="739.2" y="397.4" class="t-database" font-size="7" text-anchor="middle">요청 성공 ≠ DB 반영</text>
         </g>
 
@@ -5348,8 +5348,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(699.2 470) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="739.2" y="497" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">경로 반영 확인</text>
-          <text data-detail="context" x="739.2" y="510.8" class="t-muted" font-size="7.3" text-anchor="middle">20초 간격·최대 10분</text>
+          <text data-node-label="" data-detail-anchor="" x="739.2" y="497" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">경로 반영 확인</text>
+          <text data-detail="context" x="739.2" y="510.8" class="t-muted" font-size="8" text-anchor="middle">20초 간격·최대 10분</text>
         <text data-detail="fine" x="739.2" y="523.4" class="t-backend" font-size="7" text-anchor="middle">성공한 지원 파일만</text>
         </g>
 
@@ -5372,8 +5372,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(522 596) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="562" y="623" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">알림 묶음·발송</text>
-          <text data-detail="context" x="562" y="635.6" class="t-muted" font-size="6.3" text-anchor="middle">기본 60초 / 최대 180초</text>
+          <text data-node-label="" data-detail-anchor="" x="562" y="623" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">알림 묶음·발송</text>
+          <text data-detail="context" x="562" y="635.6" class="t-muted" font-size="8" text-anchor="middle">기본 60초 / 최대 180초</text>
         <text data-detail="fine" x="562" y="647.9" class="t-backend" font-size="7" text-anchor="middle">스캔 재실행 안 함</text>
         </g>
 
@@ -5386,7 +5386,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="739.2" y="624.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">알림 DB 큐</text>
-          <text data-detail="context" x="739.2" y="637.1" class="t-muted" font-size="6.3" text-anchor="middle">스캔과 별개로 결과 보존</text>
+          <text data-detail="context" x="739.2" y="637.1" class="t-muted" font-size="8" text-anchor="middle">스캔과 별개로 결과 보존</text>
         <text data-detail="fine" x="739.2" y="649.4" class="t-database" font-size="7" text-anchor="middle">웹훅 설정 시</text>
         </g>
 
@@ -6493,7 +6493,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
           style.textContent =
             fontCss + "\n" +
-            "svg { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace; }\n" +
+            "svg { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; }\n" +
             hostStyle + "\n" +
             ":root, svg { " + darkTheme.vars + " }\n" +
             "@media (prefers-color-scheme: light) { :root, svg { " + lightTheme.vars + " } }\n" +
@@ -6522,7 +6522,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           // Keep this order.
           style.textContent =
             fontCss + "\n" +
-            "svg { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace; }\n" +
+            "svg { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; }\n" +
             hostStyle + "\n" +
             ":root, svg { " + vars + " }\n";
 
@@ -6743,7 +6743,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       function fitCanvasText(ctx, text, maxWidth, startSize, minSize, weight, fontFamily) {
         var value = String(text || '').trim();
         var size = startSize;
-        var family = fontFamily || "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+        var family = fontFamily || "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'";
         while (size > minSize) {
           ctx.font = (weight || '600') + ' ' + size + 'px ' + family;
           if (ctx.measureText(value).width <= maxWidth) return value;
